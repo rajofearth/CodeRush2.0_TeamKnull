@@ -466,13 +466,87 @@ async function executeForModel(
   return result;
 }
 
+export type ToolProfile = "full" | "coding";
+
+/** edit / write / bash — shared by full and coding profiles. */
+function createMutationAiTools(ctx: ToolContext) {
+  return {
+    edit: tool({
+      description: "Exact string replacement edit in an existing file.",
+      parameters: z.object({
+        path: z.string(),
+        oldString: z.string().describe("Exact text to find"),
+        newString: z.string().describe("Replacement text"),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "edit", () =>
+          editTool(ctx, {
+            path: args.path,
+            oldString: args.oldString,
+            newString: args.newString,
+            replaceAll: false,
+          }),
+        ),
+    }),
+    write: tool({
+      description: "Create or overwrite a text file.",
+      parameters: z.object({
+        path: z.string(),
+        content: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "write", () => writeTool(ctx, args)),
+    }),
+    bash: tool({
+      description:
+        "Run a shell command in the sandboxed workspace (network deny-by-default). Hard timeout ~60s; large stdout/stderr is truncated for context. For long-running/watch commands use bash_bg instead.",
+      parameters: z.object({
+        command: z.string().describe("Shell command to run"),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "bash", async () => {
+          const result = await bashTool(ctx, {
+            command: args.command,
+            timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
+          });
+          if (ctx.onBenchCheckPass && result.ok && result.exitCode === 0) {
+            const cmd = String(args.command ?? "");
+            if (
+              /\bnode\s+check\.mjs\b/.test(cmd) ||
+              /(?:^|[;&|]\s*)node\s+check\.mjs\b/.test(cmd)
+            ) {
+              ctx.onBenchCheckPass();
+            }
+          }
+          return result;
+        }),
+    }),
+  };
+}
+
 /**
  * AI SDK tool map — same implementations, swappable model.
  * Keep schemas minimal: Groq (gpt-oss) rejects optional-only keys and
  * often invents/omits extra fields when schemas are wide.
  * All results pass through the truncation layer before reaching the model.
  */
-export function createAiTools(ctx: ToolContext) {
+export function createAiTools(
+  ctx: ToolContext,
+  opts?: { profile?: ToolProfile },
+) {
+  const profile = opts?.profile ?? "full";
+  const mutation = createMutationAiTools(ctx);
+
+  if (profile === "coding") {
+    const ro = createReadOnlyAiTools(ctx);
+    return {
+      grep: ro.grep,
+      glob: ro.glob,
+      read: ro.read,
+      ...mutation,
+    };
+  }
+
   return {
     ...createReadOnlyAiTools(ctx),
     ...createBgShellTools(ctx),
@@ -541,46 +615,7 @@ export function createAiTools(ctx: ToolContext) {
           return out;
         }),
     }),
-    edit: tool({
-      description: "Exact string replacement edit in an existing file.",
-      parameters: z.object({
-        path: z.string(),
-        oldString: z.string().describe("Exact text to find"),
-        newString: z.string().describe("Replacement text"),
-      }),
-      execute: async (args) =>
-        executeForModel(ctx, "edit", () =>
-          editTool(ctx, {
-            path: args.path,
-            oldString: args.oldString,
-            newString: args.newString,
-            replaceAll: false,
-          }),
-        ),
-    }),
-    write: tool({
-      description: "Create or overwrite a text file.",
-      parameters: z.object({
-        path: z.string(),
-        content: z.string(),
-      }),
-      execute: async (args) =>
-        executeForModel(ctx, "write", () => writeTool(ctx, args)),
-    }),
-    bash: tool({
-      description:
-        "Run a shell command in the sandboxed workspace (network deny-by-default). Hard timeout ~60s; large stdout/stderr is truncated for context. For long-running/watch commands use bash_bg instead.",
-      parameters: z.object({
-        command: z.string().describe("Shell command to run"),
-      }),
-      execute: async (args) =>
-        executeForModel(ctx, "bash", () =>
-          bashTool(ctx, {
-            command: args.command,
-            timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
-          }),
-        ),
-    }),
+    ...mutation,
   };
 }
 
