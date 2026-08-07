@@ -13,6 +13,7 @@ export type TraceEventType =
   | "assistant_text"
   | "tool_call"
   | "tool_result"
+  | "tool_repair"
   | "approval"
   | "error"
   | "info";
@@ -33,8 +34,10 @@ export type TraceWriter = {
 
 export type CreateTraceWriterOptions = {
   runId?: string;
-  /** Directory for events.jsonl (default: .clai/traces/<runId>) */
+  /** Directory for events.jsonl (default: <tracesDir>/<runId>) */
   dir?: string;
+  /** Workspace-rooted traces directory (default: <cwd>/.clai/traces) */
+  tracesDir?: string;
   cwd?: string;
 };
 
@@ -43,7 +46,8 @@ export async function createTraceWriter(
 ): Promise<TraceWriter> {
   const runId = opts.runId ?? randomUUID().slice(0, 8);
   const cwd = opts.cwd ?? process.cwd();
-  const dir = opts.dir ?? path.join(cwd, ".clai", "traces", runId);
+  const tracesDir = opts.tracesDir ?? path.join(cwd, ".clai", "traces");
+  const dir = opts.dir ?? path.join(tracesDir, runId);
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, "events.jsonl");
 

@@ -11,6 +11,11 @@ const cli = path.join(root, "src", "cli.tsx");
 const result = spawnSync(
   process.execPath,
   ["--import", "tsx", cli, ...process.argv.slice(2)],
-  { stdio: "inherit", cwd: root, env: process.env },
+  {
+    stdio: "inherit",
+    cwd: root,
+    // tsx resolves from the package root, so forward where the user actually is.
+    env: { ...process.env, CLAI_INVOCATION_CWD: process.cwd() },
+  },
 );
 process.exit(result.status ?? 1);

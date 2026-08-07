@@ -11,8 +11,14 @@ const required = (input: string | undefined, message: string) => {
   return input;
 };
 
-export async function runMemoryCli(args: string[]): Promise<void> {
-  const store = await openMemoryStore({ directory: value(args, "--data-dir") });
+export async function runMemoryCli(
+  args: string[],
+  /** Workspace-rooted `.clai` used when --data-dir is absent. */
+  defaultDirectory?: string,
+): Promise<void> {
+  const store = await openMemoryStore({
+    directory: value(args, "--data-dir") ?? defaultDirectory,
+  });
   try {
     const command = args[0];
     if (command === "list") {
