@@ -4,6 +4,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvFiles } from "./adapter/env.js";
+import { isTuiEnabled } from "./ui/headless.js";
+import {
+  openWorkspaceFromEntry,
+  parseEntry,
+  printWorkspaceNotes,
+  WorkspaceError,
+} from "./workspace.js";
 
 await loadEnvFiles();
 
@@ -11,6 +18,7 @@ const HELP = `
 clai — Unified Agentic Coding Harness
 
 Usage:
+  clai [<folder>] [--cwd <path>]
   clai --help
   clai demo [--fixture <path>]
   clai demo lsp [--fixture <path>]
@@ -22,12 +30,20 @@ Usage:
 
 Options:
   -h, --help              Show this help message
+  <folder>                Workspace root for the session (default: cwd)
   demo                    Offline edit+bash happy path (no API key)
   demo lsp                Offline intake + LSP diagnostics demo
   intake                  Print repository intake map (JSON)
   --fixture <path>        Fixture workspace (default: fixtures/tiny-edit)
   run "<prompt>"          Soft agent loop via AI SDK (needs API key)
-  --cwd <path>            Working directory for run/intake (default: cwd)
+  --cwd <path>            Workspace root; overrides a positional <folder>
+  --                      Everything after it is a path, never a subcommand
+
+Workspace root:
+  A bare first word matching run/demo/intake/memory/help is a subcommand;
+  anything else is the workspace folder. Use "clai -- demo" or
+  "clai --cwd demo" to open a folder that shares a subcommand name.
+  The resolved root governs tool cwd, .clai/traces, .clai memory, and intake.
 
 Env:
   GROQ_API_KEY                      Default provider (CLAI_PROVIDER=groq)
@@ -46,11 +62,13 @@ Quick start:
   pnpm clai demo
   CLAI_NO_TUI=1 pnpm clai demo lsp
   pnpm clai intake --cwd fixtures/lsp-ts
+  pnpm clai fixtures/tiny-edit
   pnpm clai run --cwd fixtures/tiny-edit
   pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
 `.trim();
 
-const args = process.argv.slice(2);
+const entry = parseEntry(process.argv.slice(2));
+const args = entry.args;
 
 function flagValue(name: string): string | undefined {
   const i = args.indexOf(name);
@@ -65,35 +83,52 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultFixture = path.join(root, "fixtures", "tiny-edit");
 const defaultLspFixture = path.join(root, "fixtures", "lsp-ts");
 
-const wantsHelp = args.includes("--help") || args.includes("-h");
-const wantsMemory = args[0] === "memory";
-const wantsIntake = args[0] === "intake";
-const wantsInjectionDemo = args[0] === "demo" && args[1] === "injection";
-const wantsLspDemo = args[0] === "demo" && args[1] === "lsp";
+const wantsHelp =
+  args.includes("--help") || args.includes("-h") || entry.subcommand === "help";
+const wantsMemory = entry.subcommand === "memory";
+const wantsIntake = entry.subcommand === "intake";
+const wantsInjectionDemo = entry.subcommand === "demo" && args[1] === "injection";
+const wantsLspDemo = entry.subcommand === "demo" && args[1] === "lsp";
 const wantsDemo =
-  (args.includes("demo") && !wantsInjectionDemo && !wantsLspDemo) ||
-  (args.includes("--fixture") && !wantsLspDemo && args[0] !== "demo");
-const wantsRun = args[0] === "run";
+  (entry.subcommand === "demo" && !wantsInjectionDemo && !wantsLspDemo) ||
+  (args.includes("--fixture") && !wantsLspDemo && entry.subcommand !== "demo");
+const wantsRun = entry.subcommand === "run";
+/** Bare `clai` / `clai <folder>` — launch the interface on the resolved root. */
+const wantsLaunch =
+  !wantsHelp &&
+  !wantsMemory &&
+  !wantsIntake &&
+  !wantsInjectionDemo &&
+  !wantsLspDemo &&
+  !wantsDemo &&
+  !wantsRun;
 
-if (
-  wantsHelp ||
-  (!wantsDemo &&
-    !wantsRun &&
-    !wantsMemory &&
-    !wantsInjectionDemo &&
-    !wantsLspDemo &&
-    !wantsIntake &&
-    args.length === 0)
-) {
+async function resolveWorkspace(showNotes = true) {
+  try {
+    const workspace = await openWorkspaceFromEntry(entry, flagValue("--cwd"));
+    if (showNotes) printWorkspaceNotes(workspace);
+    return workspace;
+  } catch (error) {
+    if (error instanceof WorkspaceError) {
+      console.error(error.message);
+      console.error(`  ${error.hint}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+if (wantsHelp) {
   console.log(HELP);
   process.exitCode = 0;
 } else if (wantsMemory) {
+  const workspace = await resolveWorkspace(false);
   const { runMemoryCli } = await import("./memory/cli.js");
-  await runMemoryCli(args.slice(1));
+  await runMemoryCli(args.slice(1), workspace.dataDir);
 } else if (wantsIntake) {
-  const cwd = path.resolve(flagValue("--cwd") ?? process.cwd());
+  const workspace = await resolveWorkspace();
   const { scanIntakeMap } = await import("./tools/intake.js");
-  const map = await scanIntakeMap(cwd);
+  const map = await scanIntakeMap(workspace.root);
   console.log(JSON.stringify(map, null, 2));
   process.exitCode = 0;
 } else if (wantsInjectionDemo) {
@@ -181,9 +216,31 @@ if (
     shell.done(result.ok ? 0 : 1);
     await shell.waitUntilExit();
   }
-} else if (wantsRun) {
-  const initialPrompt = args[1]; // optional when TTY interactive
-  const cwd = path.resolve(flagValue("--cwd") ?? process.cwd());
+} else if (wantsRun || wantsLaunch) {
+  const initialPrompt = wantsRun ? args[1] : undefined; // optional when TTY interactive
+  const workspace = await resolveWorkspace();
+  const cwd = workspace.root;
+
+  if (wantsLaunch && !isTuiEnabled()) {
+    // No interactive surface to launch: report the resolved contract instead.
+    console.log(
+      JSON.stringify(
+        {
+          root: workspace.root,
+          rootSource: workspace.source,
+          dataDir: workspace.dataDir,
+          tracesDir: workspace.tracesDir,
+          gitRepo: workspace.isGitRepo,
+          tui: false,
+          hint: 'headless has no interactive input — use clai run "<prompt>" here',
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(0);
+  }
+
   const { hasApiKey, runAgentLoop, resolveModel } = await import(
     "./adapter/index.js"
   );
@@ -208,7 +265,10 @@ if (
       workspaceRoot: cwd,
       autoApprove: process.env.CLAI_AUTO_APPROVE === "1",
     });
-    const trace = await createTraceWriter({ cwd });
+    const trace = await createTraceWriter({
+      cwd,
+      tracesDir: workspace.tracesDir,
+    });
     const bus = ui.createUiBus();
     const lsp = await probeLspAvailability(cwd);
     const lspNames = lsp.filter((s) => s.available).map((s) => s.engine);
