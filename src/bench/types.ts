@@ -100,6 +100,13 @@ export type LiveSnapshot = {
   parallel: number;
   tasks: LiveTask[];
   done: boolean;
+  /** Set while waiting out a provider quota / 429. Shown as a dashboard banner. */
+  rateLimit?: {
+    label: string;
+    detail?: string;
+    retryInSec?: number;
+    taskId?: string;
+  } | null;
 };
 
 export function computeAggregates(tasks: TaskResult[]): BenchAggregates {
@@ -115,8 +122,11 @@ export function computeAggregates(tasks: TaskResult[]): BenchAggregates {
     timedOut,
     passRate: tasks.length ? passed / tasks.length : 0,
     totalWallMs: tasks.reduce((a, t) => a + t.wallMs, 0),
-    totalTokensIn: tasks.reduce((a, t) => a + t.tokensIn, 0),
-    totalTokensOut: tasks.reduce((a, t) => a + t.tokensOut, 0),
-    totalCost: tasks.reduce((a, t) => a + t.cost, 0),
+    totalTokensIn: tasks.reduce((a, t) => a + (Number(t.tokensIn) || 0), 0),
+    totalTokensOut: tasks.reduce((a, t) => a + (Number(t.tokensOut) || 0), 0),
+    totalCost: tasks.reduce((a, t) => {
+      const c = Number(t.cost);
+      return a + (Number.isFinite(c) ? c : 0);
+    }, 0),
   };
 }

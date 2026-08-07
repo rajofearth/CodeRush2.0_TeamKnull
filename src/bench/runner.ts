@@ -122,6 +122,7 @@ export async function runBench(
     cost: 0,
   }));
   let done = false;
+  let rateLimit: LiveSnapshot["rateLimit"] = null;
   const snapshot = (): LiveSnapshot => ({
     runId,
     startedAt,
@@ -131,6 +132,7 @@ export async function runBench(
     parallel,
     tasks: live.map((t) => ({ ...t })),
     done,
+    rateLimit,
   });
   const publish = () => opts.onUpdate?.(snapshot());
   publish();
@@ -143,6 +145,7 @@ export async function runBench(
       const task = opts.tasks[index]!;
       const liveTask = live[index]!;
       liveTask.status = "running";
+      rateLimit = null;
       publish();
       const result = await runOneTask(task, {
         runId,
@@ -151,7 +154,24 @@ export async function runBench(
         model,
         provider,
         onProgress: (partial) => {
-          Object.assign(liveTask, partial);
+          if (partial.tokensIn != null) {
+            liveTask.tokensIn = Number(partial.tokensIn) || 0;
+          }
+          if (partial.tokensOut != null) {
+            liveTask.tokensOut = Number(partial.tokensOut) || 0;
+          }
+          if (partial.cost != null) {
+            const c = Number(partial.cost);
+            liveTask.cost = Number.isFinite(c) ? c : 0;
+          }
+          if (partial.status) liveTask.status = partial.status;
+          if (partial.steps != null) liveTask.steps = partial.steps;
+          if (partial.wallMs != null) liveTask.wallMs = partial.wallMs;
+          if (partial.error !== undefined) liveTask.error = partial.error;
+          publish();
+        },
+        onRateLimit: (info) => {
+          rateLimit = { ...info, taskId: task.id };
           publish();
         },
       });
@@ -159,10 +179,13 @@ export async function runBench(
       liveTask.status = result.status;
       liveTask.wallMs = result.wallMs;
       liveTask.steps = result.steps;
-      liveTask.tokensIn = result.tokensIn;
-      liveTask.tokensOut = result.tokensOut;
-      liveTask.cost = result.cost;
+      liveTask.tokensIn = Number(result.tokensIn) || 0;
+      liveTask.tokensOut = Number(result.tokensOut) || 0;
+      liveTask.cost = Number.isFinite(Number(result.cost)) ? Number(result.cost) : 0;
       liveTask.error = result.error;
+      if (result.status !== "error" || !/rate.?limit|quota/i.test(result.error ?? "")) {
+        rateLimit = null;
+      }
       publish();
     }
   };
@@ -171,6 +194,7 @@ export async function runBench(
   );
 
   done = true;
+  rateLimit = null;
   publish();
 
   return {
@@ -194,6 +218,11 @@ type TaskRunContext = {
   model?: ResolvedModel;
   provider: string;
   onProgress: (partial: Partial<LiveTask>) => void;
+  onRateLimit?: (info: {
+    label: string;
+    detail?: string;
+    retryInSec?: number;
+  }) => void;
 };
 
 async function runOneTask(
@@ -234,6 +263,13 @@ async function runOneTask(
       // Agent timed out / crashed but had already fixed the code — count it.
       base.status = "pass";
     }
+    if (base.status === "pass") {
+      // Don't leave a recovered 429 note hanging on a green task.
+      base.error = undefined;
+    }
+    base.tokensIn = Number(base.tokensIn) || 0;
+    base.tokensOut = Number(base.tokensOut) || 0;
+    base.cost = Number.isFinite(Number(base.cost)) ? Number(base.cost) : 0;
   } catch (err) {
     base.status = "error";
     base.error = err instanceof Error ? err.message : String(err);
@@ -324,19 +360,37 @@ async function agentSolve(
   const price = PRICING[ctx.provider] ?? PRICING.default!;
   const timedOut = Symbol("timeout");
   let timer: NodeJS.Timeout | undefined;
+  const BENCH_SYSTEM = `You are running a scored coding benchmark task in a tiny isolated workspace.
+You MUST make the required code change with the edit/write tools and verify with bash ({command: "node check.mjs"}).
+Do not stop after only reading files. Prefer: glob/read → edit → bash check → done.
+If check.mjs exits 0, stop. If it fails, fix and re-check within your step budget.`;
   try {
     const loop = runAgentLoop({
       ctx: toolCtx,
       prompt: task.prompt,
-      maxSteps: task.maxSteps,
+      maxSteps: Math.max(task.maxSteps, 12),
       model: ctx.model,
+      system: BENCH_SYSTEM,
       trace,
+      onStatus: (status) => {
+        const m = /waiting (\d+)s/.exec(status.label);
+        ctx.onRateLimit?.({
+          label: status.label,
+          detail: status.detail,
+          retryInSec: m ? Number(m[1]) : undefined,
+        });
+        ctx.onProgress({
+          error: status.level === "error" ? status.label : undefined,
+        });
+      },
       onUsage: (usage) => {
-        out.tokensIn = usage.promptTokens;
-        out.tokensOut = usage.completionTokens;
-        out.cost =
-          (usage.promptTokens / 1e6) * price.inPerM +
-          (usage.completionTokens / 1e6) * price.outPerM;
+        const tokensIn = Number(usage.promptTokens) || 0;
+        const tokensOut = Number(usage.completionTokens) || 0;
+        out.tokensIn = tokensIn;
+        out.tokensOut = tokensOut;
+        const cost =
+          (tokensIn / 1e6) * price.inPerM + (tokensOut / 1e6) * price.outPerM;
+        out.cost = Number.isFinite(cost) ? cost : 0;
         ctx.onProgress({
           tokensIn: out.tokensIn,
           tokensOut: out.tokensOut,
@@ -357,6 +411,7 @@ async function agentSolve(
     } else {
       out.steps = raced.steps;
       out.status = "fail"; // provisional; check decides
+      out.error = undefined; // clear transient rate-limit notes if we recovered
       await trace.close("ok", { finishReason: raced.finishReason });
     }
   } catch (err) {
