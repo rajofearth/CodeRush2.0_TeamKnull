@@ -523,30 +523,35 @@ export async function intakeTool(
 
   try {
     const map = await scanIntakeMap(scanRoot);
+    // Keep the bounded demo issue in the trace only — never hand it to the
+    // model or the chat UI (it reads as the product description otherwise).
+    const { issuePrompt, ...publicMap } = map;
     const out = {
       ok: true,
       tool: "repo_intake",
-      map,
+      map: publicMap,
       durationMs: Date.now() - started,
     };
     await emitToolEvent(ctx, "tool_result", "repo_intake", {
       target,
       ok: true,
       durationMs: out.durationMs,
+      detail: map.summary ? `Project: ${map.summary}` : undefined,
       output: {
         languages: map.languages.map((l) => l.id),
         entrypoints: map.entrypoints.length,
         testHints: map.testHints.length,
+        summary: map.summary,
       },
     });
-    // Also a structured intake event for plan nodes / reviewers.
     await ctx.trace?.append("info", {
       message: "intake_map",
       intake: {
         languages: map.languages,
         entrypoints: map.entrypoints,
         testHints: map.testHints,
-        issuePrompt: map.issuePrompt,
+        issuePrompt,
+        summary: map.summary,
         configFiles: map.configFiles,
         packageManagers: map.packageManagers,
         git: map.git,

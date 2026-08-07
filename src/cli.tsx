@@ -303,15 +303,9 @@ if (wantsHelp) {
       bus.emit({ type: "status", label: "intake scan" });
       const intake = await intakeTool(ctx, {});
       if (intake.ok && intake.map && typeof intake.map === "object") {
-        const map = intake.map as {
-          summary?: string;
-          issuePrompt?: string;
-        };
-        // Prefer the product one-liner for chat context — never dump the
-        // bounded "propose a fix / run pnpm test" issue seed into the thread.
-        intakeSeed = map.summary
-          ? `Project: ${map.summary}.`
-          : String(map.issuePrompt ?? "").split(/\n/)[0] ?? "";
+        const map = intake.map as { summary?: string };
+        // Product one-liner only — never the bounded "run pnpm test" issue seed.
+        intakeSeed = map.summary ? `Project: ${map.summary}.` : "";
       } else {
         intakeSeed = "";
       }

@@ -60,8 +60,15 @@ export async function runTaskSubagent(
   // so the UI can render them as a subagent row.
   const childCtx: ToolContext = {
     ...ctx,
-    onEvent: (event) =>
-      ctx.onEvent?.({ ...event, tool: `task:${event.tool}`, group: "subagent" }),
+    onEvent: (event) => {
+      // Keep real tool names (read/grep/…) so the UI stays readable; tag the
+      // group so rows cluster under a "subagent" header instead of "task:read".
+      if (event.type === "tool_call" || event.type === "tool_result") {
+        ctx.onEvent?.({ ...event, group: "subagent" });
+        return;
+      }
+      ctx.onEvent?.(event);
+    },
   };
   const tools = createReadOnlyAiTools(childCtx);
 
