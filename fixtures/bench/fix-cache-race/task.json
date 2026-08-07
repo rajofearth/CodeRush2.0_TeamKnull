@@ -1,0 +1,12 @@
+{
+  "id": "fix-cache-race",
+  "title": "Fix double-load race in async cache",
+  "prompt": "AsyncCache.get(key, loader) in cache.mjs must call loader once per key under concurrency. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "cache-race-fix"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "fix-middleware-order",
+  "title": "Run middleware in registration order",
+  "prompt": "App.handle(req) in app.mjs must run middleware left-to-right. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "headless-terminal"
+  }
+}

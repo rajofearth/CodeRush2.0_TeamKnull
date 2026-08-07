@@ -1,0 +1,12 @@
+{
+  "id": "add-request-validation",
+  "title": "Validate request body fields",
+  "prompt": "validateCreateUser(body) in validate.mjs throws on missing name/email or invalid email. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "request-validation-middleware"
+  }
+}

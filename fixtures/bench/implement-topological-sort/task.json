@@ -1,0 +1,12 @@
+{
+  "id": "implement-topological-sort",
+  "title": "Topological sort of dependency graph",
+  "prompt": "topoSort(graph) in topo.mjs returns ordering where deps come before dependents. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "merge-diff-arc-agi-task"
+  }
+}

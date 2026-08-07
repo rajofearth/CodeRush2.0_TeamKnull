@@ -1,0 +1,12 @@
+{
+  "id": "fix-stack-overflow-dfs",
+  "title": "Convert recursive DFS to iterative",
+  "prompt": "walkTree(node, visit) in walk.mjs must traverse without recursive stack overflow. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "fix-code-vulnerability"
+  }
+}

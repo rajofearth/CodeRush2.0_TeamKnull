@@ -1,0 +1,12 @@
+{
+  "id": "scrub-secrets-log",
+  "title": "Redact API keys from log lines",
+  "prompt": "scrubSecrets(text) in scrub.mjs replaces sk-... and AKIA... patterns with [REDACTED]. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "git-leak-recovery"
+  }
+}

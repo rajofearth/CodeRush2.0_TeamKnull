@@ -1,0 +1,730 @@
+{
+  "version": 1,
+  "description": "CLAI bench manifest — 80 tasks: 8 legacy CLAI fixtures + 72 adapted from Terminal-Bench 2.1 and DeepSWE themes.",
+  "totalTasks": 81,
+  "legacyTaskIds": [
+    "fix-async-race",
+    "fix-broken-import",
+    "fix-json-config",
+    "fix-test-assertion",
+    "implement-slugify",
+    "off-by-one",
+    "refactor-report",
+    "validate-quantity"
+  ],
+  "tasks": [
+    {
+      "id": "fix-async-race",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "fix-async-race"
+      }
+    },
+    {
+      "id": "fix-broken-import",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "fix-broken-import"
+      }
+    },
+    {
+      "id": "fix-json-config",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "fix-json-config"
+      }
+    },
+    {
+      "id": "fix-test-assertion",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "fix-test-assertion"
+      }
+    },
+    {
+      "id": "implement-slugify",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "implement-slugify"
+      }
+    },
+    {
+      "id": "off-by-one",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "off-by-one"
+      }
+    },
+    {
+      "id": "refactor-report",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "refactor-report"
+      }
+    },
+    {
+      "id": "validate-quantity",
+      "source": {
+        "benchmark": "clai",
+        "taskId": "validate-quantity"
+      }
+    },
+    {
+      "id": "add-batch-flush",
+      "title": "Flush buffered items in batches",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "batch-flush-processor"
+      }
+    },
+    {
+      "id": "add-cache-with-ttl",
+      "title": "Memoize with TTL expiry",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "cache-ttl-invalidation"
+      }
+    },
+    {
+      "id": "add-config-file-parser",
+      "title": "Add JSON config file parser",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "cliffy-config-parser"
+      }
+    },
+    {
+      "id": "add-cors-middleware",
+      "title": "Add CORS headers middleware",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "cors-middleware"
+      }
+    },
+    {
+      "id": "add-error-boundary-wrapper",
+      "title": "Catch errors and map to result type",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "error-boundary-wrapper"
+      }
+    },
+    {
+      "id": "add-graceful-shutdown",
+      "title": "Drain hooks on shutdown signal",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "graceful-shutdown-hooks"
+      }
+    },
+    {
+      "id": "add-health-check-route",
+      "title": "Implement health handler returning status",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "health-check-endpoint"
+      }
+    },
+    {
+      "id": "add-idempotency-key",
+      "title": "Dedupe operations by idempotency key",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "idempotency-key-store"
+      }
+    },
+    {
+      "id": "add-pagination-cursor",
+      "title": "Encode/decode pagination cursor",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "pagination-cursor-helper"
+      }
+    },
+    {
+      "id": "add-request-timeout",
+      "title": "Race async work against timeout",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "request-timeout-wrapper"
+      }
+    },
+    {
+      "id": "add-request-validation",
+      "title": "Validate request body fields",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "request-validation-middleware"
+      }
+    },
+    {
+      "id": "add-retry-transient-errors",
+      "title": "Retry only transient HTTP status codes",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "retry-transient-errors"
+      }
+    },
+    {
+      "id": "add-transaction-log",
+      "title": "Append-only transaction log with rollback",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "transaction-log-rollback"
+      }
+    },
+    {
+      "id": "add-unique-key-guard",
+      "title": "Reject duplicate keys on insert",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "unique-key-guard"
+      }
+    },
+    {
+      "id": "cancel-async-tasks",
+      "title": "Fix cooperative task cancellation",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "fix-async-map-unbounded",
+      "title": "Limit concurrency in async map",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "fix-buffer-encoding",
+      "title": "Compare UTF-8 strings safely",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "polyglot-c-py"
+      }
+    },
+    {
+      "id": "fix-cache-race",
+      "title": "Fix double-load race in async cache",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "cache-race-fix"
+      }
+    },
+    {
+      "id": "fix-circular-import",
+      "title": "Break circular dependency between a and b modules",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "merge-diff-arc-agi-task"
+      }
+    },
+    {
+      "id": "fix-deep-merge-mutation",
+      "title": "Deep merge without mutating inputs",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "merge-diff-arc-agi-task"
+      }
+    },
+    {
+      "id": "fix-encoding-utf8",
+      "title": "Normalize to NFC before compare",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "utf8-normalization-fix"
+      }
+    },
+    {
+      "id": "fix-event-listener-leak",
+      "title": "Remove listeners on unsubscribe",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "headless-terminal"
+      }
+    },
+    {
+      "id": "fix-floating-epsilon",
+      "title": "Compare floats with epsilon tolerance",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "modernize-scientific-stack"
+      }
+    },
+    {
+      "id": "fix-iterator-invalidation",
+      "title": "Safe removal while iterating listeners",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "headless-terminal"
+      }
+    },
+    {
+      "id": "fix-json-trailing-comma",
+      "title": "Reject JSON with trailing commas",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-middleware-order",
+      "title": "Run middleware in registration order",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "headless-terminal"
+      }
+    },
+    {
+      "id": "fix-null-deref-chain",
+      "title": "Safe optional property access helper",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-off-by-one-slice",
+      "title": "Fix exclusive end in paginate helper",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "query-optimize"
+      }
+    },
+    {
+      "id": "fix-path-traversal",
+      "title": "Block path traversal in safeJoin",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-promise-all-settled",
+      "title": "Collect all results even when some reject",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "fix-race-counter",
+      "title": "Fix lost increment in async counter",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "fix-reducer-mutation",
+      "title": "Fix reducer mutating accumulator",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-regex-catastrophic",
+      "title": "Replace nested quantifier email regex",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "filter-js-from-html"
+      }
+    },
+    {
+      "id": "fix-sql-injection-pattern",
+      "title": "Use parameterized query builder",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-stack-overflow-dfs",
+      "title": "Convert recursive DFS to iterative",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-code-vulnerability"
+      }
+    },
+    {
+      "id": "fix-stale-closure",
+      "title": "Fix stale count in delayed callback",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "fix-timezone-date-only",
+      "title": "Parse YYYY-MM-DD as UTC midnight",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "modernize-scientific-stack"
+      }
+    },
+    {
+      "id": "fix-unhandled-promise",
+      "title": "Surface rejection from fire-and-forget helper",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "implement-apply-patch",
+      "title": "Apply unified line patch",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "xml-patch-apply"
+      }
+    },
+    {
+      "id": "implement-bloom-filter",
+      "title": "Implement simple bloom filter",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "query-optimize"
+      }
+    },
+    {
+      "id": "implement-debounce",
+      "title": "Debounce function calls",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "debounce-helper"
+      }
+    },
+    {
+      "id": "implement-deep-equal",
+      "title": "Deep equality for plain objects and arrays",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "merge-diff-arc-agi-task"
+      }
+    },
+    {
+      "id": "implement-diff-lines",
+      "title": "Line diff between two texts",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "xml-diff-lines"
+      }
+    },
+    {
+      "id": "implement-glob-matcher",
+      "title": "Match simple glob patterns",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "polyglot-c-py"
+      }
+    },
+    {
+      "id": "implement-kv-store",
+      "title": "Implement in-memory KV store with TTL",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "kv-store-grpc"
+      }
+    },
+    {
+      "id": "implement-lru-cache",
+      "title": "Implement LRU cache with capacity",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "kv-store-grpc"
+      }
+    },
+    {
+      "id": "implement-min-heap",
+      "title": "Implement min-heap priority queue",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "query-optimize"
+      }
+    },
+    {
+      "id": "implement-observable-subscribe",
+      "title": "Minimal observable pub/sub",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "observable-subscribe"
+      }
+    },
+    {
+      "id": "implement-pipeline",
+      "title": "Compose async middleware pipeline",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "headless-terminal"
+      }
+    },
+    {
+      "id": "implement-queue-processor",
+      "title": "Process jobs sequentially from queue",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "queue-worker"
+      }
+    },
+    {
+      "id": "implement-retry-backoff",
+      "title": "Retry async fn with exponential backoff",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cancel-async-tasks"
+      }
+    },
+    {
+      "id": "implement-ring-buffer",
+      "title": "Fixed-size ring buffer overwrite",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "ring-buffer-capricorn86"
+      }
+    },
+    {
+      "id": "implement-semver-compare",
+      "title": "Compare semver strings",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "pypi-server"
+      }
+    },
+    {
+      "id": "implement-stable-sort",
+      "title": "Stable sort by key",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "stable-sort-helper"
+      }
+    },
+    {
+      "id": "implement-throttle",
+      "title": "Throttle function calls",
+      "category": "feature",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "throttle-helper"
+      }
+    },
+    {
+      "id": "implement-token-bucket",
+      "title": "Implement token bucket rate limiter",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "pypi-server"
+      }
+    },
+    {
+      "id": "implement-topological-sort",
+      "title": "Topological sort of dependency graph",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "merge-diff-arc-agi-task"
+      }
+    },
+    {
+      "id": "implement-trie-search",
+      "title": "Prefix search with trie",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "query-optimize"
+      }
+    },
+    {
+      "id": "local-package-index",
+      "title": "Resolve package name to tarball path",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "pypi-server"
+      }
+    },
+    {
+      "id": "optimize-lookup-index",
+      "title": "Add index map for O(1) user lookup",
+      "category": "refactor",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "query-optimize"
+      }
+    },
+    {
+      "id": "parse-dotenv",
+      "title": "Parse dotenv text into key/value map",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "modernize-scientific-stack"
+      }
+    },
+    {
+      "id": "parse-shell-command",
+      "title": "Tokenize a simple shell command line",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "headless-terminal"
+      }
+    },
+    {
+      "id": "port-fixed-width-records",
+      "title": "Parse fixed-width records to objects",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "cobol-modernization"
+      }
+    },
+    {
+      "id": "promisify-callback-api",
+      "title": "Promisify callback-style readConfig",
+      "category": "refactor",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "modernize-scientific-stack"
+      }
+    },
+    {
+      "id": "recover-deleted-artifact",
+      "title": "Recover latest backup artifact by timestamp",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "fix-git"
+      }
+    },
+    {
+      "id": "refactor-extract-validator",
+      "title": "Extract shared validator module",
+      "category": "refactor",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "extract-validator-module"
+      }
+    },
+    {
+      "id": "refactor-split-router",
+      "title": "Extract router from monolithic server file",
+      "category": "refactor",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "split-router-module"
+      }
+    },
+    {
+      "id": "reshard-jsonl",
+      "title": "Split JSONL into N balanced shard files",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "reshard-c4-data"
+      }
+    },
+    {
+      "id": "resolve-merge-markers",
+      "title": "Resolve git conflict markers in a file",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "merge-diff-arc-agi-task"
+      }
+    },
+    {
+      "id": "sanitize-html",
+      "title": "Strip script tags and event handlers from HTML",
+      "category": "feature",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "filter-js-from-html"
+      }
+    },
+    {
+      "id": "scrub-secrets-log",
+      "title": "Redact API keys from log lines",
+      "category": "bugfix",
+      "source": {
+        "benchmark": "terminal-bench",
+        "taskId": "git-leak-recovery"
+      }
+    },
+    {
+      "id": "test-fix-async-flaky",
+      "title": "Fix flaky async test timing",
+      "category": "test",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "fix-flaky-async-test"
+      }
+    },
+    {
+      "id": "test-fix-mock-order",
+      "title": "Fix mock call order assertion",
+      "category": "test",
+      "source": {
+        "benchmark": "deepswe",
+        "taskId": "fix-mock-order-test"
+      }
+    }
+  ]
+}

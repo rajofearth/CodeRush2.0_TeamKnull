@@ -15,7 +15,7 @@ This document is a visual and structural map of how CLAI is organized, how a run
 | **Memory** | SQLite/JSON with provenance + invalidation | Session history; durable memory is convention/prompt |
 | **Context** | Budgeted `assemble()` + deterministic history compaction | Compaction + prompt; no harness memory plane |
 | **Subagents** | `task` tool — read-only sub-loop with bounded summary return | Sub-agents, multi-session |
-| **Benchmarks** | Built-in 8-task bench + live SSE dashboard | Community evals; no first-party harness bench |
+| **Benchmarks** | Built-in 81-task bench + live SSE dashboard | Community evals; no first-party harness bench |
 | **Done means** | Designed: `PASS \| FAIL \| BLOCKED` + evidence *(verify seam scaffolded)* | Model `stop` finish reason — tests are advisory |
 | **Trace** | Append-only JSONL under `.clai/traces/<runId>/` | Session store + share links |
 | **UI** | Ink ADE pane (`UiBus` → TUI or headless) | SolidJS/OpenTUI; event bus across threads |
@@ -175,7 +175,7 @@ flowchart TD
 | `clai demo injection` | No | Red-team memory/context assembly demo |
 | `clai intake` | No | Print repository intake map JSON |
 | `clai memory list\|get\|set\|delete\|export` | No | Harness memory store CLI |
-| `clai bench run\|serve\|list` | Optional | 8-task benchmark subset + live dashboard |
+| `clai bench run\|serve\|list` | Optional | 81-task benchmark suite + live dashboard |
 
 Heavy modules (`adapter`, `sandbox`, `bench`, `memory`) are **lazy-imported** so `clai --help` stays fast.
 
@@ -529,18 +529,20 @@ Headless: set `CLAI_NO_TUI=1` or run on non-TTY stdout. Requires explicit prompt
 
 ## Benchmark system
 
-Built-in Terminal-Bench-style eval loop over 8 fixtures in `fixtures/bench/`:
+Built-in Terminal-Bench-style eval loop over **81** self-contained Node.js fixtures in `fixtures/bench/`:
 
-| Task id | Category |
-|---------|----------|
-| `fix-async-race` | bugfix |
-| `fix-broken-import` | bugfix |
-| `fix-json-config` | bugfix |
-| `fix-test-assertion` | bugfix |
-| `implement-slugify` | feature |
-| `off-by-one` | bugfix |
-| `refactor-report` | refactor |
-| `validate-quantity` | bugfix |
+- **8 legacy tasks** — original CLAI mini-repo tasks (`fix-async-race`, `implement-slugify`, …)
+- **73 adapted tasks** — themes from [Terminal-Bench 2.1](https://github.com/harbor-framework/terminal-bench-2-1) and [DeepSWE](https://deepswe.datacurve.ai/), rewritten as isolated `.mjs` workspaces with `check.mjs` verifiers (no Docker required)
+
+Full manifest: `fixtures/bench/manifest.json` (maps each task to its upstream benchmark id).
+
+Regenerate catalog fixtures:
+
+```bash
+pnpm bench:scaffold              # write fixtures from src/bench/task-catalog/
+pnpm bench:scaffold -- --force   # overwrite existing catalog tasks
+pnpm bench:verify-fixtures       # broken must fail, _solution/ must pass
+```
 
 ```mermaid
 flowchart LR
@@ -611,7 +613,7 @@ stateDiagram-v2
 | `fixtures/tiny-edit` | `clai demo` | Minimal edit+bash loop with `check.mjs` |
 | `fixtures/lsp-ts` | `clai demo lsp` | TypeScript file with intentional type error |
 | `fixtures/red-team-readme` | `clai demo injection` | Prompt injection resistance demo |
-| `fixtures/bench/*` | `clai bench run` | 8-task eval subset |
+| `fixtures/bench/*` | `clai bench run` | 81-task eval suite (Terminal-Bench + DeepSWE inspired) |
 
 Offline demos emit JSON summary on headless stdout: `{ ok, runId, sandboxMode, tracePath, … }`.
 
@@ -658,7 +660,7 @@ Node **≥ 20** required. Package manager: **pnpm 9**.
 | Area | Why |
 |------|-----|
 | **Eval reproducibility** | JSONL traces + ablation flags + memory provenance → judges can replay *what the harness believed* |
-| **Built-in bench** | 8-task subset, offline mode, live dashboard, pi comparison — no external harness required |
+| **Built-in bench** | 81-task suite (TB/DeepSWE adapted), offline mode, live dashboard, pi comparison — no external harness required |
 | **Honest completion** | Verification contract aims for evidence-based `PASS`, not “model stopped talking” |
 | **Context discipline** | Token budget, staleness invalidation, injection labels, deterministic compaction |
 | **Subagent isolation** | `task` tool keeps exploration out of parent context |
@@ -693,7 +695,7 @@ pnpm clai demo lsp            # intake + LSP diagnostics
 pnpm clai demo injection      # memory/context injection demo
 pnpm clai intake --cwd .      # repo map JSON
 pnpm clai memory list         # harness plane store
-pnpm clai bench list          # 8 eval tasks
+pnpm clai bench list          # 81 eval tasks
 pnpm clai bench run --offline --serve   # offline run + dashboard :4310
 CLAI_NO_TUI=1 pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
 ```

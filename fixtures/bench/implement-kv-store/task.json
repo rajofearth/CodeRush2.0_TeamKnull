@@ -1,0 +1,12 @@
+{
+  "id": "implement-kv-store",
+  "title": "Implement in-memory KV store with TTL",
+  "prompt": "Implement KVStore in kv.mjs with set(key,val,ttlMs?), get(key), delete(key). Expired keys behave as missing. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "kv-store-grpc"
+  }
+}

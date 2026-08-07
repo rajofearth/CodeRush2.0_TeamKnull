@@ -1,0 +1,12 @@
+{
+  "id": "fix-json-trailing-comma",
+  "title": "Reject JSON with trailing commas",
+  "prompt": "parseStrictJson(text) in json.mjs must throw on trailing commas before property/end. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "fix-code-vulnerability"
+  }
+}

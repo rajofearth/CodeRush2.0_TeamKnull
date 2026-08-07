@@ -1,0 +1,12 @@
+{
+  "id": "add-health-check-route",
+  "title": "Implement health handler returning status",
+  "prompt": "healthHandler(deps) in health.mjs returns { status: 'ok' } when deps.ready is true, else 503 shape. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "health-check-endpoint"
+  }
+}

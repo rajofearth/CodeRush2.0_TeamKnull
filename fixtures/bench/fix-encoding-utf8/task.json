@@ -1,0 +1,12 @@
+{
+  "id": "fix-encoding-utf8",
+  "title": "Normalize to NFC before compare",
+  "prompt": "sameText(a,b) in text.mjs compares Unicode strings after NFC normalization. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "utf8-normalization-fix"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "fix-async-map-unbounded",
+  "title": "Limit concurrency in async map",
+  "prompt": "mapLimit(items, limit, fn) in pool.mjs runs at most `limit` tasks at once. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

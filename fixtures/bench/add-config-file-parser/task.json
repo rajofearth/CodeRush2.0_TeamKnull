@@ -1,0 +1,12 @@
+{
+  "id": "add-config-file-parser",
+  "title": "Add JSON config file parser",
+  "prompt": "Implement loadConfig(path) in config-loader.mjs per SPEC.md. It must read JSON and validate required fields. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "cliffy-config-parser"
+  }
+}

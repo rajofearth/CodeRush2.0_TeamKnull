@@ -1,0 +1,12 @@
+{
+  "id": "implement-observable-subscribe",
+  "title": "Minimal observable pub/sub",
+  "prompt": "Observable in observable.mjs supports subscribe(fn) and emit(value); unsubscribe removes listener. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "observable-subscribe"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "implement-diff-lines",
+  "title": "Line diff between two texts",
+  "prompt": "diffLines(a,b) in diff.mjs returns { added, removed } line arrays (set difference by line). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "xml-diff-lines"
+  }
+}

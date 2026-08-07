@@ -1,0 +1,12 @@
+{
+  "id": "local-package-index",
+  "title": "Resolve package name to tarball path",
+  "prompt": "PackageIndex.resolve(name, version) in index.mjs looks up packages in a manifest map. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "pypi-server"
+  }
+}

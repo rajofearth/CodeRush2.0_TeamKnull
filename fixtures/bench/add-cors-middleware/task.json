@@ -1,0 +1,12 @@
+{
+  "id": "add-cors-middleware",
+  "title": "Add CORS headers middleware",
+  "prompt": "corsMiddleware(options) in cors.mjs sets Access-Control-Allow-Origin on response headers. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "cors-middleware"
+  }
+}

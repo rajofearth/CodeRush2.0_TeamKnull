@@ -1,0 +1,12 @@
+{
+  "id": "test-fix-async-flaky",
+  "title": "Fix flaky async test timing",
+  "prompt": "timer.test.mjs fails intermittently because it uses real timers. Fix timer.test.mjs only so it awaits deterministically. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "test",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "fix-flaky-async-test"
+  }
+}

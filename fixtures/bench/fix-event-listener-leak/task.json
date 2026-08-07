@@ -1,0 +1,12 @@
+{
+  "id": "fix-event-listener-leak",
+  "title": "Remove listeners on unsubscribe",
+  "prompt": "EventBus.off(event, fn) in bus.mjs must remove the listener registered by on(). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "headless-terminal"
+  }
+}

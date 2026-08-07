@@ -1,0 +1,12 @@
+{
+  "id": "fix-sql-injection-pattern",
+  "title": "Use parameterized query builder",
+  "prompt": "buildQuery(table, id) in query.mjs must use placeholders, never interpolate raw id. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "fix-code-vulnerability"
+  }
+}

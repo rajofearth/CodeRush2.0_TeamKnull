@@ -1,0 +1,12 @@
+{
+  "id": "fix-circular-import",
+  "title": "Break circular dependency between a and b modules",
+  "prompt": "a.mjs and b.mjs have a circular import causing undefined exports. Restructure so both exports work. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "merge-diff-arc-agi-task"
+  }
+}

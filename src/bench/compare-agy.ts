@@ -1,5 +1,5 @@
 /**
- * compare-agy — run the same 8-task bench against Antigravity CLI (`agy`)
+ * compare-agy — run the same bench tasks against Antigravity CLI (`agy`)
  * and emit a side-by-side scorecard vs the latest CLAI live run (or a fresh
  * CLAI serial run if COMPARE_CLAI=1).
  *

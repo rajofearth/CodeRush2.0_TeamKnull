@@ -1,0 +1,12 @@
+{
+  "id": "add-unique-key-guard",
+  "title": "Reject duplicate keys on insert",
+  "prompt": "UniqueStore in store.mjs throws on duplicate put(key) and overwrites only via set(key,val,force). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "unique-key-guard"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "implement-token-bucket",
+  "title": "Implement token bucket rate limiter",
+  "prompt": "TokenBucket in bucket.mjs refills tokens over time and consume(n) throws when insufficient. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "pypi-server"
+  }
+}

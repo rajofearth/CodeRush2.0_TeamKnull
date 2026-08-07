@@ -1,0 +1,12 @@
+{
+  "id": "implement-stable-sort",
+  "title": "Stable sort by key",
+  "prompt": "stableSort(items, keyFn) in sort.mjs sorts by key while preserving order for equal keys. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "stable-sort-helper"
+  }
+}

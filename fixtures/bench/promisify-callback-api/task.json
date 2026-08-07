@@ -1,0 +1,12 @@
+{
+  "id": "promisify-callback-api",
+  "title": "Promisify callback-style readConfig",
+  "prompt": "Add readConfigAsync(path) to config.mjs that wraps the existing callback readConfig without breaking it. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "refactor",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "modernize-scientific-stack"
+  }
+}

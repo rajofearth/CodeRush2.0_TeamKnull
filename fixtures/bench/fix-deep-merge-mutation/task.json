@@ -1,0 +1,12 @@
+{
+  "id": "fix-deep-merge-mutation",
+  "title": "Deep merge without mutating inputs",
+  "prompt": "deepMerge(a,b) in merge-deep.mjs must return a new object and not mutate a or b. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "merge-diff-arc-agi-task"
+  }
+}

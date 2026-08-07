@@ -1,0 +1,12 @@
+{
+  "id": "implement-min-heap",
+  "title": "Implement min-heap priority queue",
+  "prompt": "MinHeap in heap.mjs supports push(n) and pop() returning smallest element. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "query-optimize"
+  }
+}

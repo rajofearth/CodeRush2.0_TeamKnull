@@ -1,0 +1,12 @@
+{
+  "id": "add-idempotency-key",
+  "title": "Dedupe operations by idempotency key",
+  "prompt": "IdempotencyStore in idem.mjs runs handler once per key and returns cached result on repeats. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "idempotency-key-store"
+  }
+}

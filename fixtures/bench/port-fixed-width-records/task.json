@@ -1,0 +1,12 @@
+{
+  "id": "port-fixed-width-records",
+  "title": "Parse fixed-width records to objects",
+  "prompt": "parseRecords(lines) in records.mjs parses 20-char id + 30-char name fixed-width lines into {id,name}. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cobol-modernization"
+  }
+}

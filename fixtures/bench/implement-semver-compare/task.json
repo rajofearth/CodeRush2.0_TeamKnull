@@ -1,0 +1,12 @@
+{
+  "id": "implement-semver-compare",
+  "title": "Compare semver strings",
+  "prompt": "Implement compareSemver(a,b) in semver.mjs per SPEC.md. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "pypi-server"
+  }
+}

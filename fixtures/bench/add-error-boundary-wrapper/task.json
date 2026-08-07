@@ -1,0 +1,12 @@
+{
+  "id": "add-error-boundary-wrapper",
+  "title": "Catch errors and map to result type",
+  "prompt": "safeRun(fn) in safe.mjs returns { ok: true, value } or { ok: false, error } without throwing. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "error-boundary-wrapper"
+  }
+}

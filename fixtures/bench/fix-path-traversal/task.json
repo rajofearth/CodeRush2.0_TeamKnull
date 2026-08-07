@@ -1,0 +1,12 @@
+{
+  "id": "fix-path-traversal",
+  "title": "Block path traversal in safeJoin",
+  "prompt": "safeJoin(root, userPath) in paths.mjs must resolve paths under root only. The current join allows ../ escape. Fix it. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "fix-code-vulnerability"
+  }
+}
