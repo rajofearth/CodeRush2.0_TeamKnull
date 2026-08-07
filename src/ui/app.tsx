@@ -38,6 +38,7 @@ import {
   createHitRegistry,
   enterAltScreen,
   isMouseEnabled,
+  scrubMouseJunk,
   type HitRegistry,
 } from "./mouse.js";
 import { glyphs, resolve } from "./theme.js";
@@ -360,11 +361,16 @@ export function ClaiApp(props: ClaiAppProps) {
         return;
       }
       if (key.backspace || key.delete) {
-        setInput((v) => v.slice(0, -1));
+        setInput((v) => scrubMouseJunk(v.slice(0, -1)));
+        return;
+      }
+      // Mouse CSI that slips past the stdin filter must never enter the prompt.
+      if (ch && (ch === "\x1b" || /\[<\d*;?\d*;?\d*[Mm]?/.test(ch))) {
+        setInput((v) => scrubMouseJunk(v));
         return;
       }
       if (ch && !key.ctrl && !key.meta) {
-        setInput((v) => v + ch);
+        setInput((v) => scrubMouseJunk(v + ch));
       }
     },
     { isActive: true },
