@@ -20,8 +20,10 @@ export type SessionSummary = {
 
 const CHAT_SYSTEM = `## Chat log mode — delegate aggressively
 You are in verbose log mode where every tool call and subagent step is printed.
-Use the \`task\` tool liberally: spawn subagents for any exploration spanning more than 2–3 files, parallel investigations, or "how does X work" questions.
+Use the \`task\` tool liberally: spawn subagents (explore or general) for any exploration spanning more than 2–3 files, parallel investigations, or "how does X work" questions.
+Emit multiple \`task\` calls in one step to run subagents in parallel.
 Prefer multiple focused subagents over doing broad grep/read yourself — keep your context lean and synthesize their summaries in prose.
+Long builds/servers: \`bash_bg\` + \`bash_output\` / \`bash_kill\`.
 Do not dump raw tool output in your replies; the user already sees it in the log.`;
 
 export function extraSystemForMode(mode: "log" | "tui" | "headless", extra?: string): string | undefined {
@@ -69,6 +71,11 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
     workspaceRoot: cwd,
     autoApprove: process.env.CLAI_AUTO_APPROVE === "1",
   });
+  const { ShellJobManager } = await import("../shell/jobs.js");
+  const shellJobs = new ShellJobManager({
+    workspaceRoot: cwd,
+    requestApproval: sandbox.requestApproval,
+  });
   const trace = await createTraceWriter({
     cwd,
     tracesDir: opts.workspace.tracesDir,
@@ -89,6 +96,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   const ctx = {
     workspaceRoot: cwd,
     sandbox,
+    shellJobs,
     trace,
     onEvent: createToolPlaneBridge(opts.bus),
   };
@@ -244,6 +252,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
     }
   } finally {
     rl.close();
+    shellJobs.dispose();
     await trace.close(lastTurnFailed ? "fail" : "ok");
     await sandbox.dispose();
   }

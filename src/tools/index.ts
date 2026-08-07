@@ -25,6 +25,7 @@ import {
 import { intakeTool } from "./intake.js";
 import { capToolResultForModel } from "./limits.js";
 import { previewForLog } from "./log-preview.js";
+import { createBgShellTools } from "./bg-shell.js";
 
 export type { ToolContext, ToolPlaneEvent, ToolResult } from "./common.js";
 export { resolveInWorkspace, pathExists } from "./common.js";
@@ -37,6 +38,7 @@ export {
 } from "./lsp.js";
 export { intakeTool, scanIntakeMap, type IntakeMap } from "./intake.js";
 export { MODEL_OUTPUT_CAPS, capToolResultForModel } from "./limits.js";
+export { createBgShellTools } from "./bg-shell.js";
 
 async function emit(
   ctx: ToolContext,
@@ -364,7 +366,7 @@ export async function writeTool(
 }
 
 /** Default bash wall-clock timeout when the model omits one (ms). */
-const DEFAULT_BASH_TIMEOUT_MS = 60_000;
+export const DEFAULT_BASH_TIMEOUT_MS = 60_000;
 
 export async function bashTool(
   ctx: ToolContext,
@@ -473,6 +475,72 @@ async function executeForModel(
 export function createAiTools(ctx: ToolContext) {
   return {
     ...createReadOnlyAiTools(ctx),
+    ...createBgShellTools(ctx),
+    parallel: tool({
+      description:
+        "Run up to 6 read-only tools concurrently (grep/glob/read). Prefer emitting multiple tool calls in one step when possible; use this when you want one batched result.",
+      parameters: z.object({
+        jobs: z
+          .array(
+            z.object({
+              tool: z.enum(["grep", "glob", "read"]),
+              pattern: z
+                .string()
+                .nullable()
+                .describe("grep/glob pattern; null for read"),
+              path: z
+                .string()
+                .nullable()
+                .describe("File/dir path; required for read"),
+            }),
+          )
+          .min(1)
+          .max(6),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "parallel", async () => {
+          const started = Date.now();
+          await emit(ctx, "tool_call", "parallel", {
+            target: `${args.jobs.length} jobs`,
+            input: args,
+          });
+          type ParallelJob = Parameters<typeof parallelReadOnly>[1][number];
+          const jobs: ParallelJob[] = [];
+          for (const j of args.jobs) {
+            if (j.tool === "grep") {
+              jobs.push({
+                tool: "grep",
+                args: {
+                  pattern: j.pattern ?? "",
+                  path: j.path ?? undefined,
+                },
+              });
+            } else if (j.tool === "glob") {
+              jobs.push({
+                tool: "glob",
+                args: { pattern: j.pattern ?? "**/*" },
+              });
+            } else if (j.path) {
+              jobs.push({ tool: "read", args: { path: j.path } });
+            }
+          }
+          const results = await parallelReadOnly(ctx, jobs);
+          const out = {
+            ok: results.every((r) => r.ok),
+            tool: "parallel",
+            results,
+            count: results.length,
+            durationMs: Date.now() - started,
+          };
+          await emit(ctx, "tool_result", "parallel", {
+            target: `${args.jobs.length} jobs`,
+            ok: out.ok,
+            durationMs: out.durationMs,
+            output: previewForLog("parallel", out),
+          });
+          return out;
+        }),
+    }),
     edit: tool({
       description: "Exact string replacement edit in an existing file.",
       parameters: z.object({
@@ -501,7 +569,7 @@ export function createAiTools(ctx: ToolContext) {
     }),
     bash: tool({
       description:
-        "Run a shell command in the sandboxed workspace (network deny-by-default). Hard timeout ~60s; large stdout/stderr is truncated for context.",
+        "Run a shell command in the sandboxed workspace (network deny-by-default). Hard timeout ~60s; large stdout/stderr is truncated for context. For long-running/watch commands use bash_bg instead.",
       parameters: z.object({
         command: z.string().describe("Shell command to run"),
       }),

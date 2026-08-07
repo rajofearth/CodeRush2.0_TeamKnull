@@ -115,10 +115,13 @@ Be concise. Soft completion: stop when the task looks done — there is no hard 
 
 ## Tool use
 Prefer read-only discovery (grep/glob/read/repo_intake/LSP) before edits.
-Use the task tool to delegate broad read-only investigations ("how does X work across the codebase?") — it keeps raw exploration out of your context and returns a short summary.
+Emit multiple tool calls in ONE step to run them in parallel (reads, greps, or several task subagents).
+Use parallel({jobs:[…]}) to batch up to 6 read-only tools when you want one combined result.
+Use the task tool to delegate investigations — agent=explore (read-only) or agent=general (+bash). Multiple task calls in one step run in parallel.
+For long-running commands (dev servers, watchers, big builds) use bash_bg, then bash_output / bash_jobs / bash_kill — do not block on foreground bash.
 Use lsp_diagnostics after edits on TS/Python; lsp_definition / lsp_references for navigation.
 Large tool outputs are truncated with a marker — re-run scoped narrower (read with offset/limit, grep with a tighter pattern/path) if you need the omitted part.
-Tool tips: glob pattern use **/* ; read needs path (offset/limit optional); edit needs path+oldString+newString; bash only needs command.`;
+Tool tips: glob pattern use **/* ; read needs path (offset/limit optional); edit needs path+oldString+newString; bash needs command; bash_bg for background.`;
 
 /** Compose the built-in policy with caller-provided extra context. */
 function composeSystem(extra?: string): string {
