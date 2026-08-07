@@ -37,6 +37,7 @@ export type UiEvent =
       tool: string;
       target?: string;
       group?: string;
+      input?: unknown;
     }
   /** Tool finished. `id` should match the originating `tool_call`. */
   | {
@@ -46,6 +47,10 @@ export type UiEvent =
       ok: boolean;
       detail?: string;
       durationMs?: number;
+      group?: string;
+      input?: unknown;
+      output?: unknown;
+      truncated?: boolean;
     }
   /** Plan / task-graph snapshot. Re-emitting the same `id` replaces it. */
   | {

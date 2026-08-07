@@ -15,9 +15,10 @@ import { generateText } from "ai";
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "../tools/common.js";
+import { emitToolEvent } from "../tools/common.js";
 import { createReadOnlyAiTools } from "../tools/index.js";
 import { MODEL_OUTPUT_CAPS, capToolResultForModel } from "../tools/limits.js";
-import { emitToolEvent } from "../tools/common.js";
+import { previewForLog } from "../tools/log-preview.js";
 import { withProviderRetry } from "../adapter/retry.js";
 
 export type TaskModelHandle = {
@@ -168,7 +169,7 @@ export function createTaskTool(ctx: ToolContext, model: TaskModelHandle) {
         detail: full.ok
           ? `${full.steps} steps · ${Buffer.byteLength(full.summary, "utf8")}B`
           : full.error ?? "subagent failed",
-        output: { steps: full.steps, truncated: full.truncated },
+        output: previewForLog("task", full),
       });
       return result;
     },

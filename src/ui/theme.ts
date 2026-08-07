@@ -351,6 +351,62 @@ export function glyph(name: GlyphName): string {
   return glyphs().glyph(name);
 }
 
+const SGR_RESET = "\x1b[0m";
+
+/** Wrap `text` in SGR foreground for stdout (log printer, not Ink). */
+export function paintText(token: ThemeToken, text: string, opts?: { dim?: boolean }): string {
+  const level = colorLevel();
+  if (level === "none") return text;
+
+  let open = "";
+  if (level === "truecolor") {
+    const hex = HEX[token];
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    open = `\x1b[38;2;${r};${g};${b}m`;
+  } else if (level === "256") {
+    const index = INDEX_256[token];
+    if (index == null) return text;
+    open = `\x1b[38;5;${index}m`;
+  } else {
+    const name = ANSI_16[token];
+    const code =
+      name === "whiteBright"
+        ? 97
+        : name === "blackBright"
+          ? 90
+          : name === "blueBright"
+            ? 94
+            : name === "cyanBright"
+              ? 96
+              : name === "greenBright"
+                ? 92
+                : name === "yellow"
+                  ? 93
+                  : name === "redBright"
+                    ? 91
+                    : name === "green"
+                      ? 32
+                      : name === "red"
+                        ? 31
+                        : name === "cyan"
+                          ? 36
+                          : name === "white"
+                            ? 37
+                            : name === "blue"
+                              ? 34
+                              : 37;
+    open = `\x1b[${code}m`;
+  }
+  const dim = opts?.dim ? "\x1b[2m" : "";
+  return `${open}${dim}${text}${SGR_RESET}`;
+}
+
+export function resetSgr(): string {
+  return SGR_RESET;
+}
+
 // ── wordmark ─────────────────────────────────────────────────────────────────
 
 /**

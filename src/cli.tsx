@@ -26,6 +26,7 @@ Usage:
   clai intake [--cwd <path>]
   clai memory list|get|set|delete|export
   clai bench run|serve|list [--offline] [--parallel N] [--serve]
+  clai chat ["<prompt>"] [--cwd <path>]
   clai --fixture <path>
   clai run "<prompt>" [--cwd <path>]
 
@@ -37,13 +38,14 @@ Options:
   intake                  Print repository intake map (JSON)
   --fixture <path>        Fixture workspace (default: fixtures/tiny-edit)
   run "<prompt>"          Soft agent loop via AI SDK (needs API key)
+  chat ["<prompt>"]       Verbose log-mode session — tools, I/O, tokens, cost
   bench run               Parallel task subset (use --offline with no API key)
   bench serve             Live metrics dashboard over history (port 4310)
   --cwd <path>            Workspace root; overrides a positional <folder>
   --                      Everything after it is a path, never a subcommand
 
 Workspace root:
-  A bare first word matching run/demo/intake/memory/bench/help is a subcommand;
+  A bare first word matching run/chat/demo/intake/memory/bench/help is a subcommand;
   anything else is the workspace folder. Use "clai -- demo" or
   "clai --cwd demo" to open a folder that shares a subcommand name.
   The resolved root governs tool cwd, .clai/traces, .clai memory, and intake.
@@ -71,6 +73,8 @@ Quick start:
   pnpm clai bench run --offline --serve
   pnpm clai run --cwd fixtures/tiny-edit
   pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
+  pnpm clai chat
+  pnpm clai chat "how does the bench runner work?"
 `.trim();
 
 const entry = parseEntry(process.argv.slice(2));
@@ -99,6 +103,7 @@ const wantsDemo =
   (entry.subcommand === "demo" && !wantsInjectionDemo && !wantsLspDemo) ||
   (args.includes("--fixture") && !wantsLspDemo && entry.subcommand !== "demo");
 const wantsRun = entry.subcommand === "run";
+const wantsChat = entry.subcommand === "chat";
 const wantsBench = entry.subcommand === "bench";
 /** Bare `clai` / `clai <folder>` — launch the interface on the resolved root. */
 const wantsLaunch =
@@ -109,6 +114,7 @@ const wantsLaunch =
   !wantsLspDemo &&
   !wantsDemo &&
   !wantsRun &&
+  !wantsChat &&
   !wantsBench;
 
 async function resolveWorkspace(showNotes = true) {
@@ -137,6 +143,10 @@ if (wantsHelp) {
   const workspace = await resolveWorkspace(false);
   const { runBenchCli } = await import("./bench/index.js");
   process.exitCode = await runBenchCli(args.slice(1), workspace.root);
+} else if (wantsChat) {
+  const workspace = await resolveWorkspace();
+  const { runChatCli } = await import("./chat/index.js");
+  process.exitCode = await runChatCli(args.slice(1), workspace);
 } else if (wantsIntake) {
   const workspace = await resolveWorkspace();
   const { scanIntakeMap } = await import("./tools/intake.js");
@@ -256,6 +266,7 @@ if (wantsHelp) {
   const { hasApiKey, runAgentLoop, resolveModel } = await import(
     "./adapter/index.js"
   );
+  const { estimateUsdBench } = await import("./bench/pricing.js");
   const { createSandbox } = await import("./sandbox/index.js");
   const { createTraceWriter } = await import("./trace/index.js");
   const { intakeTool, probeLspAvailability } = await import("./tools/index.js");
@@ -357,6 +368,11 @@ if (wantsHelp) {
               type: "metrics",
               tokensIn: usage.promptTokens,
               tokensOut: usage.completionTokens,
+              costUsd: estimateUsdBench(
+                model.provider,
+                usage.promptTokens,
+                usage.completionTokens,
+              ),
             }),
         });
         history = result.messages;

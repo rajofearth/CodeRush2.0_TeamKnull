@@ -16,6 +16,9 @@ export type ToolPlaneLike = {
   ok?: boolean;
   durationMs?: number;
   detail?: string;
+  group?: string;
+  input?: unknown;
+  output?: unknown;
 };
 
 /** Read-only tools cluster into one collapsible block. */
@@ -48,7 +51,8 @@ export function createToolPlaneBridge(
         id,
         tool: event.tool,
         target: event.target,
-        group: groups[event.tool],
+        group: event.group ?? groups[event.tool],
+        input: event.input,
       });
       return;
     }
@@ -61,6 +65,9 @@ export function createToolPlaneBridge(
       ok: event.ok ?? false,
       detail: event.detail ?? event.target,
       durationMs: event.durationMs,
+      group: event.group,
+      input: event.input,
+      output: event.output,
     });
   };
 }

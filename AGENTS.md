@@ -29,6 +29,7 @@ pnpm install
 cp .env.example .env   # set GROQ_API_KEY (default provider)
 pnpm clai --help
 pnpm clai               # launch on the current directory as workspace root
+pnpm clai chat          # verbose log session — tools, I/O, tokens, cost
 pnpm clai <folder>      # launch on a folder (`-- <dir>` / `--cwd <dir>` if it collides with a subcommand)
 pnpm clai demo          # offline edit+bash on fixtures/tiny-edit (no API key)
 pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts

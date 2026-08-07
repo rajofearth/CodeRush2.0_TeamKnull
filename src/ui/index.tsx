@@ -39,6 +39,14 @@ export {
   isTuiEnabled,
 } from "./headless.js";
 
+export type { LogPrinterOptions } from "./log.js";
+export {
+  attachLogPrinter,
+  createLogPrinter,
+  formatTurnSummary,
+  resetSgr,
+} from "./log.js";
+
 export {
   Activity,
   ApprovalPrompt,
@@ -55,6 +63,7 @@ export {
   Wordmark,
   WorkingLine,
   formatCost,
+  formatCostPrecise,
   formatDuration,
   formatTokens,
   toolSigil,

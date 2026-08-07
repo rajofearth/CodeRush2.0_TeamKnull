@@ -55,6 +55,19 @@ export function formatCost(usd?: number): string {
   return `$${(usd ?? 0).toFixed(2)}`;
 }
 
+/**
+ * Cost for log lines / small API runs — keeps sub-cent amounts visible
+ * (e.g. $0.0003 instead of rounding to $0.00).
+ */
+export function formatCostPrecise(usd?: number): string {
+  const n = usd ?? 0;
+  if (!Number.isFinite(n) || n === 0) return "$0.00";
+  if (n >= 0.01) return `$${n.toFixed(2)}`;
+  if (n >= 0.0001) return `$${n.toFixed(4)}`;
+  if (n >= 0.000001) return `$${n.toFixed(6)}`;
+  return `$${n.toExponential(2)}`;
+}
+
 /** One-line ellipsis so a long command never reflows the log. */
 export function truncate(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();

@@ -24,6 +24,7 @@ import {
 } from "./lsp.js";
 import { intakeTool } from "./intake.js";
 import { capToolResultForModel } from "./limits.js";
+import { previewForLog } from "./log-preview.js";
 
 export type { ToolContext, ToolPlaneEvent, ToolResult } from "./common.js";
 export { resolveInWorkspace, pathExists } from "./common.js";
@@ -125,7 +126,7 @@ export async function grepTool(
         target: args.path ?? ".",
         ok: true,
         durationMs: out.durationMs,
-        output: { count: matches.length, engine: "rg" },
+        output: previewForLog("grep", out),
       });
       return out;
     }
@@ -181,7 +182,7 @@ export async function grepTool(
     target: args.path ?? ".",
     ok: true,
     durationMs: out.durationMs,
-    output: { count: matches.length, engine: "node" },
+    output: previewForLog("grep", out),
   });
   return out;
 }
@@ -221,7 +222,7 @@ export async function globTool(
       target: pattern,
       ok: true,
       durationMs: out.durationMs,
-      output: { count: out.count },
+      output: previewForLog("glob", out),
     });
     return out;
   } catch (err) {
@@ -269,7 +270,7 @@ export async function readTool(
       target: args.path,
       ok: true,
       durationMs: out.durationMs,
-      output: { totalLines: lines.length, shown: slice.length },
+      output: previewForLog("read", out),
     });
     return out;
   } catch (err) {
@@ -332,6 +333,7 @@ export async function editTool(
     target: args.path,
     ok: true,
     durationMs: out.durationMs,
+    output: previewForLog("edit", out),
   });
   return out;
 }
@@ -356,6 +358,7 @@ export async function writeTool(
     target: args.path,
     ok: true,
     durationMs: out.durationMs,
+    output: previewForLog("write", out),
   });
   return out;
 }
@@ -394,7 +397,7 @@ export async function bashTool(
     ok: out.ok,
     durationMs: out.durationMs,
     detail: `exit ${result.exitCode} (${result.mode})`,
-    output: { exitCode: result.exitCode, sandboxMode: result.mode },
+    output: previewForLog("bash", out),
   });
   return out;
 }
