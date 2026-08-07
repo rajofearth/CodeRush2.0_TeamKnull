@@ -414,9 +414,10 @@ export function ClaiApp(props: ClaiAppProps) {
       : null;
 
   const footerHints: FooterHint[] = [
+    ...(interruptMode
+      ? [{ id: "interrupt", key: "esc", label: interruptMode === "confirm" ? "again to interrupt" : "interrupt" }]
+      : []),
     { id: "scroll", key: "pgup/dn", label: "scroll" },
-    { id: "agent", key: "tab", label: "switch agent" },
-    { id: "commands", key: "ctrl+p", label: "commands" },
   ];
 
   hintActions.current.set("interrupt", () => requestInterrupt());
