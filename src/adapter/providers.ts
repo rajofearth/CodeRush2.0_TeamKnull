@@ -11,7 +11,8 @@ export type ProviderId =
   | "openrouter"
   | "cerebras"
   | "openai"
-  | "anthropic";
+  | "anthropic"
+  | "gemini";
 
 /** Opaque AI SDK language model. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,9 +27,23 @@ export type ProviderHandle = {
 type ProviderDef = {
   id: ProviderId;
   envKey: string;
+  /** Extra env names that also satisfy this provider (e.g. SDK aliases). */
+  envKeyAliases?: string[];
   defaultModel: string;
   create: (apiKey: string, modelId: string) => Promise<AnyLanguageModel>;
 };
+
+function providerEnvKeys(def: ProviderDef): string[] {
+  return [def.envKey, ...(def.envKeyAliases ?? [])];
+}
+
+function resolveProviderApiKey(def: ProviderDef): string | undefined {
+  for (const key of providerEnvKeys(def)) {
+    const value = process.env[key];
+    if (value) return value;
+  }
+  return undefined;
+}
 
 async function openaiCompatible(
   apiKey: string,
@@ -125,6 +140,55 @@ const PROVIDERS: Record<ProviderId, ProviderDef> = {
       return createAnthropic({ apiKey })(modelId);
     },
   },
+  gemini: {
+    id: "gemini",
+    envKey: "GEMINI_API_KEY",
+    // @ai-sdk/google defaults to GOOGLE_GENERATIVE_AI_API_KEY
+    envKeyAliases: ["GOOGLE_GENERATIVE_AI_API_KEY"],
+    // Confirmed against https://ai.google.dev/gemini-api/docs/models (Gemini 3.5 Flash-Lite)
+    defaultModel: "gemini-3.5-flash-lite",
+    create: async (apiKey, modelId) => {
+      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+      // Gemini 3.x requires thought signatures on replayed functionCall parts.
+      // AI SDK 4's @ai-sdk/google does not round-trip them; inject Google's
+      // documented sentinel so multi-step tool loops (maxSteps) keep working.
+      // https://ai.google.dev/gemini-api/docs/thought-signatures
+      const fetchWithThoughtSignatures: typeof fetch = async (input, init) => {
+        if (init?.body && typeof init.body === "string") {
+          try {
+            const body = JSON.parse(init.body) as {
+              contents?: Array<{
+                parts?: Array<Record<string, unknown>>;
+              }>;
+            };
+            let patched = false;
+            for (const content of body.contents ?? []) {
+              for (const part of content.parts ?? []) {
+                if (
+                  part.functionCall != null &&
+                  part.thoughtSignature == null &&
+                  part.thought_signature == null
+                ) {
+                  part.thoughtSignature = "skip_thought_signature_validator";
+                  patched = true;
+                }
+              }
+            }
+            if (patched) {
+              init = { ...init, body: JSON.stringify(body) };
+            }
+          } catch {
+            // leave body alone
+          }
+        }
+        return fetch(input, init);
+      };
+      return createGoogleGenerativeAI({
+        apiKey,
+        fetch: fetchWithThoughtSignatures,
+      })(modelId);
+    },
+  },
 };
 
 /** Default provider — Groq for fast free/hackathon runs. */
@@ -139,11 +203,11 @@ export function providerEnvKey(id: ProviderId): string {
 }
 
 export function hasAnyProviderKey(): boolean {
-  return listProviders().some((id) => Boolean(process.env[PROVIDERS[id].envKey]));
+  return listProviders().some((id) => hasProviderKey(id));
 }
 
 export function hasProviderKey(id: ProviderId): boolean {
-  return Boolean(process.env[PROVIDERS[id].envKey]);
+  return Boolean(resolveProviderApiKey(PROVIDERS[id]));
 }
 
 export function pickProviderId(prefer?: ProviderId): ProviderId {
@@ -160,7 +224,7 @@ export function pickProviderId(prefer?: ProviderId): ProviderId {
   }
   throw new Error(
     `No API key found. Set one of: ${listProviders()
-      .map((id) => PROVIDERS[id].envKey)
+      .flatMap((id) => providerEnvKeys(PROVIDERS[id]))
       .join(", ")}. Or run \`clai demo\` offline.`,
   );
 }
@@ -171,9 +235,11 @@ export async function createProviderHandle(
 ): Promise<ProviderHandle> {
   const id = pickProviderId(prefer);
   const def = PROVIDERS[id];
-  const apiKey = process.env[def.envKey];
+  const apiKey = resolveProviderApiKey(def);
   if (!apiKey) {
-    throw new Error(`Missing ${def.envKey} for provider ${id}`);
+    throw new Error(
+      `Missing ${providerEnvKeys(def).join(" or ")} for provider ${id}`,
+    );
   }
   const modelId =
     modelIdOverride ?? process.env.CLAI_MODEL ?? def.defaultModel;
