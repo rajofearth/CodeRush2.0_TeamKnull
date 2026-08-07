@@ -26,9 +26,11 @@ https://github.com/rajofearth/CodeRush2.0_TeamKnull/issues/1
 
 ```bash
 pnpm install
-cp .env.example .env   # set CEREBRAS_API_KEY (default provider)
+cp .env.example .env   # set OPENROUTER_API_KEY (default provider)
 pnpm clai --help
 pnpm clai demo          # offline edit+bash on fixtures/tiny-edit (no API key)
+pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts
+pnpm clai intake        # print repository intake map JSON
 pnpm clai run "…"       # soft agent loop (needs a provider key)
 ```
 
@@ -38,11 +40,12 @@ Registry: `src/adapter/providers.ts`. Default **cerebras**. Add/remove providers
 
 | Env | `CLAI_PROVIDER` |
 |-----|-----------------|
-| `CEREBRAS_API_KEY` | `cerebras` (default) |
+| `OPENROUTER_API_KEY` | `openrouter` (default, free models) |
+| `CEREBRAS_API_KEY` | `cerebras` |
 | `OPENAI_API_KEY` | `openai` |
 | `ANTHROPIC_API_KEY` | `anthropic` |
 
-`CLAI_MODEL` overrides the model id. Never commit `.env`.
+`CLAI_MODEL` overrides the model id (default `google/gemma-4-31b-it:free`). Never commit `.env`.
 
 Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-imported so `--help` stays light.
 
@@ -51,7 +54,7 @@ Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-impor
 | Path | Role |
 |------|------|
 | `src/adapter/` | Vercel AI SDK loop; pluggable providers (Cerebras default) |
-| `src/tools/` | grep (rg→Node), glob, read, edit, write, bash; parallel read-only |
+| `src/tools/` | grep (rg→Node), glob, read, edit, write, bash, LSP (defs/refs/diagnostics), repo intake; parallel read-only |
 | `src/sandbox/` | `@anthropic-ai/sandbox-runtime` wrap + stub fallback; env scrub; approval hooks |
 | `src/memory/` | SQLite/JSON memory + CLI |
 | `src/context/` | Budgeted assemble + ablation gates |
