@@ -56,7 +56,7 @@ Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-impor
 | `src/memory/` | SQLite/JSON memory + CLI |
 | `src/context/` | Budgeted assemble + ablation gates |
 | `src/trace/` | Append-only JSONL under `.clai/traces/<runId>/events.jsonl` |
-| `src/ui/` | OpenCode-like Ink ADE activity shell |
+| `src/ui/` | Ink ADE shell — header, activity column, context strip, footer; `UiBus` event API + headless printer (`CLAI_NO_TUI=1` / non-TTY) |
 
 ## Platform notes
 
