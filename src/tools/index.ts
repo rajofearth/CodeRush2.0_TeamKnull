@@ -187,35 +187,56 @@ export async function globTool(
   args: { pattern: string; path?: string; maxResults?: number },
 ): Promise<ToolResult> {
   const started = Date.now();
+  // Models (esp. Groq) sometimes omit/blank the pattern — default to all files.
+  const pattern = args.pattern?.trim() ? args.pattern.trim() : "**/*";
   const searchRoot = args.path
     ? resolveInWorkspace(ctx.workspaceRoot, args.path)
     : ctx.workspaceRoot;
   await emit(ctx, "tool_call", "glob", {
-    target: args.pattern,
-    input: args,
+    target: pattern,
+    input: { ...args, pattern },
   });
-  const files = await fg(args.pattern, {
-    cwd: searchRoot,
-    onlyFiles: true,
-    dot: false,
-    ignore: ["**/node_modules/**", "**/.git/**", "**/.clai/**"],
-  });
-  const limited = files.slice(0, args.maxResults ?? 200);
-  const out = {
-    ok: true,
-    tool: "glob",
-    files: limited,
-    count: limited.length,
-    truncated: files.length > limited.length,
-    durationMs: Date.now() - started,
-  };
-  await emit(ctx, "tool_result", "glob", {
-    target: args.pattern,
-    ok: true,
-    durationMs: out.durationMs,
-    output: { count: out.count },
-  });
-  return out;
+  try {
+    const files = await fg(pattern, {
+      cwd: searchRoot,
+      onlyFiles: true,
+      dot: false,
+      ignore: ["**/node_modules/**", "**/.git/**", "**/.clai/**"],
+    });
+    const limited = files.slice(0, args.maxResults ?? 200);
+    const out = {
+      ok: true,
+      tool: "glob",
+      files: limited,
+      count: limited.length,
+      truncated: files.length > limited.length,
+      pattern,
+      durationMs: Date.now() - started,
+    };
+    await emit(ctx, "tool_result", "glob", {
+      target: pattern,
+      ok: true,
+      durationMs: out.durationMs,
+      output: { count: out.count },
+    });
+    return out;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const out = {
+      ok: false,
+      tool: "glob",
+      error: message,
+      pattern,
+      durationMs: Date.now() - started,
+    };
+    await emit(ctx, "tool_result", "glob", {
+      target: pattern,
+      ok: false,
+      durationMs: out.durationMs,
+      detail: message,
+    });
+    return out;
+  }
 }
 
 export async function readTool(
@@ -378,82 +399,82 @@ function truncate(s: string, max: number): string {
   return `${s.slice(0, max)}\n…(truncated ${s.length - max} chars)`;
 }
 
-/** AI SDK tool map — same implementations, swappable model.
- * Schemas keep every property in `required` (Groq rejects optional-only keys).
+/** Catch tool throws so the agent loop gets a soft error instead of dying. */
+async function safeExecute(
+  toolName: string,
+  run: () => Promise<ToolResult>,
+): Promise<ToolResult> {
+  try {
+    return await run();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, tool: toolName, error: message };
+  }
+}
+
+/**
+ * AI SDK tool map — same implementations, swappable model.
+ * Keep schemas minimal: Groq (gpt-oss) rejects optional-only keys and
+ * often invents/omits extra fields when schemas are wide.
  */
 export function createAiTools(ctx: ToolContext) {
   return {
     grep: tool({
       description: "Search file contents with ripgrep (or Node fallback).",
       parameters: z.object({
-        pattern: z.string(),
+        pattern: z.string().describe("Search pattern"),
         path: z
           .string()
           .nullable()
           .describe("Subdir to search, or null for workspace root"),
-        glob: z.string().nullable().describe("File glob filter, or null"),
-        caseInsensitive: z.boolean().describe("Case-insensitive match"),
-        maxResults: z.number().int().positive().describe("Max matches to return"),
       }),
       execute: async (args) =>
-        grepTool(ctx, {
-          pattern: args.pattern,
-          path: args.path ?? undefined,
-          glob: args.glob ?? undefined,
-          caseInsensitive: args.caseInsensitive,
-          maxResults: args.maxResults,
-        }),
+        safeExecute("grep", () =>
+          grepTool(ctx, {
+            pattern: args.pattern,
+            path: args.path ?? undefined,
+          }),
+        ),
     }),
     glob: tool({
-      description: "Find files by glob pattern within the workspace.",
+      description:
+        "Find files by glob pattern within the workspace. Use **/* or * to list all files.",
       parameters: z.object({
-        pattern: z.string(),
-        path: z
+        pattern: z
           .string()
-          .nullable()
-          .describe("Subdir to search, or null for workspace root"),
-        maxResults: z.number().int().positive().describe("Max paths to return"),
+          .describe("Glob pattern, e.g. **/* or *.ts (empty defaults to **/*)"),
       }),
       execute: async (args) =>
-        globTool(ctx, {
-          pattern: args.pattern,
-          path: args.path ?? undefined,
-          maxResults: args.maxResults,
-        }),
+        safeExecute("glob", () =>
+          globTool(ctx, {
+            pattern: args.pattern,
+          }),
+        ),
     }),
     read: tool({
-      description: "Read a text file (optional offset/limit by line).",
+      description: "Read a text file from the workspace.",
       parameters: z.object({
-        path: z.string(),
-        offset: z
-          .number()
-          .int()
-          .positive()
-          .nullable()
-          .describe("1-based start line, or null"),
-        limit: z
-          .number()
-          .int()
-          .positive()
-          .nullable()
-          .describe("Max lines to read, or null"),
+        path: z.string().describe("File path relative to workspace"),
       }),
       execute: async (args) =>
-        readTool(ctx, {
-          path: args.path,
-          offset: args.offset ?? undefined,
-          limit: args.limit ?? undefined,
-        }),
+        safeExecute("read", () => readTool(ctx, { path: args.path })),
     }),
     edit: tool({
       description: "Exact string replacement edit in an existing file.",
       parameters: z.object({
         path: z.string(),
-        oldString: z.string(),
-        newString: z.string(),
-        replaceAll: z.boolean().describe("Replace every occurrence"),
+        oldString: z.string().describe("Exact text to find"),
+        newString: z.string().describe("Replacement text"),
       }),
-      execute: async (args) => editTool(ctx, args),
+      execute: async (args) =>
+        safeExecute("edit", () =>
+          editTool(ctx, {
+            path: args.path,
+            oldString: args.oldString,
+            newString: args.newString,
+            replaceAll: false,
+          }),
+        ),
     }),
     write: tool({
       description: "Create or overwrite a text file.",
@@ -461,30 +482,20 @@ export function createAiTools(ctx: ToolContext) {
         path: z.string(),
         content: z.string(),
       }),
-      execute: async (args) => writeTool(ctx, args),
+      execute: async (args) => safeExecute("write", () => writeTool(ctx, args)),
     }),
     bash: tool({
       description:
         "Run a shell command in the sandboxed workspace (network deny-by-default).",
       parameters: z.object({
-        command: z.string(),
-        cwd: z
-          .string()
-          .nullable()
-          .describe("Relative cwd inside workspace, or null"),
-        timeoutMs: z
-          .number()
-          .int()
-          .positive()
-          .nullable()
-          .describe("Timeout ms, or null for default"),
+        command: z.string().describe("Shell command to run"),
       }),
       execute: async (args) =>
-        bashTool(ctx, {
-          command: args.command,
-          cwd: args.cwd ?? undefined,
-          timeoutMs: args.timeoutMs ?? undefined,
-        }),
+        safeExecute("bash", () =>
+          bashTool(ctx, {
+            command: args.command,
+          }),
+        ),
     }),
     lsp_definition: tool({
       description:
@@ -498,7 +509,8 @@ export function createAiTools(ctx: ToolContext) {
           .nonnegative()
           .describe("0-based column"),
       }),
-      execute: async (args) => lspDefinitionTool(ctx, args),
+      execute: async (args) =>
+        safeExecute("lsp_definition", () => lspDefinitionTool(ctx, args)),
     }),
     lsp_references: tool({
       description:
@@ -512,7 +524,8 @@ export function createAiTools(ctx: ToolContext) {
           .nonnegative()
           .describe("0-based column"),
       }),
-      execute: async (args) => lspReferencesTool(ctx, args),
+      execute: async (args) =>
+        safeExecute("lsp_references", () => lspReferencesTool(ctx, args)),
     }),
     lsp_diagnostics: tool({
       description:
@@ -524,7 +537,9 @@ export function createAiTools(ctx: ToolContext) {
           .describe("File path, or null for workspace-wide (TS)"),
       }),
       execute: async (args) =>
-        lspDiagnosticsTool(ctx, { path: args.path ?? undefined }),
+        safeExecute("lsp_diagnostics", () =>
+          lspDiagnosticsTool(ctx, { path: args.path ?? undefined }),
+        ),
     }),
     repo_intake: tool({
       description:
@@ -536,7 +551,9 @@ export function createAiTools(ctx: ToolContext) {
           .describe("Subdir to scan, or null for workspace root"),
       }),
       execute: async (args) =>
-        intakeTool(ctx, { path: args.path ?? undefined }),
+        safeExecute("repo_intake", () =>
+          intakeTool(ctx, { path: args.path ?? undefined }),
+        ),
     }),
   };
 }
