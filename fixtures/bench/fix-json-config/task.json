@@ -1,0 +1,8 @@
+{
+  "id": "fix-json-config",
+  "title": "Repair invalid config.json",
+  "prompt": "`node app.mjs` crashes because config.json is invalid: it is not parseable JSON and one field has the wrong type. Fix config.json so it parses and satisfies app.mjs's validation, preserving the intended values (the service is named widget-service on port 8080, retries means three attempts, features are alpha and beta). Do not change app.mjs. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 120000,
+  "maxSteps": 8
+}

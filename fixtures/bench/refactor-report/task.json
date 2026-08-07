@@ -1,0 +1,8 @@
+{
+  "id": "refactor-report",
+  "title": "Deduplicate boxed-report framing",
+  "prompt": "report.mjs contains two functions, formatUserReport and formatOrderReport, that duplicate the same boxed-report framing logic (border building, title row, padded body rows). Refactor report.mjs so the shared framing exists exactly once — e.g. extract a helper that both functions call. The rendered output must stay byte-identical: check.mjs asserts the exact strings AND that the duplicated border expression `\"+\" + \"-\".repeat(width) + \"+\"` appears at most once in the source. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "refactor",
+  "timeoutMs": 150000,
+  "maxSteps": 10
+}

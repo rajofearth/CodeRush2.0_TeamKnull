@@ -48,6 +48,8 @@ export type IntakeMap = {
   packageManagers: string[];
   tree: IntakeTreeNode[];
   git: IntakeGitSummary;
+  /** One-line product summary from package.json / README when available. */
+  summary?: string;
   /** Bounded issue prompt for plan/intake demo / coordinator seed. */
   issuePrompt: string;
   stats: {
@@ -309,25 +311,71 @@ async function detectGit(root: string): Promise<IntakeGitSummary> {
 
 function buildIssuePrompt(map: IntakeMap): string {
   const topLang = map.languages[0]?.id ?? "unknown";
+  // Prefer real package entrypoints over fixture check scripts for the issue seed.
   const entry =
+    map.entrypoints.find((e) => e.kind === "bin" || e.kind === "main")?.path ??
+    map.entrypoints.find((e) => !e.path.startsWith("fixtures/"))?.path ??
     map.entrypoints[0]?.path ??
-    map.configFiles.find((c) => /readme/i.test(c)) ??
+    map.configFiles.find((c) => /readme/i.test(c) && !c.startsWith("fixtures/")) ??
+    map.configFiles.find((c) => c === "package.json") ??
     map.tree.find((t) => t.type === "file")?.path ??
     ".";
   const test =
+    map.testHints.find((h) => !h.command.includes("fixtures/"))?.command ??
     map.testHints[0]?.command ??
     (topLang === "python"
       ? "pytest -q"
       : topLang === "typescript" || topLang === "javascript"
         ? "pnpm test"
         : "run project checks");
-  const configs = map.configFiles.slice(0, 4).join(", ") || "none";
-  return [
-    `Bounded intake issue (${topLang}):`,
-    `Inspect ${entry} and related sources; confirm project shape from configs (${configs}).`,
-    `Propose one small, verifiable fix or clarification, then run: ${test}.`,
-    `Stay inside the workspace; prefer read/grep/LSP before edits.`,
-  ].join(" ");
+  const configs = [
+    ...map.configFiles.filter((c) => !c.startsWith("fixtures/")),
+    ...map.configFiles.filter((c) => c.startsWith("fixtures/")),
+  ]
+    .slice(0, 4)
+    .join(", ") || "none";
+  const parts: string[] = [];
+  if (map.summary) {
+    parts.push(`Project: ${map.summary}.`);
+  }
+  parts.push(
+    `Bounded intake issue (${topLang}): Inspect ${entry} and related sources; confirm project shape from configs (${configs}). Propose one small, verifiable fix or clarification, then run: ${test}. Stay inside the workspace; prefer read/grep/LSP before edits.`,
+  );
+  return parts.join(" ");
+}
+
+async function readProjectSummary(
+  root: string,
+  files: string[],
+): Promise<string | undefined> {
+  const pkgRel =
+    files.find((f) => f === "package.json") ??
+    files.find((f) => /(^|\/)package\.json$/.test(f));
+  if (pkgRel) {
+    const pkg = await readJson(path.join(root, pkgRel));
+    if (pkg) {
+      const name = typeof pkg.name === "string" ? pkg.name : undefined;
+      const description =
+        typeof pkg.description === "string" ? pkg.description.trim() : undefined;
+      if (name && description) return `${name} — ${description}`.slice(0, 240);
+      if (description) return description.slice(0, 240);
+      if (name) return name;
+    }
+  }
+  const readmeRel = files.find((f) => /^readme\.md$/i.test(path.posix.basename(f)));
+  if (readmeRel) {
+    try {
+      const raw = await readFile(path.join(root, readmeRel), "utf8");
+      const line = raw
+        .split(/\r?\n/)
+        .map((l) => l.replace(/^#+\s*/, "").trim())
+        .find((l) => l.length > 0);
+      if (line) return line.slice(0, 240);
+    } catch {
+      /* ignore */
+    }
+  }
+  return undefined;
 }
 
 export async function scanIntakeMap(
@@ -430,6 +478,7 @@ export async function scanIntakeMap(
   ];
 
   const git = await detectGit(root);
+  const summary = await readProjectSummary(root, files);
   const map: IntakeMap = {
     root,
     scannedAt: new Date().toISOString(),
@@ -440,6 +489,7 @@ export async function scanIntakeMap(
     packageManagers: [...packageManagers].sort(),
     tree,
     git,
+    summary,
     issuePrompt: "",
     stats: { filesScanned: files.length, truncated },
   };

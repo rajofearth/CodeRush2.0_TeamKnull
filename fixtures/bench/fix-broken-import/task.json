@@ -1,0 +1,8 @@
+{
+  "id": "fix-broken-import",
+  "title": "Make a broken ESM import resolve",
+  "prompt": "`node main.mjs` fails with ERR_MODULE_NOT_FOUND. The import specifier in main.mjs does not resolve under Node's ESM rules (relative imports need an explicit file extension). Fix the import so the program runs and prints its output. Do not rename or move lib/math-utils.mjs. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 120000,
+  "maxSteps": 8
+}

@@ -1,0 +1,391 @@
+/**
+ * bench/runner — executes the benchmark task subset against the agent loop.
+ *
+ * For each task: copy the fixture to a temp work dir (fixtures are never
+ * mutated), run the agent (or the scripted offline solver), run `node
+ * check.mjs`, record metrics, clean up. Tasks run under a concurrency limit;
+ * a crash or timeout in one task never kills the run.
+ */
+
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { access, cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { runAgentLoop, resolveModel, hasApiKey, type ResolvedModel } from "../adapter/index.js";
+import { createSandbox } from "../sandbox/index.js";
+import type { ToolContext } from "../tools/index.js";
+import { createTraceWriter } from "../trace/index.js";
+import {
+  computeAggregates,
+  type BenchRunRecord,
+  type BenchTaskSpec,
+  type LiveSnapshot,
+  type LiveTask,
+  type TaskResult,
+} from "./types.js";
+
+/**
+ * Rough USD per 1M tokens used for the cost column. Providers do not report
+ * cost through the AI SDK, so this is an estimate keyed by provider id;
+ * unknown providers fall back to `default`.
+ */
+const PRICING: Record<string, { inPerM: number; outPerM: number }> = {
+  groq: { inPerM: 0.1, outPerM: 0.5 },
+  cerebras: { inPerM: 0.1, outPerM: 0.1 },
+  openai: { inPerM: 2.5, outPerM: 10 },
+  anthropic: { inPerM: 3, outPerM: 15 },
+  gemini: { inPerM: 0.1, outPerM: 0.4 },
+  openrouter: { inPerM: 1, outPerM: 3 },
+  default: { inPerM: 0.1, outPerM: 0.2 },
+};
+
+const CHECK_TIMEOUT_MS = 30_000;
+
+export type BenchRunnerOptions = {
+  /** Where `.clai/bench` (traces, history) lives — usually the CLAI repo root. */
+  workspaceRoot: string;
+  tasks: BenchTaskSpec[];
+  parallel?: number;
+  offline?: boolean;
+  /** Called with a fresh snapshot after every state change (for SSE / TUI). */
+  onUpdate?: (snapshot: LiveSnapshot) => void;
+};
+
+export async function loadBenchTasks(
+  fixturesRoot: string,
+  ids?: string[],
+): Promise<BenchTaskSpec[]> {
+  const entries = await readdir(fixturesRoot, { withFileTypes: true });
+  const tasks: BenchTaskSpec[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(fixturesRoot, entry.name);
+    let spec: Record<string, unknown>;
+    try {
+      spec = JSON.parse(await readFile(path.join(dir, "task.json"), "utf8"));
+    } catch {
+      continue; // not a task dir
+    }
+    tasks.push({
+      id: String(spec.id ?? entry.name),
+      title: String(spec.title ?? entry.name),
+      prompt: String(spec.prompt ?? ""),
+      category: (spec.category as BenchTaskSpec["category"]) ?? "bugfix",
+      timeoutMs: Number(spec.timeoutMs ?? 120_000),
+      maxSteps: Number(spec.maxSteps ?? 10),
+      dir,
+    });
+  }
+  tasks.sort((a, b) => a.id.localeCompare(b.id));
+  if (ids && ids.length > 0) {
+    const want = new Set(ids);
+    const filtered = tasks.filter((t) => want.has(t.id));
+    const missing = ids.filter((id) => !filtered.some((t) => t.id === id));
+    if (missing.length > 0) {
+      throw new Error(`unknown bench task id(s): ${missing.join(", ")}`);
+    }
+    return filtered;
+  }
+  return tasks;
+}
+
+export async function runBench(
+  opts: BenchRunnerOptions,
+): Promise<BenchRunRecord> {
+  const runId = `bench-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+  const startedAt = new Date().toISOString();
+  const parallel = Math.max(1, opts.parallel ?? 3);
+  const offline = opts.offline ?? false;
+
+  let model: ResolvedModel | undefined;
+  let provider = "offline";
+  let modelId = "scripted-solver";
+  if (!offline) {
+    if (!hasApiKey()) {
+      throw new Error(
+        "no provider API key found — set GROQ_API_KEY (or another provider) or use --offline",
+      );
+    }
+    model = await resolveModel();
+    provider = model.provider;
+    modelId = model.modelId;
+  }
+
+  const live: LiveTask[] = opts.tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    category: t.category,
+    status: "queued",
+    tokensIn: 0,
+    tokensOut: 0,
+    cost: 0,
+  }));
+  let done = false;
+  const snapshot = (): LiveSnapshot => ({
+    runId,
+    startedAt,
+    provider,
+    model: modelId,
+    offline,
+    parallel,
+    tasks: live.map((t) => ({ ...t })),
+    done,
+  });
+  const publish = () => opts.onUpdate?.(snapshot());
+  publish();
+
+  const results: TaskResult[] = new Array(opts.tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < opts.tasks.length) {
+      const index = next++;
+      const task = opts.tasks[index]!;
+      const liveTask = live[index]!;
+      liveTask.status = "running";
+      publish();
+      const result = await runOneTask(task, {
+        runId,
+        workspaceRoot: opts.workspaceRoot,
+        offline,
+        model,
+        provider,
+        onProgress: (partial) => {
+          Object.assign(liveTask, partial);
+          publish();
+        },
+      });
+      results[index] = result;
+      liveTask.status = result.status;
+      liveTask.wallMs = result.wallMs;
+      liveTask.steps = result.steps;
+      liveTask.tokensIn = result.tokensIn;
+      liveTask.tokensOut = result.tokensOut;
+      liveTask.cost = result.cost;
+      liveTask.error = result.error;
+      publish();
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(parallel, opts.tasks.length) }, worker),
+  );
+
+  done = true;
+  publish();
+
+  return {
+    runId,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    provider,
+    model: modelId,
+    offline,
+    parallel,
+    taskIds: opts.tasks.map((t) => t.id),
+    tasks: results,
+    aggregates: computeAggregates(results),
+  };
+}
+
+type TaskRunContext = {
+  runId: string;
+  workspaceRoot: string;
+  offline: boolean;
+  model?: ResolvedModel;
+  provider: string;
+  onProgress: (partial: Partial<LiveTask>) => void;
+};
+
+async function runOneTask(
+  task: BenchTaskSpec,
+  ctx: TaskRunContext,
+): Promise<TaskResult> {
+  const started = Date.now();
+  const base: TaskResult = {
+    id: task.id,
+    title: task.title,
+    category: task.category,
+    status: "error",
+    wallMs: 0,
+    steps: 0,
+    toolCalls: {},
+    tokensIn: 0,
+    tokensOut: 0,
+    cost: 0,
+  };
+
+  let workdir: string | undefined;
+  try {
+    workdir = await mkdtemp(path.join(os.tmpdir(), `clai-bench-${task.id}-`));
+    await copyFixture(task.dir, workdir);
+
+    if (ctx.offline) {
+      await offlineSolve(task, workdir, base);
+    } else {
+      await agentSolve(task, workdir, ctx, base);
+    }
+
+    const check = await runCheck(workdir);
+    base.checkExitCode = check.exitCode;
+    base.checkOutput = check.output.slice(-2000);
+    if (base.status !== "timeout" && base.status !== "error") {
+      base.status = check.exitCode === 0 ? "pass" : "fail";
+    } else if (check.exitCode === 0) {
+      // Agent timed out / crashed but had already fixed the code — count it.
+      base.status = "pass";
+    }
+  } catch (err) {
+    base.status = "error";
+    base.error = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (workdir) {
+      await rm(workdir, { recursive: true, force: true, maxRetries: 3 }).catch(
+        () => {},
+      );
+    }
+  }
+
+  base.wallMs = Date.now() - started;
+  return base;
+}
+
+/** Copy the fixture, excluding the reference solution and the task manifest. */
+async function copyFixture(fixtureDir: string, dest: string): Promise<void> {
+  await cp(fixtureDir, dest, {
+    recursive: true,
+    filter: (src) => {
+      const name = path.basename(src);
+      return name !== "_solution" && name !== "task.json";
+    },
+  });
+}
+
+/**
+ * Scripted solver for `--offline` smoke runs: overlays `_solution/` onto the
+ * workdir when present so the check pipeline is testable without an API key.
+ * Tasks without a reference solution are left broken (honest fail).
+ */
+async function offlineSolve(
+  task: BenchTaskSpec,
+  workdir: string,
+  out: TaskResult,
+): Promise<void> {
+  out.status = "fail"; // provisional; check decides
+  const solutionDir = path.join(task.dir, "_solution");
+  try {
+    await access(solutionDir);
+  } catch {
+    out.error = undefined;
+    out.checkOutput =
+      "offline solver has no _solution/ for this task (expected fail)";
+    return;
+  }
+  await cp(solutionDir, workdir, { recursive: true, force: true });
+  out.steps = 1;
+  out.toolCalls = { patch: 1 };
+}
+
+async function agentSolve(
+  task: BenchTaskSpec,
+  workdir: string,
+  ctx: TaskRunContext,
+  out: TaskResult,
+): Promise<void> {
+  const trace = await createTraceWriter({
+    runId: `${ctx.runId}-${task.id}`,
+    dir: path.join(
+      ctx.workspaceRoot,
+      ".clai",
+      "bench",
+      "traces",
+      ctx.runId,
+      task.id,
+    ),
+    cwd: workdir,
+  });
+  out.tracePath = trace.path;
+
+  const sandbox = await createSandbox({
+    workspaceRoot: workdir,
+    autoApprove: true,
+  });
+
+  const toolCtx: ToolContext = {
+    workspaceRoot: workdir,
+    sandbox,
+    trace,
+    onEvent: (event) => {
+      if (event.type === "tool_call") {
+        out.toolCalls[event.tool] = (out.toolCalls[event.tool] ?? 0) + 1;
+      }
+    },
+  };
+
+  const price = PRICING[ctx.provider] ?? PRICING.default!;
+  const timedOut = Symbol("timeout");
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const loop = runAgentLoop({
+      ctx: toolCtx,
+      prompt: task.prompt,
+      maxSteps: task.maxSteps,
+      model: ctx.model,
+      trace,
+      onUsage: (usage) => {
+        out.tokensIn = usage.promptTokens;
+        out.tokensOut = usage.completionTokens;
+        out.cost =
+          (usage.promptTokens / 1e6) * price.inPerM +
+          (usage.completionTokens / 1e6) * price.outPerM;
+        ctx.onProgress({
+          tokensIn: out.tokensIn,
+          tokensOut: out.tokensOut,
+          cost: out.cost,
+        });
+      },
+    });
+    const raced = await Promise.race([
+      loop,
+      new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), task.timeoutMs);
+      }),
+    ]);
+    if (raced === timedOut) {
+      out.status = "timeout";
+      out.error = `agent exceeded ${task.timeoutMs}ms`;
+      await trace.close("timeout");
+    } else {
+      out.steps = raced.steps;
+      out.status = "fail"; // provisional; check decides
+      await trace.close("ok", { finishReason: raced.finishReason });
+    }
+  } catch (err) {
+    out.status = "error";
+    out.error = err instanceof Error ? err.message : String(err);
+    await trace.close("error", { message: out.error }).catch(() => {});
+  } finally {
+    if (timer) clearTimeout(timer);
+    await sandbox.dispose().catch(() => {});
+  }
+}
+
+function runCheck(
+  workdir: string,
+): Promise<{ exitCode: number; output: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      ["check.mjs"],
+      { cwd: workdir, timeout: CHECK_TIMEOUT_MS, windowsHide: true },
+      (err, stdout, stderr) => {
+        const code =
+          err && typeof (err as NodeJS.ErrnoException & { code?: unknown }).code === "number"
+            ? Number((err as { code: number }).code)
+            : err
+              ? 1
+              : 0;
+        resolve({ exitCode: code, output: `${stdout ?? ""}${stderr ?? ""}` });
+      },
+    );
+  });
+}

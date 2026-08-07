@@ -1,0 +1,8 @@
+{
+  "id": "implement-slugify",
+  "title": "Implement slugify from spec and tests",
+  "prompt": "Implement the slugify function in slugify.mjs. It currently throws 'not implemented'. The exact behavior is defined in SPEC.md and exercised by slugify.test.mjs. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 120000,
+  "maxSteps": 10
+}

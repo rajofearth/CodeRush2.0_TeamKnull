@@ -1,0 +1,8 @@
+{
+  "id": "fix-test-assertion",
+  "title": "Fix outdated test expectation for formatPrice",
+  "prompt": "Running `node price.test.mjs` fails, but the implementation in price.mjs is CORRECT — it matches SPEC.md exactly. The test file contains an outdated expected value. Update price.test.mjs so its expectations match SPEC.md and the tests pass. Do NOT change price.mjs. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "test",
+  "timeoutMs": 120000,
+  "maxSteps": 8
+}

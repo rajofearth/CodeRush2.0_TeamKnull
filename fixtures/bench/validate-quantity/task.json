@@ -1,0 +1,8 @@
+{
+  "id": "validate-quantity",
+  "title": "Add input validation to parseQuantity",
+  "prompt": "parseQuantity(input) in parse-quantity.mjs currently just calls Number() with no validation. Add validation so it: (1) accepts positive integers or strings containing only a positive integer (e.g. 5 or \"12\") and returns the number; (2) throws an Error (any Error subclass) for everything else — NaN inputs, non-integers like 2.5, zero, negatives, empty strings, null, undefined, booleans. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 120000,
+  "maxSteps": 10
+}

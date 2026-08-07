@@ -25,6 +25,7 @@ Usage:
   clai demo injection [--data-dir <path>]
   clai intake [--cwd <path>]
   clai memory list|get|set|delete|export
+  clai bench run|serve|list [--offline] [--parallel N] [--serve]
   clai --fixture <path>
   clai run "<prompt>" [--cwd <path>]
 
@@ -36,11 +37,13 @@ Options:
   intake                  Print repository intake map (JSON)
   --fixture <path>        Fixture workspace (default: fixtures/tiny-edit)
   run "<prompt>"          Soft agent loop via AI SDK (needs API key)
+  bench run               Parallel task subset (use --offline with no API key)
+  bench serve             Live metrics dashboard over history (port 4310)
   --cwd <path>            Workspace root; overrides a positional <folder>
   --                      Everything after it is a path, never a subcommand
 
 Workspace root:
-  A bare first word matching run/demo/intake/memory/help is a subcommand;
+  A bare first word matching run/demo/intake/memory/bench/help is a subcommand;
   anything else is the workspace folder. Use "clai -- demo" or
   "clai --cwd demo" to open a folder that shares a subcommand name.
   The resolved root governs tool cwd, .clai/traces, .clai memory, and intake.
@@ -63,6 +66,7 @@ Quick start:
   CLAI_NO_TUI=1 pnpm clai demo lsp
   pnpm clai intake --cwd fixtures/lsp-ts
   pnpm clai fixtures/tiny-edit
+  pnpm clai bench run --offline --serve
   pnpm clai run --cwd fixtures/tiny-edit
   pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
 `.trim();
@@ -93,6 +97,7 @@ const wantsDemo =
   (entry.subcommand === "demo" && !wantsInjectionDemo && !wantsLspDemo) ||
   (args.includes("--fixture") && !wantsLspDemo && entry.subcommand !== "demo");
 const wantsRun = entry.subcommand === "run";
+const wantsBench = entry.subcommand === "bench";
 /** Bare `clai` / `clai <folder>` — launch the interface on the resolved root. */
 const wantsLaunch =
   !wantsHelp &&
@@ -101,7 +106,8 @@ const wantsLaunch =
   !wantsInjectionDemo &&
   !wantsLspDemo &&
   !wantsDemo &&
-  !wantsRun;
+  !wantsRun &&
+  !wantsBench;
 
 async function resolveWorkspace(showNotes = true) {
   try {
@@ -125,6 +131,10 @@ if (wantsHelp) {
   const workspace = await resolveWorkspace(false);
   const { runMemoryCli } = await import("./memory/cli.js");
   await runMemoryCli(args.slice(1), workspace.dataDir);
+} else if (wantsBench) {
+  const workspace = await resolveWorkspace(false);
+  const { runBenchCli } = await import("./bench/index.js");
+  process.exitCode = await runBenchCli(args.slice(1), workspace.root);
 } else if (wantsIntake) {
   const workspace = await resolveWorkspace();
   const { scanIntakeMap } = await import("./tools/intake.js");
@@ -292,17 +302,18 @@ if (wantsHelp) {
       if (intakeSeed) return;
       bus.emit({ type: "status", label: "intake scan" });
       const intake = await intakeTool(ctx, {});
-      intakeSeed =
-        intake.ok && intake.map && typeof intake.map === "object"
-          ? String((intake.map as { issuePrompt?: string }).issuePrompt ?? "")
-          : "";
-      if (intakeSeed) {
-        bus.emit({
-          type: "assistant",
-          id: "intake-seed",
-          text: intakeSeed,
-          done: true,
-        });
+      if (intake.ok && intake.map && typeof intake.map === "object") {
+        const map = intake.map as {
+          summary?: string;
+          issuePrompt?: string;
+        };
+        // Prefer the product one-liner for chat context — never dump the
+        // bounded "propose a fix / run pnpm test" issue seed into the thread.
+        intakeSeed = map.summary
+          ? `Project: ${map.summary}.`
+          : String(map.issuePrompt ?? "").split(/\n/)[0] ?? "";
+      } else {
+        intakeSeed = "";
       }
       bus.emit({ type: "status", label: "ready", done: true });
     }
@@ -323,10 +334,19 @@ if (wantsHelp) {
           prompt,
           history,
           system: intakeSeed
-            ? `Repository intake notes:\n${intakeSeed}\n\nUse tools to explore.`
+            ? `Repository intake notes:\n${intakeSeed}`
             : undefined,
           trace,
           model,
+          onStatus: (status) =>
+            bus.emit({
+              type: "status",
+              label: status.label,
+              detail: status.detail,
+              level: status.level,
+              done: status.done,
+              sticky: status.sticky,
+            }),
           onText: (text) => {
             turn += 1;
             bus.emit({

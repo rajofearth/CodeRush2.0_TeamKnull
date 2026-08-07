@@ -24,6 +24,8 @@ export type ToolPlaneEvent = {
   detail?: string;
   input?: unknown;
   output?: unknown;
+  /** Cluster label for the UI (e.g. "subagent" for task sub-loop calls). */
+  group?: string;
 };
 
 export type ToolResult = {
