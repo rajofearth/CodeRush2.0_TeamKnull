@@ -346,9 +346,14 @@ function runPi(
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 
+    let sawJsonStdout = false;
     const onStdout = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      if (raw.length === 0 && text.length > 0) clearTimeout(stallTimer);
+      // Stall kill keys off JSON stdout only — stderr/otel noise must not cancel it.
+      if (!sawJsonStdout && text.trim().startsWith("{")) {
+        sawJsonStdout = true;
+        clearTimeout(stallTimer);
+      }
       raw += text;
       lineBuf += text;
       let nl: number;
@@ -359,7 +364,6 @@ function runPi(
     };
     const onStderr = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      if (raw.length === 0 && text.length > 0) clearTimeout(stallTimer);
       raw += text;
     };
     child.stdout?.on("data", onStdout);
@@ -371,7 +375,7 @@ function runPi(
     child.on("close", (code) => finish(code === 0, false));
 
     const stallTimer = setTimeout(() => {
-      if (settled || raw.length > 0) return;
+      if (settled || sawJsonStdout) return;
       stalled = true;
       killTree();
       finish(false, true);

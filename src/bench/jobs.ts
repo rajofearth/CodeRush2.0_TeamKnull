@@ -2,6 +2,8 @@
  * bench/jobs — in-process job runner for the dashboard control center.
  * Starts CLAI / offline / compare jobs, pushes LiveRunFeed + compare SSE.
  */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { loadEnvFiles } from "../adapter/env.js";
 import { runComparePi, type CompareResult } from "./compare-pi.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
@@ -137,6 +139,25 @@ export function createJobManager(opts: {
         return { ok: false as const, status: 400, error: "invalid kind" };
       }
       abort = new AbortController();
+      // Snapshot last finished card, then seed partial so reconnects never flash
+      // the previous winner while the new race is starting.
+      const restoreCompare =
+        req.kind === "compare" && latestCompare && latestCompare.partial !== true
+          ? latestCompare
+          : null;
+      if (req.kind === "compare") {
+        publishCompare({
+          at: new Date().toISOString(),
+          piProvider: process.env.PI_PROVIDER ?? "deepseek",
+          piModel: process.env.PI_MODEL ?? "deepseek-v4-flash",
+          pi: [],
+          clai: [],
+          piScore: { pass: 0, fail: 0, err: 0, total: 0, rate: 0 },
+          claiScore: { pass: 0, fail: 0, err: 0, total: 0, rate: 0 },
+          claiLabel: "starting…",
+          partial: true,
+        });
+      }
       setStatus({
         status: "running",
         kind: req.kind,
@@ -145,7 +166,29 @@ export function createJobManager(opts: {
       void run(req)
         .then(() => finish())
         .catch((err) => {
-          finish(err instanceof Error ? err.message : String(err));
+          void (async () => {
+            // Failed before a finished scorecard — don't leave SSE on empty seed.
+            if (req.kind === "compare" && latestCompare?.partial === true) {
+              if (restoreCompare) {
+                publishCompare(restoreCompare);
+              } else {
+                try {
+                  const diskPath = path.join(
+                    opts.workspaceRoot,
+                    ".clai",
+                    "bench",
+                    "compare-pi.json",
+                  );
+                  publishCompare(
+                    JSON.parse(await readFile(diskPath, "utf8")) as CompareResult,
+                  );
+                } catch {
+                  publishCompare(null);
+                }
+              }
+            }
+            finish(err instanceof Error ? err.message : String(err));
+          })();
         });
       return { ok: true as const };
     },

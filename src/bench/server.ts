@@ -90,12 +90,35 @@ export async function startBenchServer(
   });
 
   async function loadCompareFromDisk(): Promise<unknown | null> {
+    const mem = jobs.getCompare() as { at?: string; partial?: boolean } | null;
+    const job = jobs.status();
+    const compareInFlight =
+      job.kind === "compare" &&
+      (job.status === "running" || job.status === "stopping");
+    // While a compare job is in flight, serve memory only: partial seed/mid-race,
+    // or the final card emitted before jobs.finish() flips status to idle.
+    // jobs.start seeds partial before setStatus so this never flashes a prior finish.
+    if (compareInFlight) {
+      return mem;
+    }
     try {
       const comparePath = path.join(opts.store.benchDir, "compare-pi.json");
       await access(comparePath);
-      return JSON.parse(await readFile(comparePath, "utf8"));
+      const disk = JSON.parse(await readFile(comparePath, "utf8")) as {
+        at?: string;
+      };
+      if (
+        mem &&
+        mem.partial !== true &&
+        mem.at &&
+        disk?.at &&
+        Date.parse(mem.at) >= Date.parse(disk.at)
+      ) {
+        return mem;
+      }
+      return disk;
     } catch {
-      return jobs.getCompare();
+      return mem;
     }
   }
 

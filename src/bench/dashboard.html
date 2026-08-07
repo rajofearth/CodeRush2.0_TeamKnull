@@ -512,9 +512,15 @@
       );
     }).join("");
 
-    // Charts: defer to refreshChartsFromBestSource (SSE/load) so a pinned history
-    // run is not overwritten by live snapshots. Only paint here when not pinned.
-    if (!(historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length)) {
+    // Charts: defer to refreshChartsFromBestSource so pinned history / dual compare
+    // are not overwritten by merged live cards.
+    const compareLive =
+      snapshot.provider === "clai+pi" ||
+      (job.kind === "compare" && (job.status === "running" || job.status === "stopping"));
+    if (
+      !(historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length) &&
+      !compareLive
+    ) {
       renderCharts(tasks);
       refreshChartTitles("live");
     }
@@ -716,25 +722,9 @@
     if (!compare) return false;
     const claiRows = compare.clai || [];
     const piRows = compare.pi || [];
+    const scoringReady = isCompareScoringReady(compare);
     const claiM = harnessMetrics(claiRows);
     const piM = harnessMetrics(piRows);
-    const weights = sharedScoreWeights(claiM, piM);
-    const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
-    const tokCands = weights.bothTok
-      ? [claiM.avgTokens, piM.avgTokens].filter((v) => v != null && v > 0)
-      : [];
-    const costCands = weights.bothCost
-      ? [claiM.avgCost, piM.avgCost].filter((v) => v != null && v > 0)
-      : [];
-    const refs = {
-      bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
-      bestAvgTok: tokCands.length ? Math.min.apply(null, tokCands) : null,
-      bestAvgCost: costCands.length ? Math.min.apply(null, costCands) : null,
-    };
-    const claiScore = scoreHarness(claiM, refs, weights);
-    const piScore = scoreHarness(piM, refs, weights);
-    renderScoreboard(claiM, piM, claiScore, piScore);
-
     const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
     const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
     const ids = [...new Set(piRows.map((r) => r.id).concat(claiRows.map((r) => r.id)))];
@@ -743,7 +733,30 @@
 
     refreshChartTitles("compare");
     $("chart-pass").setAttribute("viewBox", "0 0 320 150");
-    $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
+    if (scoringReady) {
+      const weights = sharedScoreWeights(claiM, piM);
+      const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+      const tokCands = weights.bothTok
+        ? [claiM.avgTokens, piM.avgTokens].filter((v) => v != null && v > 0)
+        : [];
+      const costCands = weights.bothCost
+        ? [claiM.avgCost, piM.avgCost].filter((v) => v != null && v > 0)
+        : [];
+      const refs = {
+        bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
+        bestAvgTok: tokCands.length ? Math.min.apply(null, tokCands) : null,
+        bestAvgCost: costCands.length ? Math.min.apply(null, costCands) : null,
+      };
+      renderScoreboard(claiM, piM, scoreHarness(claiM, refs, weights), scoreHarness(piM, refs, weights));
+      $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
+    } else {
+      $("scoreboard").innerHTML =
+        '<div class="scoreboard-pending" style="color:var(--faint);font-size:12px;padding:8px 0">scoreboard when both finish</div>';
+      const formula = $("score-formula");
+      if (formula) formula.textContent = "Composite pending until both harnesses finish";
+      $("chart-pass").innerHTML =
+        '<text x="160" y="70" text-anchor="middle" fill="#808080" font-size="12">pass pies when both finish</text>';
+    }
     $("chart-dur").setAttribute("viewBox", "0 0 320 " + h);
     $("chart-dur").innerHTML = dualMetricBars(
       ids, (id) => claiMap[id]?.wallMs || 0, (id) => piMap[id]?.wallMs || 0,
@@ -1370,18 +1383,27 @@
           refreshChartsFromBestSource();
           if (snapshot.done && !wasDone) loadRuns();
         }
-        if (msg.type === "compare" && msg.compare) {
-          compare = msg.compare;
-          hydrateClaiTokens().then(() => {
+        if (msg.type === "compare") {
+          if (msg.compare) {
+            compare = msg.compare;
+            hydrateClaiTokens().then(() => {
+              renderCompare();
+              refreshChartsFromBestSource();
+            });
+          } else {
+            compare = null;
             renderCompare();
             refreshChartsFromBestSource();
-          });
+          }
         }
         if (msg.type === "job" && msg.job) {
           const wasRunning = job.status === "running" || job.status === "stopping";
           job = msg.job;
           renderJob();
-          if (wasRunning && job.status === "idle") loadRuns();
+          if (wasRunning && job.status === "idle") {
+            loadRuns();
+            loadCompare();
+          }
         }
       } catch { /* ignore bad frames */ }
     };
