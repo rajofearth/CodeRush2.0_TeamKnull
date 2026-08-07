@@ -6,6 +6,7 @@ import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { SandboxHandle } from "../sandbox/index.js";
+import type { ShellJobManager } from "../shell/jobs.js";
 import type { TraceWriter } from "../trace/index.js";
 
 export type ToolContext = {
@@ -13,6 +14,8 @@ export type ToolContext = {
   sandbox: SandboxHandle;
   trace?: TraceWriter;
   onEvent?: (event: ToolPlaneEvent) => void;
+  /** Session-scoped background shell jobs (bash_bg / bash_jobs / …). */
+  shellJobs?: ShellJobManager;
 };
 
 export type ToolPlaneEvent = {

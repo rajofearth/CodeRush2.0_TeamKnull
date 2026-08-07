@@ -44,9 +44,22 @@ export function previewForLog(toolName: string, result: ToolResult): unknown {
         stdout: capped.stdout,
         stderr: capped.stderr,
       };
+    case "bash_bg":
+    case "bash_jobs":
+    case "bash_output":
+    case "bash_kill":
+      return truncated ? { ...capped, truncated: true } : capped;
+    case "parallel":
+      return {
+        truncated,
+        count: capped.count,
+        ok: capped.ok,
+        results: capped.results,
+      };
     case "task":
       return {
         truncated: capped.truncated ?? result.truncated,
+        agent: result.agent,
         steps: result.steps,
         summary: result.summary ?? capped.summary,
         error: result.error,

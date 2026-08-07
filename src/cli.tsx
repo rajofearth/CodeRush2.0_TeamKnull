@@ -288,6 +288,11 @@ if (wantsHelp) {
       workspaceRoot: cwd,
       autoApprove: process.env.CLAI_AUTO_APPROVE === "1",
     });
+    const { ShellJobManager } = await import("./shell/jobs.js");
+    const shellJobs = new ShellJobManager({
+      workspaceRoot: cwd,
+      requestApproval: sandbox.requestApproval,
+    });
     const trace = await createTraceWriter({
       cwd,
       tracesDir: workspace.tracesDir,
@@ -307,6 +312,7 @@ if (wantsHelp) {
     const ctx = {
       workspaceRoot: cwd,
       sandbox,
+      shellJobs,
       trace,
       onEvent: ui.createToolPlaneBridge(bus),
     };
@@ -451,6 +457,7 @@ if (wantsHelp) {
       }
 
       await shell.waitUntilExit();
+      shellJobs.dispose();
       await trace.close("ok");
       await sandbox.dispose();
     } else {
@@ -473,6 +480,7 @@ if (wantsHelp) {
         await trace.close("fail");
         process.exitCode = 1;
       } finally {
+        shellJobs.dispose();
         await sandbox.dispose();
       }
     }

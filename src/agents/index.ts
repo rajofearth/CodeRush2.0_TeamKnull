@@ -5,6 +5,7 @@
 export {
   createTaskTool,
   runTaskSubagent,
+  type TaskAgentKind,
   type TaskModelHandle,
   type TaskRunResult,
 } from "./task.js";

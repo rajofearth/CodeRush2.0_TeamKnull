@@ -61,8 +61,10 @@ Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-impor
 
 | Path | Role |
 |------|------|
-| `src/adapter/` | Vercel AI SDK loop; pluggable providers (Cerebras default) |
-| `src/tools/` | grep (rg→Node), glob, read, edit, write, bash, LSP (defs/refs/diagnostics), repo intake; parallel read-only |
+| `src/adapter/` | Vercel AI SDK loop; pluggable providers (Cerebras default); multi-tool-call parallelism |
+| `src/tools/` | grep/glob/read/edit/write/bash, `parallel`, `bash_bg`/`bash_jobs`/`bash_output`/`bash_kill`, LSP, intake |
+| `src/agents/` | `task` subagents (`explore` read-only, `general` +bash); parallel via multiple tool calls |
+| `src/shell/` | Session-scoped background shell job manager |
 | `src/sandbox/` | `@anthropic-ai/sandbox-runtime` wrap + stub fallback; env scrub; approval hooks |
 | `src/memory/` | SQLite/JSON memory + CLI |
 | `src/context/` | Budgeted assemble + ablation gates |

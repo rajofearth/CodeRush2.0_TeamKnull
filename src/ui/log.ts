@@ -31,6 +31,11 @@ function toolVerb(tool: string): string {
     edit: "Edit",
     write: "Write",
     bash: "Bash",
+    bash_bg: "Bash bg",
+    bash_jobs: "Bash jobs",
+    bash_output: "Bash out",
+    bash_kill: "Bash kill",
+    parallel: "Parallel",
     task: "Task",
     repo_intake: "Intake",
     lsp_definition: "LSP def",
@@ -42,8 +47,19 @@ function toolVerb(tool: string): string {
 
 function toolSigil(tool: string): string {
   if (tool === "read") return glyph("sigilRead");
-  if (tool === "grep" || tool === "glob") return glyph("sigilSearch");
+  if (tool === "grep" || tool === "glob" || tool === "parallel") {
+    return glyph("sigilSearch");
+  }
   if (tool === "task") return glyph("sigilTask");
+  if (
+    tool === "bash" ||
+    tool === "bash_bg" ||
+    tool === "bash_jobs" ||
+    tool === "bash_output" ||
+    tool === "bash_kill"
+  ) {
+    return glyph("sigilDefault");
+  }
   return glyph("sigilDefault");
 }
 
