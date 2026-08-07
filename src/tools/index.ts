@@ -1,53 +1,39 @@
 /**
- * tools — Core tool plane: grep, glob, read, edit, write, bash.
+ * tools — Core tool plane: grep, glob, read, edit, write, bash, LSP, intake.
  * Parallel read-only helpers included. Paths confined to workspaceRoot.
  */
 
 import { execa } from "execa";
 import fg from "fast-glob";
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { tool } from "ai";
 import { z } from "zod";
-import type { SandboxHandle } from "../sandbox/index.js";
-import type { TraceWriter } from "../trace/index.js";
+import {
+  emitToolEvent,
+  pathExists,
+  resolveInWorkspace,
+  type ToolContext,
+  type ToolPlaneEvent,
+  type ToolResult,
+} from "./common.js";
+import {
+  lspDefinitionTool,
+  lspDiagnosticsTool,
+  lspReferencesTool,
+} from "./lsp.js";
+import { intakeTool } from "./intake.js";
 
-export type ToolContext = {
-  workspaceRoot: string;
-  sandbox: SandboxHandle;
-  trace?: TraceWriter;
-  onEvent?: (event: ToolPlaneEvent) => void;
-};
-
-export type ToolPlaneEvent = {
-  type: "tool_call" | "tool_result";
-  tool: string;
-  target?: string;
-  ok?: boolean;
-  durationMs?: number;
-  detail?: string;
-  input?: unknown;
-  output?: unknown;
-};
-
-export type ToolResult = {
-  ok: boolean;
-  tool: string;
-  [key: string]: unknown;
-};
-
-function resolveInWorkspace(root: string, relOrAbs: string): string {
-  const rootAbs = path.resolve(root);
-  const resolved = path.isAbsolute(relOrAbs)
-    ? path.resolve(relOrAbs)
-    : path.resolve(rootAbs, relOrAbs);
-  const rel = path.relative(rootAbs, resolved);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`path escapes workspace: ${relOrAbs}`);
-  }
-  return resolved;
-}
+export type { ToolContext, ToolPlaneEvent, ToolResult } from "./common.js";
+export { resolveInWorkspace, pathExists } from "./common.js";
+export {
+  lspDefinitionTool,
+  lspDiagnosticsTool,
+  lspReferencesTool,
+  probeLspAvailability,
+  disposeLspSessions,
+} from "./lsp.js";
+export { intakeTool, scanIntakeMap, type IntakeMap } from "./intake.js";
 
 async function emit(
   ctx: ToolContext,
@@ -55,15 +41,7 @@ async function emit(
   toolName: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const event: ToolPlaneEvent = {
-    type: phase,
-    tool: toolName,
-    ...payload,
-  } as ToolPlaneEvent;
-  ctx.onEvent?.(event);
-  if (ctx.trace) {
-    await ctx.trace.append(phase, { tool: toolName, ...payload });
-  }
+  await emitToolEvent(ctx, phase, toolName, payload);
 }
 
 /** Prefer ripgrep (`rg`); fall back to a simple Node walk+search. */
@@ -373,20 +351,24 @@ export async function bashTool(
   return out;
 }
 
-/** Parallel read-only discovery: grep / glob / read concurrently. */
+/** Parallel read-only discovery: grep / glob / read / LSP / intake concurrently. */
 export async function parallelReadOnly(
   ctx: ToolContext,
   jobs: Array<
     | { tool: "grep"; args: Parameters<typeof grepTool>[1] }
     | { tool: "glob"; args: Parameters<typeof globTool>[1] }
     | { tool: "read"; args: Parameters<typeof readTool>[1] }
+    | { tool: "lsp_diagnostics"; args: Parameters<typeof lspDiagnosticsTool>[1] }
+    | { tool: "repo_intake"; args: Parameters<typeof intakeTool>[1] }
   >,
 ): Promise<ToolResult[]> {
   return Promise.all(
     jobs.map((job) => {
       if (job.tool === "grep") return grepTool(ctx, job.args);
       if (job.tool === "glob") return globTool(ctx, job.args);
-      return readTool(ctx, job.args);
+      if (job.tool === "read") return readTool(ctx, job.args);
+      if (job.tool === "lsp_diagnostics") return lspDiagnosticsTool(ctx, job.args);
+      return intakeTool(ctx, job.args);
     }),
   );
 }
@@ -456,16 +438,41 @@ export function createAiTools(ctx: ToolContext) {
       }),
       execute: async (args) => bashTool(ctx, args),
     }),
+    lsp_definition: tool({
+      description:
+        "Go to definition via LSP (TypeScript Language Service; Python via pyright when installed). Lines are 1-based.",
+      parameters: z.object({
+        path: z.string(),
+        line: z.number().int().positive(),
+        character: z.number().int().nonnegative().optional(),
+      }),
+      execute: async (args) => lspDefinitionTool(ctx, args),
+    }),
+    lsp_references: tool({
+      description:
+        "Find references via LSP (TS Language Service / pyright). Lines are 1-based.",
+      parameters: z.object({
+        path: z.string(),
+        line: z.number().int().positive(),
+        character: z.number().int().nonnegative().optional(),
+      }),
+      execute: async (args) => lspReferencesTool(ctx, args),
+    }),
+    lsp_diagnostics: tool({
+      description:
+        "Get diagnostics for a file or the TS workspace (errors/warnings). Prefer after edits.",
+      parameters: z.object({
+        path: z.string().optional(),
+      }),
+      execute: async (args) => lspDiagnosticsTool(ctx, args),
+    }),
+    repo_intake: tool({
+      description:
+        "Thin repository intake map: languages, entrypoints, configs, test command hints, bounded issue prompt.",
+      parameters: z.object({
+        path: z.string().optional(),
+      }),
+      execute: async (args) => intakeTool(ctx, args),
+    }),
   };
 }
-
-export async function pathExists(p: string): Promise<boolean> {
-  try {
-    await access(p, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export { resolveInWorkspace };

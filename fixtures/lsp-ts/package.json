@@ -1,0 +1,9 @@
+{
+  "name": "lsp-ts-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --import tsx check.ts",
+    "test": "node --import tsx check.ts"
+  }
+}
