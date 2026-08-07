@@ -28,8 +28,10 @@ export type RetryOptions = {
 };
 
 const DEFAULT_MAX_RETRIES = 4;
-const DEFAULT_BASE_DELAY_MS = 1_000;
-const MAX_DELAY_MS = 30_000;
+/** Short base for transient 5xx; quota/429 uses QUOTA_BASE_DELAY_MS instead. */
+const DEFAULT_BASE_DELAY_MS = 2_000;
+const QUOTA_BASE_DELAY_MS = 60_000;
+const MAX_DELAY_MS = 120_000;
 
 type ErrorClass =
   | { kind: "retryable"; statusCode?: number; retryAfterMs?: number }
@@ -104,7 +106,6 @@ export async function withProviderRetry<T>(
   opts: RetryOptions = {},
 ): Promise<T> {
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
   let attempt = 0;
@@ -136,6 +137,7 @@ export async function withProviderRetry<T>(
           label: "rate limited — giving up",
           detail: `${maxRetries} retries exhausted`,
           level: "error",
+          sticky: true,
           done: true,
         });
         throw new ProviderError(
@@ -143,16 +145,37 @@ export async function withProviderRetry<T>(
           classified.statusCode,
         );
       }
-      const backoff = baseDelayMs * 2 ** (attempt - 1);
+      const message = err instanceof Error ? err.message : String(err);
+      const isQuota =
+        classified.statusCode === 429 ||
+        /quota exceeded|rate.?limit|resource.?exhausted|too many requests/i.test(
+          message,
+        );
+      // Quota/429: wait ~1 minute (not 1–8s thrashing). Transient 5xx: shorter.
+      const base = isQuota
+        ? Math.max(opts.baseDelayMs ?? 0, QUOTA_BASE_DELAY_MS)
+        : (opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS);
+      const backoff = base * 2 ** (attempt - 1);
       const delayMs = jitter(Math.max(backoff, classified.retryAfterMs ?? 0));
-      const label = `rate limited — retrying in ${Math.round(delayMs / 1000)}s (${attempt}/${maxRetries})`;
-      opts.onStatus?.({ label, level: "warn" });
+      const secs = Math.max(1, Math.round(delayMs / 1000));
+      const label = isQuota
+        ? `quota / rate limited — waiting ${secs}s then retry (${attempt}/${maxRetries})`
+        : `provider hiccup — retrying in ${secs}s (${attempt}/${maxRetries})`;
+      opts.onStatus?.({
+        label,
+        detail: isQuota
+          ? "Gemini/API quota hit — slowing down so we do not thrash the limit"
+          : undefined,
+        level: "warn",
+        sticky: true,
+      });
       await opts.onTrace?.({
         message: "provider_retry",
         attempt,
         maxRetries,
         delayMs,
         statusCode: classified.statusCode,
+        quota: isQuota,
       });
       await sleep(delayMs);
     }

@@ -32,13 +32,14 @@ export { BenchStore, LiveRunFeed } from "./store.js";
 export { startBenchServer, DEFAULT_BENCH_PORT } from "./server.js";
 
 const USAGE = `Usage:
+  clai bench [--serve] [--port N]          # alias for serve
   clai bench run [--offline] [--parallel N] [--tasks id,id] [--serve] [--port N]
   clai bench serve [--port N]
   clai bench list
 
 Options:
   --offline       Apply fixture _solution/ patches (no API key)
-  --parallel N    Concurrent tasks (default 3)
+  --parallel N    Concurrent tasks (default: 1 live / 3 offline)
   --tasks id,id   Subset of task ids
   --serve         With run: start live dashboard and keep it up
   --port N        Dashboard port (default ${DEFAULT_BENCH_PORT})
@@ -57,9 +58,12 @@ function hasFlag(args: string[], name: string): boolean {
   return args.includes(name) || args.some((a) => a.startsWith(`${name}=`));
 }
 
-function parseParallel(args: string[]): number {
+function parseParallel(args: string[], offline: boolean): number {
   const raw = flagValue(args, "--parallel");
-  if (raw == null) return 3;
+  if (raw == null) {
+    // Live Gemini quotas die under parallel=3; default serial for live runs.
+    return offline ? 3 : 1;
+  }
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) {
     throw new Error(`invalid --parallel value: ${raw}`);
@@ -112,21 +116,28 @@ function waitForInterrupt(): Promise<void> {
 
 function printRunSummary(record: Awaited<ReturnType<typeof runBench>>): void {
   const a = record.aggregates;
+  const tokens = (Number(a.totalTokensIn) || 0) + (Number(a.totalTokensOut) || 0);
+  const cost = Number.isFinite(Number(a.totalCost)) ? Number(a.totalCost) : 0;
   console.log("");
   console.log(
     `bench ${record.runId}  ${a.passed}/${a.total} pass` +
       `  (${Math.round(a.passRate * 100)}%)` +
       `  wall=${a.totalWallMs}ms` +
-      `  tokens=${a.totalTokensIn + a.totalTokensOut}` +
-      `  cost=$${a.totalCost.toFixed(4)}` +
+      `  tokens=${tokens}` +
+      `  cost=$${cost.toFixed(4)}` +
       (record.offline ? "  [offline]" : `  [${record.provider}/${record.model}]`),
   );
   for (const t of record.tasks) {
     const mark =
       t.status === "pass" ? "PASS" : t.status === "fail" ? "FAIL" : t.status.toUpperCase();
+    const err =
+      t.error && /quota|rate.?limit|429/i.test(t.error)
+        ? "  [quota/rate-limit]"
+        : t.error
+          ? `  ${t.error.slice(0, 120)}`
+          : "";
     console.log(
-      `  ${mark.padEnd(7)} ${t.id.padEnd(22)} ${String(t.wallMs).padStart(6)}ms` +
-        (t.error ? `  ${t.error}` : ""),
+      `  ${mark.padEnd(7)} ${t.id.padEnd(22)} ${String(t.wallMs).padStart(6)}ms` + err,
     );
   }
 }
@@ -140,12 +151,25 @@ export async function runBenchCli(
   args: string[],
   workspaceRoot: string,
 ): Promise<number> {
-  const command = args[0];
+  // `clai bench --serve` / bare flags → normalize to a subcommand
+  let argv = args;
+  if (argv[0]?.startsWith("-")) {
+    if (hasFlag(argv, "--serve") || hasFlag(argv, "--port")) {
+      argv = ["serve", ...argv.filter((a) => a !== "--serve")];
+    } else if (
+      hasFlag(argv, "--offline") ||
+      hasFlag(argv, "--tasks") ||
+      hasFlag(argv, "--parallel")
+    ) {
+      argv = ["run", ...argv];
+    }
+  }
+  const command = argv[0];
   if (
     !command ||
     command === "--help" ||
     command === "-h" ||
-    hasFlag(args, "--help")
+    hasFlag(argv, "--help")
   ) {
     console.log(USAGE);
     return command && command !== "--help" && command !== "-h" ? 1 : 0;
@@ -172,7 +196,7 @@ export async function runBenchCli(
     }
 
     if (command === "serve") {
-      const port = parsePort(args);
+      const port = parsePort(argv);
       const handle = await startBenchServer({ store, live, port });
       console.log(`bench dashboard → ${handle.url}`);
       console.log("Ctrl+C to stop.");
@@ -182,11 +206,11 @@ export async function runBenchCli(
     }
 
     if (command === "run") {
-      const offline = hasFlag(args, "--offline");
-      const parallel = parseParallel(args);
-      const taskIds = parseTaskIds(args);
-      const wantServe = hasFlag(args, "--serve");
-      const port = parsePort(args);
+      const offline = hasFlag(argv, "--offline");
+      const parallel = parseParallel(argv, offline);
+      const taskIds = parseTaskIds(argv);
+      const wantServe = hasFlag(argv, "--serve");
+      const port = parsePort(argv);
 
       const tasks = await loadBenchTasks(fixturesRoot, taskIds);
       if (!tasks.length) {
