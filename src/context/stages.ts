@@ -1,13 +1,11 @@
 /**
- * context/stages — glass-box observability types for context assembly.
+ * context/stages — glass-box observability types for ContextManager.assemble().
  *
- * Nine named stages: prompt_synthesis (raw input → ContextRequest) then the
- * eight collect → fingerprint → label → budget stages inside assemble().
- * Events are append-only JSONL via TraceWriter.
+ * Eight named stages map onto the real collect → fingerprint → label → budget
+ * work inside assemble(). Events are append-only JSONL via TraceWriter.
  */
 
 export const CONTEXT_STAGES = [
-  "prompt_synthesis",
   "query_planner",
   "structural_retrieval",
   "memory_retrieval",
@@ -36,18 +34,6 @@ export interface ContextStageEvent {
 export type ContextStageEmitter = (event: ContextStageEvent) => void;
 
 /** Stage-specific detail shapes (documented for glass consumers). */
-export type PromptSynthesisDetail = {
-  rawInput: string;
-  synthesizedQuery: {
-    taskId: string;
-    agentRole: string;
-    targetFragments: string[];
-    freeTextQuery: string;
-    tokenBudget: number;
-  };
-  extractionNotes: string[];
-};
-
 export type QueryPlannerDetail = {
   tiers: string[];
   targetFragments: string[];

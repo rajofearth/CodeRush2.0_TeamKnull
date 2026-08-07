@@ -17,7 +17,7 @@ export type TraceEventType =
   | "approval"
   | "error"
   | "info"
-  /** ContextManager.assemble() + prompt_synthesis stage start/complete — consumed by `clai glass`. */
+  /** ContextManager.assemble() stage start/complete — consumed by `clai glass`. */
   | "context_stage";
 
 export type TraceEvent = {

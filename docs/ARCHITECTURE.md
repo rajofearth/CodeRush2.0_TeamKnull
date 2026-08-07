@@ -271,7 +271,6 @@ src/
 │   └── jobs.ts          # Session-scoped ShellJobManager (bg processes)
 ├── context/
 │   ├── index.ts         # ContextManager.assemble() + ablation gates + stage emit
-│   ├── synthesize.ts    # stage 0: raw input → ContextRequest (prompt_synthesis)
 │   ├── stages.ts        # context_stage types + flag heuristics
 │   └── compact.ts       # Deterministic history compaction
 ├── memory/
@@ -547,11 +546,10 @@ Parallel observability surface — a **second terminal process** that tails the 
 | `--follow-latest` (default when no `--run`) | Tail the most recently modified run under `.clai/traces/`; auto-switch when a new run starts |
 | `--run <runId>` | Pin to a run and replay from the start (safe demo without a live LLM call) |
 
-Stages (in order): `prompt_synthesis` → `query_planner` → `structural_retrieval` → `memory_retrieval` → `relevance_scoring` → `stale_check` → `injection_scan` → `token_budget` → `summarizer`.
+Stages (in order): `query_planner` → `structural_retrieval` → `memory_retrieval` → `relevance_scoring` → `stale_check` → `injection_scan` → `token_budget` → `summarizer`.
 
 | Stage | Detail payload (complete) |
 |-------|---------------------------|
-| `prompt_synthesis` (stage 0) | `{ rawInput, synthesizedQuery: { taskId, agentRole, targetFragments, freeTextQuery, tokenBudget }, extractionNotes }` — minted `requestId` is the correlation origin for the rest of the pipeline |
 | `query_planner` | `{ tiers, targetFragments, agentRole }` |
 | `structural_retrieval` | `{ fragmentsFound, edgesExpanded }` |
 | `memory_retrieval` | `{ tiersQueried, itemsFound, excludedInvalidated }` |
@@ -561,7 +559,7 @@ Stages (in order): `prompt_synthesis` → `query_planner` → `structural_retrie
 | `token_budget` | `{ budget, included, summarized, excluded, tokensUsed }` |
 | `summarizer` | `{ demoted }` |
 
-Stage 0 is emitted by `synthesizeContextRequest()` ahead of `ContextManager.assemble()`; stages 1–8 emit from assemble(). Reusable tailer: `src/trace/tail.ts`. Ink entry: `src/ui-glass/` (reuses `src/ui/theme.ts`). The glass pane renders `prompt_synthesis` as a two-line panel (raw › synthesized tags) above the remaining pipeline rows.
+Reusable tailer: `src/trace/tail.ts`. Ink entry: `src/ui-glass/` (reuses `src/ui/theme.ts`).
 
 ---
 

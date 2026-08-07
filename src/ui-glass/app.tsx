@@ -41,139 +41,6 @@ function stageColor(state: StageRowState): string | undefined {
   return resolve("state.pass");
 }
 
-function truncateEllipsis(s: string, max: number): string {
-  const one = s.replace(/\s+/g, " ").trim();
-  if (max < 2 || one.length <= max) return one;
-  return `${one.slice(0, max - 1)}…`;
-}
-
-function Tag({ label }: { label: string }) {
-  return <Text color={resolve("brand.wordmark")}>[{label}]</Text>;
-}
-
-function PromptSynthesisPanel({
-  row,
-  frame,
-  width,
-}: {
-  row: StageRow;
-  frame: number;
-  width: number;
-}) {
-  const color = stageColor(row.state);
-  const icon = stageIcon(row.state, frame);
-  const muted = resolve("text.muted");
-  const primary = resolve("text.primary");
-  const rawInput = String(row.detail.rawInput ?? "");
-  const sq =
-    row.detail.synthesizedQuery &&
-    typeof row.detail.synthesizedQuery === "object"
-      ? (row.detail.synthesizedQuery as Record<string, unknown>)
-      : {};
-  const agentRole = String(sq.agentRole ?? "");
-  const freeText = String(sq.freeTextQuery ?? "");
-  const fragments = Array.isArray(sq.targetFragments)
-    ? (sq.targetFragments as string[])
-    : [];
-  const notes = Array.isArray(row.detail.extractionNotes)
-    ? (row.detail.extractionNotes as string[]).slice(0, 3)
-    : [];
-
-  const dur =
-    row.state === "pass" || row.state === "flagged"
-      ? row.durationMs != null
-        ? `${row.durationMs}ms`
-        : ""
-      : row.state === "working"
-        ? "…"
-        : "";
-
-  // Approximate content width for truncation (icon + label + padding).
-  const lineWidth = Math.max(24, width - 4);
-
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Box width={2}>
-          <Text color={color}>{icon}</Text>
-        </Box>
-        <Box width={22}>
-          <Text
-            color={row.state === "idle" ? muted : primary}
-            dimColor={row.state === "idle" ? faintUsesDim() : false}
-          >
-            prompt_synthesis
-          </Text>
-        </Box>
-        <Box flexGrow={1}>
-          <Text color={muted} dimColor={faintUsesDim()}>
-            stage 0 · raw → ContextRequest
-          </Text>
-        </Box>
-        <Box width={7} justifyContent="flex-end">
-          <Text color={muted} dimColor={faintUsesDim()}>
-            {dur}
-          </Text>
-        </Box>
-      </Box>
-
-      {row.state === "idle" ? (
-        <Box marginLeft={2}>
-          <Text color={muted} dimColor={faintUsesDim()}>
-            —
-          </Text>
-        </Box>
-      ) : (
-        <Box flexDirection="column" marginLeft={2}>
-          <Text color={muted} dimColor={faintUsesDim()}>
-            › {truncateEllipsis(rawInput || "…", lineWidth - 2)}
-          </Text>
-          {(row.state === "pass" ||
-            row.state === "flagged" ||
-            agentRole ||
-            fragments.length > 0 ||
-            freeText) && (
-            <Box>
-              {agentRole ? (
-                <>
-                  <Tag label={agentRole} />
-                  <Text> </Text>
-                </>
-              ) : null}
-              {fragments.map((f) => (
-                <React.Fragment key={f}>
-                  <Tag label={truncateEllipsis(f, 28)} />
-                  <Text> </Text>
-                </React.Fragment>
-              ))}
-              <Text color={primary}>
-                {truncateEllipsis(
-                  freeText || rawInput,
-                  Math.max(
-                    12,
-                    lineWidth -
-                      2 -
-                      (agentRole ? agentRole.length + 3 : 0) -
-                      fragments.reduce(
-                        (n, f) => n + Math.min(f.length, 28) + 3,
-                        0,
-                      ),
-                  ),
-                )}
-              </Text>
-            </Box>
-          )}
-          {notes.map((note) => (
-            <Text key={note} color={muted} dimColor={faintUsesDim()}>
-              · {truncateEllipsis(note, lineWidth - 2)}
-            </Text>
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
 function StageRowView({
   row,
   frame,
@@ -233,7 +100,6 @@ function GlassApp({
   const { exit } = useApp();
   const [snap, setSnap] = useState<GlassState>(getState);
   const [frame, setFrame] = useState(0);
-  const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
 
   useInput((input, key) => {
     if (key.escape || input === "q" || (key.ctrl && input === "c")) {
@@ -245,7 +111,6 @@ function GlassApp({
     const id = setInterval(() => {
       setSnap(getState());
       setFrame((f) => f + 1);
-      setCols(process.stdout.columns ?? 80);
     }, FRAME_MS);
     return () => clearInterval(id);
   }, [getState]);
@@ -254,11 +119,6 @@ function GlassApp({
   const muted = resolve("text.muted");
   const primary = resolve("text.primary");
   const brand = resolve("brand.wordmark");
-
-  const synthesisRow = snap.stages.find((r) => r.stage === "prompt_synthesis");
-  const pipelineRows = snap.stages.filter(
-    (r) => r.stage !== "prompt_synthesis",
-  );
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={0}>
@@ -306,14 +166,7 @@ function GlassApp({
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
-          {synthesisRow ? (
-            <PromptSynthesisPanel
-              row={synthesisRow}
-              frame={frame}
-              width={cols}
-            />
-          ) : null}
-          {pipelineRows.map((row) => (
+          {snap.stages.map((row) => (
             <StageRowView key={row.stage} row={row} frame={frame} />
           ))}
         </Box>
