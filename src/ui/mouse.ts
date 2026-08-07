@@ -3,11 +3,10 @@
  *
  * Owns the alternate screen buffer (?1049h/?1049l) and SGR mouse reporting
  * (?1002h?1006h), with teardown guaranteed on exit, SIGINT/SIGTERM, and
- * uncaught exceptions. The stdin filter strips mouse bytes before Ink's
- * useInput can see them, buffering fragmented sequences (ConPTY chops them).
- * Hit testing computes absolute boxes by walking stock Ink's yoga tree —
- * no fork needed. `CLAI_MOUSE=0` disables the whole layer; a terminal that
- * never sends mouse bytes simply never produces events.
+ * uncaught exceptions. Mouse bytes are stripped from stdin before Ink's
+ * useInput can see them. ConPTY often fragments sequences and sometimes
+ * surfaces them as strings — both shapes are handled. `CLAI_MOUSE=0`
+ * disables the whole layer.
  */
 
 import type { DOMElement } from "ink";
@@ -92,20 +91,50 @@ export type MouseEvent = {
 const ESC = 0x1b;
 
 /**
- * Buffering parser for SGR mouse reports (`ESC [ < b ; x ; y M|m`).
- * `feed(chunk)` returns the bytes that were NOT mouse reports, so the caller
- * can forward them to Ink. Fragments that could still become a mouse report
- * are held until the next chunk decides; anything disproven is flushed.
+ * Strip leaked mouse CSI junk that already made it into a text field
+ * (e.g. `[<0;54;50M` after ESC was eaten). Safe to run on every keystroke.
+ */
+export function scrubMouseJunk(text: string): string {
+  return text
+    .replace(/\x1b\[<\d+;\d+;\d+[Mm]/g, "")
+    .replace(/\[<\d+;\d+;\d+[Mm]/g, "")
+    .replace(/\x1b\[M[\s\S]{0,3}/g, "");
+}
+
+/**
+ * Buffering parser for SGR (`ESC [ < b ; x ; y M|m`) and X11
+ * (`ESC [ M Cb Cx Cy`) mouse reports. `feed` returns the bytes that were NOT
+ * mouse reports. Incomplete mouse CSI is held — never forwarded as ESC alone,
+ * which is what previously leaked `[<0;54;50M` into the prompt.
  */
 export function createSgrMouseParser(
   onEvent: (event: MouseEvent) => void,
 ): { feed: (chunk: Buffer) => Buffer } {
   let held = Buffer.alloc(0);
 
-  // Matches a complete report at the start of the buffer.
-  const complete = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
-  // Matches a strict prefix of a report (could complete with more bytes).
-  const prefix = /^\x1b(\[(<(\d+(;(\d+(;(\d+)?)?)?)?)?)?)?$/;
+  const sgrComplete = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
+  // Hold any ESC [ < … that has not yet seen its terminating M/m.
+  const sgrHold = /^\x1b\[</;
+  // X11: ESC [ M + 3 bytes
+  const x11Complete = /^\x1b\[M([\s\S]{3})/;
+  const x11Hold = /^\x1b(\[M?)?$/;
+  // Generic CSI that is clearly NOT mouse — forward once we see a final byte,
+  // but if it starts with ESC [ < treat as mouse-hold forever until M/m/discard.
+
+  function emitSgr(raw: number, x: number, y: number, isRelease: boolean): void {
+    const shift = (raw & 4) !== 0;
+    const motion = (raw & 32) !== 0;
+    const base = raw & ~(4 | 8 | 16);
+    let kind: MouseEventKind;
+    if ((base & 64) !== 0) {
+      kind = (base & 1) !== 0 ? "wheelDown" : "wheelUp";
+    } else if (motion) {
+      kind = "move";
+    } else {
+      kind = isRelease ? "release" : "press";
+    }
+    onEvent({ kind, x, y, button: base & 3, shift });
+  }
 
   return {
     feed(chunk: Buffer): Buffer {
@@ -117,40 +146,79 @@ export function createSgrMouseParser(
       while (pos < data.length) {
         const escAt = data.indexOf(ESC, pos);
         if (escAt === -1) {
-          out.push(data.subarray(pos));
+          // Also scrub bare `[<b;x;yM` fragments (ESC already lost upstream).
+          const rest = data.subarray(pos);
+          const scrubbed = Buffer.from(
+            scrubMouseJunk(rest.toString("latin1")),
+            "latin1",
+          );
+          if (scrubbed.length) out.push(scrubbed);
           break;
         }
-        if (escAt > pos) out.push(data.subarray(pos, escAt));
+        if (escAt > pos) {
+          const mid = data.subarray(pos, escAt);
+          const scrubbed = Buffer.from(
+            scrubMouseJunk(mid.toString("latin1")),
+            "latin1",
+          );
+          if (scrubbed.length) out.push(scrubbed);
+        }
 
         const tail = data.subarray(escAt).toString("latin1");
-        const match = complete.exec(tail);
-        if (match) {
-          const raw = Number(match[1]);
-          const x = Number(match[2]) - 1;
-          const y = Number(match[3]) - 1;
-          const isRelease = match[4] === "m";
-          const shift = (raw & 4) !== 0;
-          const motion = (raw & 32) !== 0;
-          const base = raw & ~(4 | 8 | 16); // strip shift/meta/ctrl modifiers
-          let kind: MouseEventKind;
-          if ((base & 64) !== 0) {
-            kind = (base & 1) !== 0 ? "wheelDown" : "wheelUp";
-          } else if (motion) {
-            kind = "move";
-          } else {
-            kind = isRelease ? "release" : "press";
-          }
-          onEvent({ kind, x, y, button: base & 3, shift });
-          pos = escAt + match[0].length;
+
+        const sgr = sgrComplete.exec(tail);
+        if (sgr) {
+          emitSgr(
+            Number(sgr[1]),
+            Number(sgr[2]) - 1,
+            Number(sgr[3]) - 1,
+            sgr[4] === "m",
+          );
+          pos = escAt + sgr[0].length;
           continue;
         }
-        if (prefix.test(tail)) {
-          // Possibly a fragmented mouse report — hold it for the next chunk.
+
+        const x11 = x11Complete.exec(tail);
+        if (x11) {
+          // X11 button/coords are encoded as byte = value + 32.
+          const cb = x11[1]!.charCodeAt(0) - 32;
+          const cx = x11[1]!.charCodeAt(1) - 32 - 1;
+          const cy = x11[1]!.charCodeAt(2) - 32 - 1;
+          emitSgr(cb, cx, cy, false);
+          pos = escAt + 6; // ESC [ M + 3
+          continue;
+        }
+
+        // Incomplete mouse report — hold, do NOT forward ESC alone.
+        if (sgrHold.test(tail) || x11Hold.test(tail) || /^\x1b\[?$/.test(tail)) {
+          // Cap hold size so a stuck sequence cannot grow forever; if it looks
+          // abandoned (no progress toward M/m and too long), drop it.
+          if (tail.length > 64 && !sgrHold.test(tail.slice(0, 4))) {
+            pos = escAt + 1;
+            continue;
+          }
+          if (tail.length > 96) {
+            // Drop the stuck ESC and keep scanning — never leak it.
+            pos = escAt + 1;
+            continue;
+          }
           held = Buffer.from(data.subarray(escAt));
           break;
         }
-        // Some other escape sequence: forward the ESC and move on.
-        out.push(data.subarray(escAt, escAt + 1));
+
+        // Some other escape: if it is CSI ending in a letter, skip the whole
+        // CSI so we do not drip it into the prompt. Otherwise forward ESC.
+        const csi = /^\x1b\[[0-9;?]*([A-Za-z])/.exec(tail);
+        if (csi) {
+          pos = escAt + csi[0].length;
+          continue;
+        }
+        if (/^\x1b\[[0-9;?]*$/.test(tail)) {
+          held = Buffer.from(data.subarray(escAt));
+          break;
+        }
+
+        // Unknown ESC — drop the ESC byte (safer than leaking into the prompt).
         pos = escAt + 1;
       }
 
@@ -273,33 +341,38 @@ export function armMouse(options: {
     }
   });
 
-  stdout.write("\x1b[?1002h\x1b[?1006h");
+  // Button-event tracking + SGR coords. Avoid 1003 (all-motion) — noisy and
+  // more likely to fragment under ConPTY.
+  stdout.write("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
 
+  // Intercept every data emit (string or Buffer). Never forward ESC alone —
+  // that is what previously leaked `[<0;54;50M` into the prompt.
   const originalEmit = stdin.emit.bind(stdin);
   const filteredEmit: typeof stdin.emit = (event: string | symbol, ...args: unknown[]) => {
     if (event === "data") {
       const raw = args[0];
-      const wasString = typeof raw === "string";
-      const buf = wasString ? Buffer.from(raw as string, "utf8") : (raw as Buffer);
+      const buf = typeof raw === "string"
+        ? Buffer.from(raw, "latin1")
+        : Buffer.isBuffer(raw)
+          ? raw
+          : Buffer.from(String(raw), "latin1");
       const rest = parser.feed(buf);
       if (rest.length === 0) return true;
-      return originalEmit("data", wasString ? rest.toString("utf8") : rest);
+      return originalEmit("data", rest);
     }
     return originalEmit(event as string, ...(args as [unknown]));
   };
-  // eslint-disable-next-line no-param-reassign
   (stdin as NodeJS.ReadStream & { emit: typeof stdin.emit }).emit = filteredEmit;
 
   let done = false;
   const restore = () => {
     if (done) return;
     done = true;
-    stdout.write("\x1b[?1002l\x1b[?1006l");
+    stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l");
     (stdin as NodeJS.ReadStream & { emit: typeof stdin.emit }).emit = originalEmit;
   };
   const unregister = registerRestore(() => {
-    // On crash paths only the terminal mode matters; skip the emit swap.
-    if (!done) stdout.write("\x1b[?1002l\x1b[?1006l");
+    if (!done) stdout.write("\x1b[?1006l\x1b[?1002l\x1b[?1000l");
   });
 
   return () => {
