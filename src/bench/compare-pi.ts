@@ -8,8 +8,8 @@
  *   COMPARE_CLAI=0 pnpm exec tsx src/bench/compare-pi.ts   # history CLAI only
  *
  * Defaults:
- *   fresh CLAI + pi in parallel, COMPARE_PARALLEL=8 (all 8 tasks concurrently
- *   per harness → up to 16 in-flight API calls)
+ *   fresh CLAI + pi in parallel; COMPARE_PARALLEL=8 means sideParallel=4 each
+ *   (peak ~8 in-flight). Override with COMPARE_SIDE_PARALLEL.
  *   PI_PROVIDER=deepseek  PI_MODEL=deepseek-v4-flash
  *
  * Pi tokens: `--mode json` sums `message_end` usage
@@ -62,6 +62,10 @@ export type CompareResult = {
   piScore: CompareScore;
   claiScore: CompareScore;
   claiLabel?: string;
+  /** Requested COMPARE_PARALLEL (before race split). */
+  compareParallel?: number;
+  /** Effective per-harness worker count during the race. */
+  sideParallel?: number;
   /**
    * True while either harness is still running. Dashboard keeps the task table
    * live but freezes winner/composite until this is false (phase "done").
@@ -281,16 +285,22 @@ function runPi(
     let lineBuf = "";
     const usage = emptyPiUsage();
     let settled = false;
+    let stalled = false;
+    const stallMs = Math.max(
+      10_000,
+      Number(process.env.COMPARE_PI_STALL_MS ?? 45_000),
+    );
     const finish = (ok: boolean, timedOut: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(stallTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       if (lineBuf.trim()) ingestPiJsonLine(usage, lineBuf);
       const totals = piUsageTotals(usage, opts.provider);
       const textTail = usage.textParts.join("\n").slice(-2000);
+      const jsonLines = raw.split(/\r?\n/).filter((l) => l.trim().startsWith("{")).length;
       if (process.env.COMPARE_PI_DEBUG === "1") {
-        const jsonLines = raw.split(/\r?\n/).filter((l) => l.trim().startsWith("{")).length;
         const safeArgs = args.map((a, i) =>
           args[i - 1] === "--api-key" ? "***" : a.length > 80 ? `${a.slice(0, 77)}…` : a,
         );
@@ -301,10 +311,18 @@ function runPi(
         );
         console.error(`[pi-usage] argv=${JSON.stringify(safeArgs)}`);
       }
+      let output = textTail || raw.slice(-4000);
+      if (stalled && !output.trim()) {
+        output = `stall · 0 bytes after ${stallMs}ms (no pi JSON — hung or rate-limited)`;
+      } else if ((timedOut || stalled) && output.trim()) {
+        output = `${output} · jsonLines=${jsonLines} raw=${raw.length}`;
+      } else if (timedOut && !output.trim()) {
+        output = `timed out · jsonLines=0 raw=0 (no pi JSON)`;
+      }
       resolve({
         ok,
-        timedOut,
-        output: textTail || raw.slice(-4000),
+        timedOut: timedOut || stalled,
+        output,
         wallMs: Date.now() - started,
         tokensIn: totals.tokensIn,
         tokensOut: totals.tokensOut,
@@ -330,6 +348,7 @@ function runPi(
 
     const onStdout = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (raw.length === 0 && text.length > 0) clearTimeout(stallTimer);
       raw += text;
       lineBuf += text;
       let nl: number;
@@ -340,6 +359,7 @@ function runPi(
     };
     const onStderr = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (raw.length === 0 && text.length > 0) clearTimeout(stallTimer);
       raw += text;
     };
     child.stdout?.on("data", onStdout);
@@ -349,6 +369,13 @@ function runPi(
       finish(false, false);
     });
     child.on("close", (code) => finish(code === 0, false));
+
+    const stallTimer = setTimeout(() => {
+      if (settled || raw.length > 0) return;
+      stalled = true;
+      killTree();
+      finish(false, true);
+    }, stallMs);
 
     const timer = setTimeout(() => {
       killTree();
@@ -403,13 +430,18 @@ async function runPiTask(
       };
     }
     if (pi.timedOut) {
+      const empty = !pi.output.trim();
       return {
         id: task.id,
         harness: "pi",
         status: "error",
         wallMs: pi.wallMs,
         detail: truncateDetail(
-          `timed out after ${pi.wallMs}ms · ${pi.output.slice(-800)}`,
+          empty
+            ? `timed out after ${pi.wallMs}ms · no pi JSON (hung / rate-limited)`
+            : pi.output.startsWith("stall")
+              ? pi.output
+              : `timed out after ${pi.wallMs}ms · ${pi.output.slice(-800)}`,
         ),
         ...usage,
       };
@@ -565,6 +597,19 @@ function buildCompareLiveSnapshot(
     const claiStatus = c?.status ?? "queued";
     const status =
       statusRank(claiStatus) >= statusRank(piStatus) ? claiStatus : piStatus;
+    // Never attach CLAI step counts to a pi-driven error/running card.
+    const steps =
+      status === claiStatus && (claiStatus === "running" || claiStatus === "pass" || claiStatus === "fail")
+        ? c?.steps
+        : undefined;
+    const notes = [
+      `clai=${claiStatus}`,
+      `pi=${piStatus}`,
+      c?.error ? `claiErr=${c.error}` : "",
+      p?.detail ? `piErr=${p.detail}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     const tokensIn = (Number(c?.tokensIn) || 0) + (Number(p?.tokensIn) || 0);
     const tokensOut = (Number(c?.tokensOut) || 0) + (Number(p?.tokensOut) || 0);
     const cost = (Number(c?.cost) || 0) + (Number(p?.cost) || 0);
@@ -575,11 +620,11 @@ function buildCompareLiveSnapshot(
       category: t.category,
       status: status as LiveTask["status"],
       wallMs,
-      steps: c?.steps,
+      steps,
       tokensIn,
       tokensOut,
       cost,
-      error: c?.error || p?.detail,
+      error: notes,
     };
   });
   return {
@@ -602,6 +647,7 @@ function buildCompareResult(
   model: string,
   claiLabel?: string,
   partial = false,
+  concurrency?: { compareParallel: number; sideParallel: number },
 ): CompareResult {
   return {
     at: new Date().toISOString(),
@@ -612,6 +658,8 @@ function buildCompareResult(
     piScore: scoreRows(piRows),
     claiScore: scoreRows(claiRows),
     claiLabel,
+    compareParallel: concurrency?.compareParallel,
+    sideParallel: concurrency?.sideParallel,
     partial: partial || undefined,
   };
 }
@@ -638,6 +686,17 @@ export async function runComparePi(
     opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 8),
   );
   const freshClai = defaultFreshClai(opts.freshClai);
+  // Racing both harnesses at full parallel doubles API load (e.g. 8+8=16) and
+  // DeepSeek stalls pi with zero JSON until task timeout. Split concurrency.
+  const sideParallel = freshClai
+    ? Math.max(
+        1,
+        Math.min(
+          parallel,
+          Number(process.env.COMPARE_SIDE_PARALLEL ?? Math.ceil(parallel / 2)),
+        ),
+      )
+    : parallel;
 
   if (!process.env.DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY is not set (expected in .env or environment).");
@@ -659,12 +718,14 @@ export async function runComparePi(
   const piRunning = new Set<string>();
   const activeChildren = new Set<ChildProcess>();
 
+  const concurrency = { compareParallel: parallel, sideParallel };
+
   const emit = (phase: CompareProgress["phase"], done = false) => {
     const live = buildCompareLiveSnapshot(tasks, claiLive, piRows, piRunning, {
       runId,
       startedAt,
       model,
-      parallel,
+      parallel: sideParallel,
       done,
     });
     // Always publish compare rows for the live task table; mark partial so the
@@ -676,6 +737,7 @@ export async function runComparePi(
       model,
       claiLabel,
       !done,
+      concurrency,
     );
     opts.onProgress?.({
       phase,
@@ -717,7 +779,7 @@ export async function runComparePi(
     const record = await runBench({
       workspaceRoot,
       tasks,
-      parallel,
+      parallel: sideParallel,
       offline: false,
       onUpdate: (snap) => {
         claiLive = snap;
@@ -802,13 +864,12 @@ export async function runComparePi(
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(parallel, tasks.length) }, () => worker()),
+      Array.from({ length: Math.min(sideParallel, tasks.length) }, () => worker()),
     );
   };
 
   try {
-    // Truly parallel: both harnesses start immediately (up to `parallel` tasks each).
-    // Live snapshot provider is "clai+pi" so the dashboard shows both progressing.
+    // Both harnesses start immediately, each capped at sideParallel workers.
     await Promise.all([runClaiSide(), runPiSide()]);
   } finally {
     opts.signal?.removeEventListener("abort", onAbort);
@@ -847,6 +908,7 @@ export async function runComparePi(
     model,
     claiLabel,
     false,
+    concurrency,
   );
 
   const outPath = path.join(workspaceRoot, ".clai", "bench", "compare-pi.json");
@@ -883,13 +945,10 @@ async function main() {
     onProgress: (p) => {
       if (!printedHeader) {
         printedHeader = true;
-        const n = Math.max(
-          p.live?.tasks.length ?? 0,
-          ids?.length ?? 0,
-          8,
-        );
+        const n = ids?.length || p.live?.tasks.length || 0;
+        const side = p.live?.parallel ?? parallel;
         console.log(
-          `compare: ${n} tasks · parallel=${parallel} · fresh CLAI + pi together\n` +
+          `compare: ${n} tasks · sideParallel=${side} (CLAI+pi race) · fresh CLAI + pi together\n` +
             `  clai  ${p.claiLabel}\n` +
             `  pi    ${process.env.PI_PROVIDER ?? "deepseek"}/${process.env.PI_MODEL ?? "deepseek-v4-flash"}`,
         );
