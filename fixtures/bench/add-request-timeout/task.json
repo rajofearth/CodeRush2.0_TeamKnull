@@ -1,0 +1,12 @@
+{
+  "id": "add-request-timeout",
+  "title": "Race async work against timeout",
+  "prompt": "withTimeout(promise, ms) in timeout.mjs rejects with TimeoutError when ms elapses first. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "request-timeout-wrapper"
+  }
+}

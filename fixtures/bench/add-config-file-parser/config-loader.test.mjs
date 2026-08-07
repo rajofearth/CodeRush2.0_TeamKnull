@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadConfig } from "./config-loader.mjs";
+const here = path.dirname(fileURLToPath(import.meta.url));
+const p = path.join(here, "sample-config.json");
+await fs.writeFile(p, JSON.stringify({ host: "127.0.0.1", port: 3000 }));
+const cfg = await loadConfig(p);
+assert.deepEqual(cfg, { host: "127.0.0.1", port: 3000 });
+await fs.unlink(p);
+console.log("config-loader ok");

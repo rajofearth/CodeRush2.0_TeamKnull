@@ -1,0 +1,12 @@
+{
+  "id": "parse-dotenv",
+  "title": "Parse dotenv text into key/value map",
+  "prompt": "parseDotenv(text) in dotenv.mjs parses KEY=VALUE lines, ignoring blanks and # comments. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "modernize-scientific-stack"
+  }
+}

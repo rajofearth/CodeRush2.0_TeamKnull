@@ -1,0 +1,12 @@
+{
+  "id": "implement-queue-processor",
+  "title": "Process jobs sequentially from queue",
+  "prompt": "JobQueue in queue.mjs processes enqueued async jobs one at a time in FIFO order. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "queue-worker"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "fix-promise-all-settled",
+  "title": "Collect all results even when some reject",
+  "prompt": "allSettled(tasks) in settle.mjs returns {status,value|reason}[] like Promise.allSettled. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

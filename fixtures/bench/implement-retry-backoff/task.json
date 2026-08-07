@@ -1,0 +1,12 @@
+{
+  "id": "implement-retry-backoff",
+  "title": "Retry async fn with exponential backoff",
+  "prompt": "retry(fn, { retries, baseMs }) in retry.mjs retries transient failures with exponential backoff. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

@@ -8,7 +8,9 @@
   },
   "scripts": {
     "clai": "tsx src/cli.tsx",
-    "bench:compare-pi": "tsx src/bench/compare-pi.ts"
+    "bench:compare-pi": "tsx src/bench/compare-pi.ts",
+    "bench:scaffold": "tsx src/bench/scaffold-fixtures.ts",
+    "bench:verify-fixtures": "tsx src/bench/verify-fixtures.ts"
   },
   "engines": {
     "node": ">=20"

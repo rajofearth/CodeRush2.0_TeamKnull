@@ -1,0 +1,12 @@
+{
+  "id": "implement-ring-buffer",
+  "title": "Fixed-size ring buffer overwrite",
+  "prompt": "RingBuffer in ring.mjs overwrites oldest item when pushing beyond capacity. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "ring-buffer-capricorn86"
+  }
+}

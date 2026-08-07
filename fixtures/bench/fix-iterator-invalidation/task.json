@@ -1,0 +1,12 @@
+{
+  "id": "fix-iterator-invalidation",
+  "title": "Safe removal while iterating listeners",
+  "prompt": "SnapshotListeners in listeners.mjs must copy before emit so off() during emit is safe. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "headless-terminal"
+  }
+}

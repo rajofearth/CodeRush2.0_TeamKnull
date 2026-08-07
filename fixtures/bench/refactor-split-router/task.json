@@ -1,0 +1,12 @@
+{
+  "id": "refactor-split-router",
+  "title": "Extract router from monolithic server file",
+  "prompt": "Move route handlers from server.mjs into router.mjs. server.mjs must import { routes } from router.mjs and behavior must stay identical. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "refactor",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "split-router-module"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "fix-stale-closure",
+  "title": "Fix stale count in delayed callback",
+  "prompt": "Counter.makeDelayedIncrement(ms) in delayed.mjs must read latest count when timer fires. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

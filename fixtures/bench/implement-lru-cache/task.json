@@ -1,0 +1,12 @@
+{
+  "id": "implement-lru-cache",
+  "title": "Implement LRU cache with capacity",
+  "prompt": "LRUCache in lru.mjs evicts least-recently-used entry when capacity exceeded. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "kv-store-grpc"
+  }
+}

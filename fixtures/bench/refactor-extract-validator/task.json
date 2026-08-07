@@ -1,0 +1,12 @@
+{
+  "id": "refactor-extract-validator",
+  "title": "Extract shared validator module",
+  "prompt": "Deduplicate isPositiveInt in order.mjs and cart.mjs by moving it to validators.mjs and importing it. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "refactor",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "extract-validator-module"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "parse-shell-command",
+  "title": "Tokenize a simple shell command line",
+  "prompt": "Implement tokenize(command) in shell.mjs: split on whitespace but respect single and double quotes. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "headless-terminal"
+  }
+}

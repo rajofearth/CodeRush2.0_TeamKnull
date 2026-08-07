@@ -1,0 +1,12 @@
+{
+  "id": "add-batch-flush",
+  "title": "Flush buffered items in batches",
+  "prompt": "BatchBuffer in batch.mjs calls onFlush(batch) whenever size reaches batchSize. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "batch-flush-processor"
+  }
+}

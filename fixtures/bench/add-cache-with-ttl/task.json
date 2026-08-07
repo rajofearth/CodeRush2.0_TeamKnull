@@ -1,0 +1,12 @@
+{
+  "id": "add-cache-with-ttl",
+  "title": "Memoize with TTL expiry",
+  "prompt": "ttlMemo(fn, ttlMs) in memo.mjs caches results until ttlMs expires. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "cache-ttl-invalidation"
+  }
+}

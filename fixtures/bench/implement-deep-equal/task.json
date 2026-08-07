@@ -1,0 +1,12 @@
+{
+  "id": "implement-deep-equal",
+  "title": "Deep equality for plain objects and arrays",
+  "prompt": "deepEqual(a,b) in equal.mjs compares nested structures recursively. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "merge-diff-arc-agi-task"
+  }
+}

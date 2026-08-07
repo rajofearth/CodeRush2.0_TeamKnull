@@ -1,0 +1,12 @@
+{
+  "id": "fix-unhandled-promise",
+  "title": "Surface rejection from fire-and-forget helper",
+  "prompt": "runTracked(promise, onError) in track.mjs must call onError when promise rejects. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

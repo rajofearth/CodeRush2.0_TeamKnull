@@ -1,0 +1,12 @@
+{
+  "id": "implement-pipeline",
+  "title": "Compose async middleware pipeline",
+  "prompt": "pipeline(fns) in pipeline.mjs returns (input) reduced through fns left-to-right. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "headless-terminal"
+  }
+}

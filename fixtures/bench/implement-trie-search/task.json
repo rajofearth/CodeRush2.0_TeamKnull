@@ -1,0 +1,12 @@
+{
+  "id": "implement-trie-search",
+  "title": "Prefix search with trie",
+  "prompt": "Trie in trie.mjs supports insert(word) and startsWith(prefix). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "query-optimize"
+  }
+}

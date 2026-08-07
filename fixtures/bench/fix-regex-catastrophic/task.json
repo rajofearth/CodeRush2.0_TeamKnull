@@ -1,0 +1,12 @@
+{
+  "id": "fix-regex-catastrophic",
+  "title": "Replace nested quantifier email regex",
+  "prompt": "isEmail(s) in email.mjs must use a safe pattern without catastrophic backtracking. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "filter-js-from-html"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "implement-throttle",
+  "title": "Throttle function calls",
+  "prompt": "throttle(fn, waitMs) in throttle.mjs invokes at most once per waitMs window. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "throttle-helper"
+  }
+}

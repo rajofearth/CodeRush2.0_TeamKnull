@@ -1,0 +1,12 @@
+{
+  "id": "cancel-async-tasks",
+  "title": "Fix cooperative task cancellation",
+  "prompt": "TaskRunner in runner.mjs should honor AbortSignal: when aborted, pending work stops and run() rejects with AbortError. Currently it ignores the signal. Fix runner.mjs only. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "cancel-async-tasks"
+  }
+}

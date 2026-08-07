@@ -1,0 +1,12 @@
+{
+  "id": "fix-null-deref-chain",
+  "title": "Safe optional property access helper",
+  "prompt": "getPath(obj, path) in path-get.mjs returns undefined instead of throwing on missing keys. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "fix-code-vulnerability"
+  }
+}

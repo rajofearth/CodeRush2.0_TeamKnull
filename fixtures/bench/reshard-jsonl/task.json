@@ -1,0 +1,12 @@
+{
+  "id": "reshard-jsonl",
+  "title": "Split JSONL into N balanced shard files",
+  "prompt": "reshard(lines, shardCount) in reshard.mjs returns an array of shard arrays with nearly equal sizes. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "reshard-c4-data"
+  }
+}

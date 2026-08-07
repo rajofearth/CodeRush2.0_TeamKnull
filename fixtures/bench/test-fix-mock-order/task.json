@@ -1,0 +1,12 @@
+{
+  "id": "test-fix-mock-order",
+  "title": "Fix mock call order assertion",
+  "prompt": "logger.test.mjs expects the wrong call order. Fix the test to match logger.mjs behavior (warn before info). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "test",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "fix-mock-order-test"
+  }
+}

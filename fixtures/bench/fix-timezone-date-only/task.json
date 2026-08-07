@@ -1,0 +1,12 @@
+{
+  "id": "fix-timezone-date-only",
+  "title": "Parse YYYY-MM-DD as UTC midnight",
+  "prompt": "parseDateOnly(s) in dates.mjs must interpret date-only strings as UTC, not local. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "modernize-scientific-stack"
+  }
+}

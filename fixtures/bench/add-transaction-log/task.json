@@ -1,0 +1,12 @@
+{
+  "id": "add-transaction-log",
+  "title": "Append-only transaction log with rollback",
+  "prompt": "TxLog in tx.mjs supports apply(mutator) and rollback() restoring prior state snapshot. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "transaction-log-rollback"
+  }
+}

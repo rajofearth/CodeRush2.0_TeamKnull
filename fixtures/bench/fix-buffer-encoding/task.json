@@ -1,0 +1,12 @@
+{
+  "id": "fix-buffer-encoding",
+  "title": "Compare UTF-8 strings safely",
+  "prompt": "equalUtf8(a,b) in encoding.mjs compares strings by UTF-8 bytes, not reference. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "polyglot-c-py"
+  }
+}

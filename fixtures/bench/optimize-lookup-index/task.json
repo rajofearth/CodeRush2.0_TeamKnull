@@ -1,0 +1,12 @@
+{
+  "id": "optimize-lookup-index",
+  "title": "Add index map for O(1) user lookup",
+  "prompt": "UserDirectory in users.mjs must build an id→user map on construction so findById is O(1). Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "refactor",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "terminal-bench",
+    "taskId": "query-optimize"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "add-retry-transient-errors",
+  "title": "Retry only transient HTTP status codes",
+  "prompt": "shouldRetry(status) in retry-http.mjs returns true for 429 and 5xx only. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "retry-transient-errors"
+  }
+}

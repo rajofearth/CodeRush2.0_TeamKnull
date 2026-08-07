@@ -1,0 +1,12 @@
+{
+  "id": "add-pagination-cursor",
+  "title": "Encode/decode pagination cursor",
+  "prompt": "encodeCursor({id}) and decodeCursor(token) in cursor.mjs round-trip opaque cursors. Verify with `node check.mjs` (exit code 0 means done).",
+  "category": "feature",
+  "timeoutMs": 150000,
+  "maxSteps": 12,
+  "source": {
+    "benchmark": "deepswe",
+    "taskId": "pagination-cursor-helper"
+  }
+}
