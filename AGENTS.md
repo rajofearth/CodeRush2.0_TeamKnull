@@ -73,6 +73,8 @@ Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-impor
 | `src/trace/` | Append-only JSONL under `.clai/traces/<runId>/events.jsonl` |
 | `src/bench/` | 81-task suite; SSE dashboard (task limit 10/+10/max); CLAI vs pi compare (partial scorecards, total wall, `sideParallel`) |
 | `src/ui/` | Ink ADE shell — header, activity column, context strip, footer; `UiBus` event API + headless printer (`CLAI_NO_TUI=1` / non-TTY) |
+| `docs/GROK-BUILD-UI-ADAPTATION.md` | Adapt grok-build (ratatui) TUI patterns into CLAI Ink — transcript order, follow, panes (not a Rust port) |
+| `docs/GROK-BUILD-UI-ADAPTATION.md` | Design brief: adapt grok-build (ratatui) TUI patterns into CLAI Ink — transcript order, follow, panes |
 
 ## Platform notes
 

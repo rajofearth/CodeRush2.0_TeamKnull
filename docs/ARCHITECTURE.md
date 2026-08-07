@@ -18,7 +18,7 @@ This document is a visual and structural map of how CLAI is organized, how a run
 | **Benchmarks** | Built-in 81-task bench + live SSE dashboard + CLAI vs pi compare | Community evals; no first-party harness bench |
 | **Done means** | Designed: `PASS \| FAIL \| BLOCKED` + evidence *(verify seam scaffolded)* | Model `stop` finish reason — tests are advisory |
 | **Trace** | Append-only JSONL under `.clai/traces/<runId>/` | Session store + share links |
-| **UI** | Ink ADE pane (`UiBus` → TUI or headless) | SolidJS/OpenTUI; event bus across threads |
+| **UI** | Ink ADE pane (`UiBus` → TUI or headless); see [GROK-BUILD-UI-ADAPTATION.md](./GROK-BUILD-UI-ADAPTATION.md) for grok-build pattern adaptation | SolidJS/OpenTUI; event bus across threads |
 | **Providers** | Vercel AI SDK registry (`src/adapter/providers.ts`) | 75+ via Models.dev |
 
 ---

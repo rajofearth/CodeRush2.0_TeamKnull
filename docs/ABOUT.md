@@ -88,6 +88,7 @@ Key seams:
 | `src/memory/` | Tiered memory (SQLite/JSON) with provenance, TTL, invalidation |
 | `src/trace/` | Append-only JSONL under `.clai/traces/<runId>/events.jsonl` |
 | `src/ui/` | Ink ADE shell + headless printer over a shared `UiBus` |
+| `docs/GROK-BUILD-UI-ADAPTATION.md` | How to adapt grok-build TUI patterns into CLAI’s Ink shell |
 
 ## What CLAI leaves behind
 
