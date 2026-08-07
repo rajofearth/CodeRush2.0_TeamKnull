@@ -89,9 +89,9 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   let running = false;
   let intakeSeed = "";
   let lastTurnFailed = false;
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let costUsd = 0;
+  let sessionTokensIn = 0;
+  let sessionTokensOut = 0;
+  let sessionCostUsd = 0;
 
   const ctx = {
     workspaceRoot: cwd,
@@ -131,6 +131,9 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
     running = true;
     lastTurnFailed = false;
     turnCount += 1;
+    let sawDelta = false;
+    let turnTokensIn = 0;
+    let turnTokensOut = 0;
     opts.bus.emit({ type: "user", text: prompt });
     opts.bus.emit({ type: "status", label: "thinking" });
 
@@ -158,47 +161,89 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
             done: status.done,
             sticky: status.sticky,
           }),
-        onText: (text) => {
+        onTextDelta: (delta) => {
           opts.bus.emit({
             type: "assistant",
             id: `turn-${turnCount}`,
-            text,
-            done: true,
+            text: delta,
+            done: false,
           });
+          sawDelta = true;
+        },
+        onText: (text) => {
+          if (sawDelta) {
+            opts.bus.emit({
+              type: "assistant",
+              id: `turn-${turnCount}`,
+              text: "",
+              done: true,
+            });
+          } else if (text.trim()) {
+            opts.bus.emit({
+              type: "assistant",
+              id: `turn-${turnCount}`,
+              text,
+              done: true,
+            });
+          }
         },
         onUsage: (usage) => {
-          tokensIn = usage.promptTokens;
-          tokensOut = usage.completionTokens;
-          costUsd = estimateUsdBench(model.provider, tokensIn, tokensOut);
+          const deltaIn = usage.promptTokens - turnTokensIn;
+          const deltaOut = usage.completionTokens - turnTokensOut;
+          turnTokensIn = usage.promptTokens;
+          turnTokensOut = usage.completionTokens;
+          sessionTokensIn += deltaIn;
+          sessionTokensOut += deltaOut;
+          sessionCostUsd = estimateUsdBench(
+            model.provider,
+            sessionTokensIn,
+            sessionTokensOut,
+          );
           opts.bus.emit({
             type: "metrics",
-            tokensIn,
-            tokensOut,
-            costUsd,
+            tokensIn: sessionTokensIn,
+            tokensOut: sessionTokensOut,
+            costUsd: sessionCostUsd,
           });
         },
       });
       history = result.messages;
+      if (sawDelta) {
+        opts.bus.emit({
+          type: "assistant",
+          id: `turn-${turnCount}`,
+          text: "",
+          done: true,
+        });
+      }
       opts.bus.emit({
         type: "status",
-        label: "ready",
+        label: "processed",
         detail: `${result.finishReason} · ${result.steps} steps`,
         sticky: true,
         done: true,
       });
       opts.onTurnComplete?.({
         turn: turnCount,
-        tokensIn,
-        tokensOut,
-        costUsd,
+        tokensIn: turnTokensIn,
+        tokensOut: turnTokensOut,
+        costUsd: estimateUsdBench(
+          model.provider,
+          turnTokensIn,
+          turnTokensOut,
+        ),
         finishReason: result.finishReason,
         steps: result.steps,
       });
       console.log(formatTurnSummary({
         turn: turnCount,
-        tokensIn,
-        tokensOut,
-        costUsd,
+        tokensIn: turnTokensIn,
+        tokensOut: turnTokensOut,
+        costUsd: estimateUsdBench(
+          model.provider,
+          turnTokensIn,
+          turnTokensOut,
+        ),
         steps: result.steps,
         finishReason: result.finishReason,
       }));
@@ -260,9 +305,9 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   return {
     runId: trace.runId,
     tracePath: trace.path,
-    tokensIn,
-    tokensOut,
-    costUsd,
+    tokensIn: sessionTokensIn,
+    tokensOut: sessionTokensOut,
+    costUsd: sessionCostUsd,
     turns: turnCount,
     ok: !lastTurnFailed,
   };

@@ -1,11 +1,9 @@
 /**
- * ui/components — presentational pieces of the CLAI shell, implementing the
- * visual language locked in assets/23-visual-language.md.
+ * ui/components — presentational pieces of the CLAI shell.
  *
- * Every colour goes through `resolve(token)`; every glyph through `glyph()`.
- * Blocks are a left `▌` rule plus a panel background — never boxes with
- * corners. Chrome is lowercase; bold is reserved for section headings, the
- * session title, the bright wordmark half, and keybind keys.
+ * Metallic silver on matte black. Every colour goes through `resolve(token)`;
+ * every lifecycle icon through `lifecycleIcon` / `LIFECYCLE`. Saturated colour
+ * is reserved for the verification state machine.
  */
 
 import React from "react";
@@ -25,20 +23,23 @@ import type {
   VerifyItem,
 } from "./state.js";
 import {
-  colorLevel,
-  expandWordmarkRow,
+  CREDIT,
+  LIFECYCLE,
+  WORDMARK,
+  WORDMARK_LARGE,
+  WORDMARK_LARGE_COLS,
   faintUsesDim,
   glyph,
   glyphs,
+  lifecycleIcon,
   resolve,
-  tintHex,
-  WORDMARK_LEFT,
-  WORDMARK_RIGHT,
+  type LifecycleState,
+  type ThemeToken,
 } from "./theme.js";
 
 // ── formatting helpers ───────────────────────────────────────────────────────
 
-/** `28221` → `28,221` (en-US thousands, per spec 6.1). */
+/** `28221` → `28,221` (en-US thousands). */
 export function formatTokens(n: number): string {
   return n.toLocaleString("en-US");
 }
@@ -57,7 +58,7 @@ export function formatCost(usd?: number): string {
 
 /**
  * Cost for log lines / small API runs — keeps sub-cent amounts visible
- * (e.g. $0.0003 instead of rounding to $0.00).
+ * (e.g. $0.0003 instead of rounding to `$0.00`).
  */
 export function formatCostPrecise(usd?: number): string {
   const n = usd ?? 0;
@@ -128,94 +129,408 @@ function Segments({ segments }: { segments: Segment[] }) {
 }
 
 /**
- * One row of a panel block: a `▌` left rule, one space, content, padded to
- * `width` so the panel background reads as a surface. No corners, ever.
+ * Quiet content row (no per-row chrome). Prefer this over bordered sub-elements.
  */
 export function BlockLine({
   width,
-  ruleColor,
+  ruleColor: _ruleColor,
   segments,
-  background = resolve("clai.backgroundPanel"),
+  background: _background,
 }: {
   width: number;
   ruleColor?: string;
   segments: Segment[];
   background?: string;
 }) {
-  const pad = Math.max(0, width - 2 - segmentsLength(segments));
+  const pad = Math.max(0, width - segmentsLength(segments));
   return (
-    <Text backgroundColor={background}>
-      <Text color={ruleColor ?? resolve("clai.border")}>{glyph("leftRule")}</Text>
-      <Text> </Text>
+    <Text>
       <Segments segments={segments} />
       <Text>{" ".repeat(pad)}</Text>
     </Text>
   );
 }
 
-// ── wordmark ─────────────────────────────────────────────────────────────────
+// ── brand ────────────────────────────────────────────────────────────────────
 
-function wordmarkShadow(fgToken: "clai.textMuted" | "clai.text"): string | undefined {
-  if (colorLevel() !== "truecolor") return resolve("clai.textFaint");
-  const fg = resolve(fgToken);
-  if (!fg) return undefined;
-  return tintHex(fg, "#0a0a0a", 0.25);
+/** Single quiet wordmark line — bright metallic silver, bold. No ASCII art. */
+export function Wordmark() {
+  return (
+    <Text bold color={resolve("brand.wordmark")}>
+      {WORDMARK}
+    </Text>
+  );
 }
 
-function WordmarkHalf({
-  rows,
-  fgToken,
-  bold,
-}: {
-  rows: string[];
-  fgToken: "clai.textMuted" | "clai.text";
-  bold: boolean;
-}) {
-  const fg = resolve(fgToken);
-  const shadow = wordmarkShadow(fgToken);
-  const truecolor = colorLevel() === "truecolor";
+/** Barely-there credit for the strip's far right. */
+export function Credit() {
   return (
-    <Box flexDirection="column">
-      {rows.map((row, rowIndex) => (
-        <Text key={rowIndex} bold={bold}>
-          {expandWordmarkRow(row).map((cell, cellIndex) => {
-            if (cell.paint === "shadowFg") {
+    <Text color={resolve("text.muted")} dimColor={faintUsesDim()}>
+      {CREDIT}
+    </Text>
+  );
+}
+
+/**
+ * Startup brand motion: large half-block CLAI, letter reveal + metallic shimmer.
+ * Theme tokens only — no neon, no boxed splash chrome.
+ */
+export const BRAND_INTRO_INTERVAL_MS = 85;
+/** Reveal (5) + hold (3) + shimmer (12) + settle (6) ≈ 2.2s. */
+export const BRAND_INTRO_TOTAL_TICKS = 26;
+
+export function brandIntroLetterColor(
+  index: number,
+  tick: number,
+): string | undefined {
+  const lettersShown = Math.min(
+    WORDMARK.length,
+    Math.max(0, tick <= 4 ? tick : WORDMARK.length),
+  );
+  if (index >= lettersShown) return undefined;
+
+  // Shimmer window: ticks 8..19 sweep a bright highlight across letters.
+  if (tick >= 8 && tick <= 19) {
+    const highlight = (tick - 8) % WORDMARK.length;
+    if (index === highlight) return resolve("brand.wordmark");
+    if (index === (highlight + WORDMARK.length - 1) % WORDMARK.length) {
+      return resolve("text.primary");
+    }
+    return resolve("text.muted");
+  }
+
+  // Settle: full bright wordmark.
+  if (tick >= 20) return resolve("brand.wordmark");
+
+  // Reveal: newly typed letter bright, prior letters primary steel.
+  if (index === lettersShown - 1) return resolve("brand.wordmark");
+  return resolve("text.primary");
+}
+
+function largeLetterColor(letterIndex: number, tick: number): string | undefined {
+  return brandIntroLetterColor(letterIndex, tick);
+}
+
+export function BrandIntro({
+  tick,
+  width,
+}: {
+  tick: number;
+  width: number;
+}) {
+  const lettersShown = Math.min(
+    WORDMARK.length,
+    Math.max(0, tick <= 4 ? tick : WORDMARK.length),
+  );
+  const showCredit = tick >= 6;
+  return (
+    <Box
+      flexDirection="column"
+      alignItems="center"
+      justifyContent="center"
+      width={width}
+    >
+      <Box flexDirection="column">
+        {WORDMARK_LARGE.map((row, rowIndex) => (
+          <Text key={rowIndex} bold>
+            {[...row].map((char, col) => {
+              const letterIndex = WORDMARK_LARGE_COLS.findIndex(
+                ([start, end]) => col >= start && col < end,
+              );
+              if (letterIndex < 0 || letterIndex >= lettersShown) {
+                return (
+                  <Text key={col} color={resolve("text.muted")}>
+                    {" "}
+                  </Text>
+                );
+              }
+              const color = largeLetterColor(letterIndex, tick);
               return (
-                <Text key={cellIndex} color={shadow}>
-                  {cell.char}
+                <Text key={col} color={color}>
+                  {char === " " ? " " : char}
                 </Text>
               );
-            }
-            if (cell.paint === "shadowBg") {
-              return (
-                <Text
-                  key={cellIndex}
-                  color={fg}
-                  backgroundColor={truecolor ? shadow : undefined}
-                >
-                  {cell.char}
-                </Text>
-              );
-            }
-            return (
-              <Text key={cellIndex} color={fg}>
-                {cell.char}
-              </Text>
-            );
-          })}
+            })}
+          </Text>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Text bold color={resolve("brand.wordmark")}>
+          {WORDMARK.slice(0, lettersShown)}
         </Text>
-      ))}
+      </Box>
+      {showCredit ? (
+        <Box marginTop={1}>
+          <Credit />
+        </Box>
+      ) : (
+        <Box marginTop={1}>
+          <Text> </Text>
+        </Box>
+      )}
     </Box>
   );
 }
 
-/** The `clai` wordmark: muted `cl`, one-column gap, bold bright `ai`. */
-export function Wordmark() {
+/** True when we should play the launch animation (real interactive TTY only). */
+export function shouldPlayBrandIntro(opts: {
+  interactive?: boolean;
+  stdout?: { isTTY?: boolean } | null;
+  env?: Record<string, string | undefined>;
+}): boolean {
+  const env = opts.env ?? process.env;
+  if (env.CLAI_NO_INTRO === "1") return false;
+  if (env.NO_COLOR) return false;
+  if (!opts.interactive) return false;
+  // Fake streams used by render-check are TTY-flagged but are not process.stdout.
+  if (!opts.stdout || opts.stdout !== process.stdout) return false;
+  return Boolean(opts.stdout.isTTY);
+}
+
+// ── session stats (top-right) ────────────────────────────────────────────────
+
+export type SessionStats = {
+  elapsedMs: number;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd?: number;
+  toolCalls: number;
+  /** True while a turn is still in flight. */
+  live?: boolean;
+};
+
+/** Compact top-right panel: time · tokens · cost · tool calls (live-updating). */
+export function StatsPanel({
+  stats,
+  width = 28,
+}: {
+  stats: SessionStats;
+  width?: number;
+}) {
+  const totalTokens = stats.tokensIn + stats.tokensOut;
+  const timeLabel =
+    formatDuration(stats.elapsedMs) ?? (stats.elapsedMs > 0 ? "0ms" : "—");
+  const rows = [
+    { k: "time", v: timeLabel },
+    { k: "tokens", v: formatTokens(totalTokens) },
+    {
+      k: "  in/out",
+      v: `${formatTokens(stats.tokensIn)}/${formatTokens(stats.tokensOut)}`,
+    },
+    { k: "cost", v: formatCostPrecise(stats.costUsd) },
+    { k: "tools", v: String(stats.toolCalls) },
+  ];
+  const inner = Math.max(18, width - 2);
   return (
-    <Box flexDirection="row">
-      <WordmarkHalf rows={WORDMARK_LEFT} fgToken="clai.textMuted" bold={false} />
-      <Text> </Text>
-      <WordmarkHalf rows={WORDMARK_RIGHT} fgToken="clai.text" bold />
+    <Box flexDirection="column" width={width}>
+      <Box>
+        <Text color={resolve("text.muted")}>session</Text>
+        {stats.live ? (
+          <Text color={resolve("state.working")}> · live</Text>
+        ) : null}
+      </Box>
+      <Text color={resolve("border")}>{glyph("hRule").repeat(inner)}</Text>
+      {rows.map((row) => (
+        <Box key={row.k} justifyContent="space-between" width={inner}>
+          <Text color={resolve("text.muted")}>{row.k}</Text>
+          <Text bold={row.k === "tokens" || row.k === "cost"} color={resolve("text.primary")}>
+            {row.v}
+          </Text>
+        </Box>
+      ))}
+      <Text color={resolve("border")}>{glyph("hRule").repeat(inner)}</Text>
+    </Box>
+  );
+}
+
+// ── scroll affordances ───────────────────────────────────────────────────────
+
+export function ScrollCue({
+  direction,
+  label,
+  register,
+}: {
+  direction: "up" | "down";
+  label: string;
+  register?: (node: DOMElement | null) => void;
+}) {
+  const arrow = direction === "up" ? "↑" : "↓";
+  return (
+    <Box ref={(node) => register?.(node as DOMElement | null)}>
+      <Text bold color={resolve("brand.wordmark")}>
+        {arrow}{" "}
+      </Text>
+      <Text color={resolve("text.muted")}>{label}</Text>
+      <Text color={resolve("text.muted")}>  </Text>
+      <Text color={resolve("state.verify")}>[expand]</Text>
+    </Box>
+  );
+}
+
+// ── live code fragment ───────────────────────────────────────────────────────
+
+/** Pull a short live fragment from assistant text (fenced code or code-like lines). */
+export function extractCodeFragment(text: string): string | null {
+  const fence = /```[\w+-]*\r?\n?([\s\S]*?)(?:```|$)/.exec(text);
+  if (fence?.[1]) {
+    const lines = fence[1].replace(/\s+$/, "").split(/\r?\n/).filter((l) => l.length > 0);
+    if (lines.length === 0) return null;
+    return lines.slice(-5).join("\n");
+  }
+
+  const lines = text.split(/\r?\n/);
+  const codey = lines.filter((line) =>
+    /[{};=>]|^\s{2,}|^(import|export|const|let|var|function|class|def|return)\b/.test(
+      line,
+    ),
+  );
+  if (codey.length < 2) return null;
+  return codey.slice(-5).join("\n");
+}
+
+/**
+ * Short typewriter panel shown while the assistant is still streaming code.
+ * Reveals the live fragment character-by-character with a metallic caret.
+ */
+export function CodeWriteFragment({
+  text,
+  frame,
+  width,
+}: {
+  text: string;
+  frame: number;
+  width: number;
+}) {
+  const fragment = extractCodeFragment(text);
+  if (!fragment) return null;
+
+  // Pace the reveal a few chars behind the live tip so writing is visible.
+  const target = Math.max(0, fragment.length - 1);
+  const reveal = Math.min(fragment.length, Math.max(1, target - (frame % 3 === 0 ? 0 : 1)));
+  // Grow reveal with length; animate last ~24 chars via frame.
+  const trail = 24;
+  const base = Math.max(0, fragment.length - trail);
+  const animated = base + Math.min(trail, Math.floor((frame % (trail + 1))));
+  const cut = Math.min(fragment.length, Math.max(reveal, animated, fragment.length > trail ? fragment.length - 2 : fragment.length));
+  const shown = fragment.slice(0, cut);
+  const lines = shown.split("\n");
+  const inner = Math.max(12, width - 4);
+  const caret = glyphs().spinnerFrames[frame % glyphs().spinnerFrames.length]!;
+
+  return (
+    <Box flexDirection="column" marginTop={1} marginBottom={0} paddingLeft={1}>
+      <Text color={resolve("text.muted")}>writing</Text>
+      <Text color={resolve("border")}>{glyph("hRule").repeat(Math.min(inner, 36))}</Text>
+      {lines.map((line, index) => (
+        <Text key={index} color={resolve("text.primary")}>
+          {`  ${truncate(line, inner - 2)}`}
+          {index === lines.length - 1 ? (
+            <Text color={resolve("state.verify")}>{` ${caret}`}</Text>
+          ) : null}
+        </Text>
+      ))}
+      <Text color={resolve("border")}>{glyph("hRule").repeat(Math.min(inner, 36))}</Text>
+    </Box>
+  );
+}
+
+// ── lifecycle widget ─────────────────────────────────────────────────────────
+
+export type LifecyclePhase = {
+  state: LifecycleState;
+  detail?: string;
+};
+
+/** Derive the live verification phase from reduced UI state (render-only). */
+export function deriveLifecycle(args: {
+  status: { label: string; detail?: string; level: string } | null;
+  items: ActivityItem[];
+}): LifecyclePhase | null {
+  const pendingApproval = args.items.find(
+    (item): item is ApprovalItem =>
+      item.kind === "approval" && item.decision == null,
+  );
+  if (pendingApproval) {
+    return {
+      state: "blocked",
+      detail: truncate(pendingApproval.request, 48),
+    };
+  }
+
+  if (args.status) {
+    const label = args.status.label.toLowerCase();
+    const detail = args.status.detail;
+    if (/\brepair\b/.test(label) || args.status.level === "warn") {
+      return { state: "repair", detail: detail ?? args.status.label };
+    }
+    if (/\bverif/.test(label)) {
+      return { state: "verify", detail: detail ?? args.status.label };
+    }
+    if (args.status.level === "error") {
+      return { state: "fail", detail: detail ?? args.status.label };
+    }
+    return { state: "working", detail: detail ?? args.status.label };
+  }
+
+  for (let i = args.items.length - 1; i >= 0; i -= 1) {
+    const item = args.items[i]!;
+    if (item.kind === "verify") {
+      return {
+        state: item.ok ? "pass" : "fail",
+        detail: item.detail ?? item.label,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Persistent single-line lifecycle widget. Exactly one icon + one colour.
+ * Braille spinner during Working / Verify / Repair.
+ * Detail is omitted when it would just repeat the state name (no grey twin).
+ */
+export function LifecycleLine({
+  phase,
+  frame,
+  width,
+}: {
+  phase: LifecyclePhase | null;
+  frame: number;
+  width: number;
+}) {
+  if (!phase) return null;
+  const spec = LIFECYCLE[phase.state];
+  const color = resolve(spec.token);
+  const spinning =
+    phase.state === "working" ||
+    phase.state === "verify" ||
+    phase.state === "repair";
+  const frames = glyphs().spinnerFrames;
+  const icon = spinning
+    ? frames[frame % frames.length]!
+    : lifecycleIcon(phase.state);
+
+  const rawDetail = phase.detail?.trim() ?? "";
+  const detail =
+    !rawDetail ||
+    rawDetail.toLowerCase() === spec.label.toLowerCase() ||
+    rawDetail.toLowerCase() === phase.state
+      ? undefined
+      : rawDetail;
+
+  const labelBudget = Math.max(8, width - spec.label.length - 4);
+  return (
+    <Box>
+      <Text color={color}>{icon} </Text>
+      <Text bold color={color}>
+        {spec.label}
+      </Text>
+      {detail ? (
+        <Text color={resolve("text.muted")}>
+          {`  ${truncate(detail, labelBudget)}`}
+        </Text>
+      ) : null}
     </Box>
   );
 }
@@ -241,31 +556,36 @@ export function PromptBox({
   provider?: string;
   showCaret: boolean;
 }) {
-  const ruleColor = focused ? resolve("clai.accent") : resolve("clai.border");
+  const ruleColor = focused ? resolve("brand.wordmark") : resolve("border");
   const inner = Math.max(8, width - 2);
 
   const inputSegments: Segment[] = value
     ? [
-        { text: truncate(value, showCaret ? inner - 1 : inner), color: resolve("clai.text") },
-        ...(showCaret ? [{ text: "▏", color: resolve("clai.textMuted") }] : []),
+        { text: truncate(value, showCaret ? inner - 1 : inner), color: resolve("text.primary") },
+        ...(showCaret ? [{ text: "▏", color: resolve("text.muted") }] : []),
       ]
-    : [{ text: truncate(placeholder, inner), color: resolve("clai.textMuted") }];
+    : [{ text: truncate(placeholder, inner), color: resolve("text.muted") }];
 
   const modelSegments: Segment[] = [
-    { text: agent, color: resolve("clai.accent") },
+    { text: agent, color: resolve("text.primary"), bold: true },
   ];
   if (model) {
-    modelSegments.push({ text: "  " }, { text: model, color: resolve("clai.text") });
+    modelSegments.push({ text: "  " }, { text: model, color: resolve("text.primary") });
   }
   if (provider) {
-    modelSegments.push({ text: "  " }, { text: provider, color: resolve("clai.textMuted") });
+    modelSegments.push({ text: "  " }, { text: provider, color: resolve("text.muted") });
   }
 
   return (
     <Box flexDirection="column" width={width}>
-      <BlockLine width={width} ruleColor={ruleColor} segments={inputSegments} />
-      <BlockLine width={width} ruleColor={ruleColor} segments={[]} />
-      <BlockLine width={width} ruleColor={ruleColor} segments={modelSegments} />
+      <Text>
+        <Text color={ruleColor}>{glyph("leftRule")} </Text>
+        <Segments segments={inputSegments} />
+      </Text>
+      <Text>
+        <Text color={ruleColor}>{glyph("leftRule")} </Text>
+        <Segments segments={modelSegments} />
+      </Text>
     </Box>
   );
 }
@@ -286,10 +606,10 @@ export function HintLine({
       {hints.map((hint, index) => (
         <Text key={hint.key}>
           {index > 0 ? "  " : ""}
-          <Text bold color={resolve("clai.text")}>
+          <Text bold color={resolve("text.primary")}>
             {hint.key}
           </Text>
-          <Text color={resolve("clai.textMuted")}>{` ${hint.label}`}</Text>
+          <Text color={resolve("text.muted")}>{` ${hint.label}`}</Text>
         </Text>
       ))}
     </Text>
@@ -301,38 +621,72 @@ export function HintLine({
 export function UserBlock({ item, width }: { item: UserItem; width: number }) {
   const lines = wrapText(item.text, Math.max(8, width - 2));
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginBottom={1}>
       {lines.map((line, index) => (
-        <BlockLine
-          key={index}
-          width={width}
-          segments={[{ text: line, color: resolve("clai.text") }]}
-        />
+        <Text key={index} color={resolve("text.primary")}>
+          {index === 0 ? `› ${line}` : `  ${line}`}
+        </Text>
       ))}
     </Box>
   );
 }
 
-export function AssistantProse({ item }: { item: AssistantItem }) {
+export function AssistantProse({
+  item,
+  width,
+  spinnerFrame = 0,
+}: {
+  item: AssistantItem;
+  width?: number;
+  spinnerFrame?: number;
+}) {
+  const STREAM_TAIL = 18;
+  const allLines = item.text.replace(/\s+$/, "").split(/\r?\n/);
+  const truncated = !item.done && allLines.length > STREAM_TAIL;
+  const display = truncated
+    ? allLines.slice(-STREAM_TAIL).join("\n")
+    : item.text.trimEnd();
+  const showCode = !item.done && width != null;
+  const caret = glyphs().spinnerFrames[spinnerFrame % glyphs().spinnerFrames.length]!;
+
   return (
-    <Box>
-      <Text wrap="wrap" color={resolve("clai.text")}>
-        {item.text.trimEnd()}
-        {item.done ? "" : <Text color={resolve("clai.accent")}>▏</Text>}
+    <Box flexDirection="column" marginBottom={1}>
+      <Box>
+        {!item.done ? (
+          <Text color={resolve("state.verify")}>streaming </Text>
+        ) : (
+          <Text color={resolve("state.pass")}>processed </Text>
+        )}
+        <Text color={resolve("text.muted")}>
+          {item.done ? "· reply" : "· live"}
+        </Text>
+      </Box>
+      {truncated ? (
+        <Text color={resolve("text.muted")}>… </Text>
+      ) : null}
+      <Text wrap="wrap" color={resolve("text.primary")}>
+        {display}
+        {!item.done ? (
+          <Text color={resolve("state.verify")}>{` ${caret}`}</Text>
+        ) : null}
       </Text>
+      {showCode ? (
+        <CodeWriteFragment
+          text={item.text}
+          frame={spinnerFrame}
+          width={width}
+        />
+      ) : null}
     </Box>
   );
 }
 
 // ── tool rows ────────────────────────────────────────────────────────────────
 
-/** Sigils per spec 6.3: Read `→`, Grep `✳`, task `◈`, everything else `·`. */
+/** Tools share the lifecycle icon set — ● in flight, ✓ ok, ✗ fail. */
 export function toolSigil(tool: string): string {
-  const name = tool.toLowerCase();
-  if (name === "read") return glyph("sigilRead");
-  if (name === "grep") return glyph("sigilSearch");
-  if (name === "task" || name === "subagent") return glyph("sigilTask");
-  return glyph("sigilDefault");
+  void tool;
+  return lifecycleIcon("working");
 }
 
 function toolVerb(tool: string): string {
@@ -364,12 +718,14 @@ export function ToolRowLine({
   if (item.status === "pending") {
     return (
       <Box paddingLeft={indent} ref={rowRef}>
-        <Text color={resolve("clai.accent")}>
+        <Text color={resolve("state.working")}>
           {frames[spinnerFrame % frames.length]}{" "}
         </Text>
-        <Text color={resolve("clai.text")}>{verb}</Text>
+        <Text bold color={resolve("text.primary")}>
+          {verb}
+        </Text>
         {target ? (
-          <Text color={resolve("clai.textMuted")}>{` ${truncate(target, budget)}`}</Text>
+          <Text color={resolve("text.muted")}>{` ${truncate(target, budget)}`}</Text>
         ) : null}
       </Box>
     );
@@ -379,22 +735,21 @@ export function ToolRowLine({
     return (
       <Box flexDirection="column" paddingLeft={indent} ref={rowRef}>
         <Box>
-          <Text color={resolve("clai.error")}>{glyph("statusDot")} </Text>
-          <Text color={resolve("clai.text")}>{verb}</Text>
+          <Text color={resolve("state.fail")}>{lifecycleIcon("fail")} </Text>
+          <Text bold color={resolve("text.primary")}>
+            {verb}
+          </Text>
           {target ? (
-            <Text color={resolve("clai.textMuted")}>{` ${truncate(target, budget)}`}</Text>
+            <Text color={resolve("text.muted")}>{` ${truncate(target, budget)}`}</Text>
           ) : null}
-          <Text color={resolve("clai.error")}> Failed</Text>
+          <Text color={resolve("state.fail")}> Failed</Text>
         </Box>
         {item.detail ? (
-          <Box flexDirection="column">
-            {wrapText(item.detail, Math.max(8, width - indent - 2)).map((line, i) => (
-              <BlockLine
-                key={i}
-                width={width - indent}
-                ruleColor={resolve("clai.error")}
-                segments={[{ text: line, color: resolve("clai.textMuted") }]}
-              />
+          <Box flexDirection="column" marginLeft={2}>
+            {wrapText(item.detail, Math.max(8, width - indent - 4)).map((line, i) => (
+              <Text key={i} color={resolve("text.muted")}>
+                {line}
+              </Text>
             ))}
           </Box>
         ) : null}
@@ -407,23 +762,23 @@ export function ToolRowLine({
   return (
     <Box flexDirection="column" paddingLeft={indent} ref={rowRef}>
       <Box>
-        <Text color={resolve("clai.accent")}>{toolSigil(item.tool)} </Text>
-        <Text color={resolve("clai.text")}>{verb}</Text>
+        <Text color={resolve("state.pass")}>{lifecycleIcon("pass")} </Text>
+        <Text bold color={resolve("text.primary")}>
+          {verb}
+        </Text>
         {target ? (
-          <Text color={resolve("clai.textMuted")}>{` ${truncate(target, budget)}`}</Text>
+          <Text color={resolve("text.muted")}>{` ${truncate(target, budget)}`}</Text>
         ) : null}
         {duration ? (
-          <Text color={resolve("clai.textMuted")}>{`  ${duration}`}</Text>
+          <Text color={resolve("text.muted")}>{`  ${duration}`}</Text>
         ) : null}
       </Box>
       {expanded && detail ? (
-        <Box flexDirection="column">
-          {wrapText(detail, Math.max(8, width - indent - 2)).map((line, i) => (
-            <BlockLine
-              key={i}
-              width={width - indent}
-              segments={[{ text: line, color: resolve("clai.textMuted") }]}
-            />
+        <Box flexDirection="column" marginLeft={2}>
+          {wrapText(detail, Math.max(8, width - indent - 4)).map((line, i) => (
+            <Text key={i} color={resolve("text.muted")}>
+              {line}
+            </Text>
           ))}
         </Box>
       ) : null}
@@ -431,7 +786,7 @@ export function ToolRowLine({
   );
 }
 
-/** A run of grouped tool rows: `explore 2/2` header, zero blank lines inside. */
+/** A run of grouped tool rows: `explore 2/2` header, tight children. */
 export function ToolGroupBlock({
   group,
   items,
@@ -449,10 +804,10 @@ export function ToolGroupBlock({
 }) {
   const done = items.filter((item) => item.status !== "pending").length;
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginBottom={1}>
       <Box>
-        <Text color={resolve("clai.text")}>{group}</Text>
-        <Text color={resolve("clai.textMuted")}>{` ${done}/${items.length}`}</Text>
+        <Text color={resolve("text.primary")}>{group}</Text>
+        <Text color={resolve("text.muted")}>{` ${done}/${items.length}`}</Text>
       </Box>
       {items.map((item) => (
         <ToolRowLine
@@ -470,43 +825,68 @@ export function ToolGroupBlock({
 
 // ── todo / plan block ────────────────────────────────────────────────────────
 
-function todoBox(state: PlanStep["state"]): { box: string; boxColor?: string; textColor?: string } {
+function planStepVisual(
+  state: PlanStep["state"],
+): { icon: string; color?: string; textColor?: string } {
   switch (state) {
     case "done":
-      return { box: "[x]", boxColor: resolve("clai.success"), textColor: resolve("clai.textFaint") };
+      return {
+        icon: lifecycleIcon("pass"),
+        color: resolve("state.pass"),
+        textColor: resolve("text.muted"),
+      };
     case "active":
-      return { box: "[~]", boxColor: resolve("clai.accent"), textColor: resolve("clai.text") };
+      return {
+        icon: lifecycleIcon("working"),
+        color: resolve("state.working"),
+        textColor: resolve("text.primary"),
+      };
     case "failed":
-      return { box: "[!]", boxColor: resolve("clai.error"), textColor: resolve("clai.text") };
+      return {
+        icon: lifecycleIcon("fail"),
+        color: resolve("state.fail"),
+        textColor: resolve("text.primary"),
+      };
     case "skipped":
-      return { box: "[-]", boxColor: resolve("clai.textFaint"), textColor: resolve("clai.textFaint") };
+      return {
+        icon: lifecycleIcon("blocked"),
+        color: resolve("state.blocked"),
+        textColor: resolve("text.muted"),
+      };
     default:
-      return { box: "[ ]", boxColor: resolve("clai.textMuted"), textColor: resolve("clai.textMuted") };
+      return {
+        icon: lifecycleIcon("working"),
+        color: resolve("text.muted"),
+        textColor: resolve("text.muted"),
+      };
   }
 }
 
 export function PlanBlock({ item, width }: { item: PlanItem; width: number }) {
-  const measure = Math.max(8, width - 6);
+  const measure = Math.max(8, width - 4);
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginBottom={1}>
+      {item.title ? (
+        <Text bold color={resolve("text.primary")}>
+          {item.title}
+        </Text>
+      ) : null}
       {item.steps.map((step, index) => {
-        const { box, boxColor, textColor } = todoBox(step.state);
+        const { icon, color, textColor } = planStepVisual(step.state);
         const lines = wrapText(step.label, measure);
         return (
           <Box key={step.id ?? `${item.id}-${index}`} flexDirection="column">
             {lines.map((line, lineIndex) => (
-              <BlockLine
-                key={lineIndex}
-                width={width}
-                segments={
-                  lineIndex === 0
-                    ? [
-                        { text: box, color: boxColor },
-                        { text: ` ${line}`, color: textColor },
-                      ]
-                    : [{ text: `    ${line}`, color: textColor }]
-                }
-              />
+              <Box key={lineIndex}>
+                {lineIndex === 0 ? (
+                  <>
+                    <Text color={color}>{icon} </Text>
+                    <Text color={textColor}>{line}</Text>
+                  </>
+                ) : (
+                  <Text color={textColor}>{`  ${line}`}</Text>
+                )}
+              </Box>
             ))}
           </Box>
         );
@@ -519,64 +899,63 @@ export function PlanBlock({ item, width }: { item: PlanItem; width: number }) {
 
 export function ApprovalPrompt({ item, width }: { item: ApprovalItem; width: number }) {
   const decided = item.decision != null;
-  const color =
+  const colorToken: ThemeToken =
     item.decision === "denied"
-      ? resolve("clai.error")
+      ? "state.fail"
       : item.decision === "allowed" || item.decision === "auto"
-        ? resolve("clai.success")
-        : resolve("clai.warning");
-  const lines = wrapText(item.request, Math.max(8, width - 2));
+        ? "state.pass"
+        : "state.working";
+  const icon = decided
+    ? item.decision === "denied"
+      ? lifecycleIcon("fail")
+      : lifecycleIcon("pass")
+    : glyph("warn");
+  const lines = wrapText(item.request, Math.max(8, width - 4));
   return (
-    <Box flexDirection="column">
-      <BlockLine
-        width={width}
-        ruleColor={resolve("clai.warning")}
-        segments={[
-          { text: "approval", color: resolve("clai.text") },
-          { text: `  ${item.tool}`, color: resolve("clai.textMuted") },
-        ]}
-      />
+    <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+      <Box>
+        <Text color={resolve(colorToken)}>{icon} </Text>
+        <Text bold color={resolve("text.primary")}>
+          approval
+        </Text>
+        <Text color={resolve("text.muted")}>{`  ${item.tool}`}</Text>
+      </Box>
       {lines.map((line, index) => (
-        <BlockLine
-          key={index}
-          width={width}
-          ruleColor={resolve("clai.warning")}
-          segments={[{ text: line, color: resolve("clai.textMuted") }]}
-        />
+        <Text key={index} color={resolve("text.muted")}>
+          {`  ${line}`}
+        </Text>
       ))}
-      <BlockLine
-        width={width}
-        ruleColor={resolve("clai.warning")}
-        segments={[
-          {
-            text: decided
-              ? `${item.decision}${item.reason ? ` · ${item.reason}` : ""}`
-              : "waiting · y allow / n deny",
-            color,
-          },
-        ]}
-      />
+      <Text color={resolve(colorToken)}>
+        {`  ${
+          decided
+            ? `${item.decision}${item.reason ? ` · ${item.reason}` : ""}`
+            : "waiting · y allow / n deny"
+        }`}
+      </Text>
     </Box>
   );
 }
 
 export function VerifyResult({ item, width }: { item: VerifyItem; width: number }) {
-  const color = item.ok ? resolve("clai.success") : resolve("clai.error");
+  const state: LifecycleState = item.ok ? "pass" : "fail";
+  const color = resolve(LIFECYCLE[state].token);
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
       <Box>
-        <Text color={color}>{glyph("statusDot")} </Text>
-        <Text color={resolve("clai.text")}>verify</Text>
-        <Text color={resolve("clai.textMuted")}>{`  ${item.label}`}</Text>
+        <Text color={color}>{lifecycleIcon(state)} </Text>
+        <Text bold color={color}>
+          {LIFECYCLE[state].label}
+        </Text>
+        <Text color={resolve("text.muted")}>{`  ${item.label}`}</Text>
         {item.detail ? (
-          <Text color={resolve("clai.textMuted")}>
+          <Text color={resolve("text.muted")}>
             {`  ${truncate(item.detail, Math.max(12, width - 30))}`}
           </Text>
         ) : null}
       </Box>
       {item.logPath ? (
         <Box paddingLeft={2}>
-          <Text color={resolve("clai.textFaint")} dimColor={faintUsesDim()}>
+          <Text color={resolve("text.muted")} dimColor={faintUsesDim()}>
             {item.logPath}
           </Text>
         </Box>
@@ -586,17 +965,23 @@ export function VerifyResult({ item, width }: { item: VerifyItem; width: number 
 }
 
 export function NoteRow({ item, width }: { item: NoteItem; width: number }) {
-  const color =
+  const token: ThemeToken =
     item.level === "error"
-      ? resolve("clai.error")
+      ? "state.fail"
       : item.level === "warn"
-        ? resolve("clai.warning")
-        : resolve("clai.textMuted");
+        ? "state.working"
+        : "text.muted";
+  const icon =
+    item.level === "error"
+      ? lifecycleIcon("fail")
+      : item.level === "warn"
+        ? glyph("warn")
+        : lifecycleIcon("working");
   return (
     <Box>
-      <Text color={color}>{`${glyph("bullet")} ${item.label}`}</Text>
+      <Text color={resolve(token)}>{`${icon} ${item.label}`}</Text>
       {item.detail ? (
-        <Text color={resolve("clai.textMuted")}>
+        <Text color={resolve("text.muted")}>
           {`  ${truncate(item.detail, Math.max(12, width - item.label.length - 6))}`}
         </Text>
       ) : null}
@@ -604,7 +989,7 @@ export function NoteRow({ item, width }: { item: NoteItem; width: number }) {
   );
 }
 
-// ── in-flight line ───────────────────────────────────────────────────────────
+// ── in-flight line (compat wrapper around LifecycleLine) ─────────────────────
 
 export function WorkingLine({
   status,
@@ -620,44 +1005,74 @@ export function WorkingLine({
   width: number;
 }) {
   if (!status) return null;
-  const frames = glyphs().spinnerFrames;
-  const spinnerColor =
-    status.level === "error"
-      ? resolve("clai.error")
-      : status.level === "warn"
-        ? resolve("clai.warning")
-        : resolve("clai.accent");
+  const phase = deriveLifecycle({ status, items: [] });
+  const detail = [
+    agent,
+    model,
+    status.label,
+    status.detail,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <Box>
-      <Text color={spinnerColor}>{frames[frame % frames.length]} </Text>
-      <Text color={resolve("clai.text")}>{agent}</Text>
-      <Text color={resolve("clai.textMuted")}>
-        {model ? ` · ${model}` : ""}
-        {`  ${truncate(status.label, Math.max(10, width - 30))}`}
-        {status.detail ? `  ${truncate(status.detail, 40)}` : ""}
-      </Text>
+    <LifecycleLine
+      phase={phase ? { ...phase, detail } : null}
+      frame={frame}
+      width={width}
+    />
+  );
+}
+
+// ── plan / approvals panes ───────────────────────────────────────────────────
+
+/** @deprecated Prefer PlanPane; kept for export stability. */
+export const SIDEBAR_WIDTH = 36;
+
+export function PlanPane({
+  todo,
+  width,
+}: {
+  todo: PlanItem | null;
+  width: number;
+}) {
+  if (!todo || todo.steps.length === 0) return null;
+  return (
+    <Box flexDirection="column" width={width} marginTop={1}>
+      <Text color={resolve("text.muted")}>plan</Text>
+      <PlanBlock item={todo} width={width} />
     </Box>
   );
 }
 
-// ── sidebar ──────────────────────────────────────────────────────────────────
-
-export const SIDEBAR_WIDTH = 42;
-
-function SectionHeading({ label }: { label: string }) {
+export function ApprovalsPane({
+  items,
+  width,
+}: {
+  items: ApprovalItem[];
+  width: number;
+}) {
+  const pending = items.filter((item) => item.decision == null);
+  if (pending.length === 0) return null;
   return (
-    <Text bold color={resolve("clai.text")}>
-      {label}
-    </Text>
+    <Box flexDirection="column" width={width} marginTop={1}>
+      <Text color={resolve("text.muted")}>approvals</Text>
+      {pending.map((item) => (
+        <ApprovalPrompt key={item.id} item={item} width={width} />
+      ))}
+    </Box>
   );
 }
 
+/**
+ * Compact side column used when the terminal is wide enough. Shows plan only —
+ * MCP / LSP / tokens live on the context strip.
+ */
 export function Sidebar({
-  context,
-  metrics,
+  context: _context,
+  metrics: _metrics,
   todo,
-  height,
-  version,
+  height: _height,
+  version: _version,
 }: {
   context: RunContext;
   metrics: RunMetrics;
@@ -665,205 +1080,156 @@ export function Sidebar({
   height: number;
   version: string;
 }) {
-  const totalTokens = metrics.tokensIn + metrics.tokensOut;
-  const pct = metrics.contextPct != null ? Math.round(metrics.contextPct) : null;
-  const pctColor =
-    pct == null
-      ? resolve("clai.textMuted")
-      : pct >= 95
-        ? resolve("clai.error")
-        : pct >= 80
-          ? resolve("clai.warning")
-          : resolve("clai.textMuted");
-
   return (
-    <Box
-      flexDirection="column"
-      width={SIDEBAR_WIDTH}
-      height={height}
-      paddingLeft={1}
-      paddingRight={1}
-    >
-      <Text bold color={context.title ? resolve("clai.text") : resolve("clai.textMuted")} wrap="wrap">
-        {context.title ?? "New session"}
-      </Text>
-      <Box marginTop={1} flexDirection="column">
-        <SectionHeading label="Context" />
-        <Text color={resolve("clai.textMuted")}>{`${formatTokens(totalTokens)} tokens`}</Text>
-        {pct != null ? <Text color={pctColor}>{`${pct}% used`}</Text> : null}
-        <Text color={resolve("clai.textMuted")}>{`${formatCost(metrics.costUsd)} spent`}</Text>
-      </Box>
-      <Box marginTop={1} flexDirection="column">
-        <SectionHeading label="MCP" />
-        {context.mcp.length === 0 ? (
-          <Text color={resolve("clai.textMuted")}>No MCP servers configured</Text>
-        ) : (
-          context.mcp.map((name) => (
-            <Box key={name}>
-              <Text color={resolve("clai.success")}>{glyph("statusDot")} </Text>
-              <Text color={resolve("clai.text")}>{name}</Text>
-              <Text color={resolve("clai.textMuted")}> Connected</Text>
-            </Box>
-          ))
-        )}
-      </Box>
-      <Box marginTop={1} flexDirection="column">
-        <SectionHeading label="LSP" />
-        {context.lsp.length === 0 ? (
-          <Text color={resolve("clai.textMuted")} wrap="wrap">
-            LSPs will activate as files are read
-          </Text>
-        ) : (
-          context.lsp.map((name) => (
-            <Box key={name}>
-              <Text color={resolve("clai.accent")}>{glyph("bullet")} </Text>
-              <Text color={resolve("clai.textMuted")}>{name}</Text>
-            </Box>
-          ))
-        )}
-      </Box>
-      {todo && todo.steps.length > 0 ? (
-        <Box marginTop={1} flexDirection="column">
-          <SectionHeading label="Todo" />
-          {todo.steps.map((step, index) => {
-            const { box, boxColor, textColor } = todoBox(step.state);
-            const lines = wrapText(step.label, SIDEBAR_WIDTH - 2 - 4);
-            return (
-              <Box key={step.id ?? index} flexDirection="column">
-                {lines.map((line, lineIndex) => (
-                  <Box key={lineIndex}>
-                    {lineIndex === 0 ? (
-                      <>
-                        <Text color={boxColor}>{box}</Text>
-                        <Text color={textColor}>{` ${line}`}</Text>
-                      </>
-                    ) : (
-                      <Text color={textColor}>{`    ${line}`}</Text>
-                    )}
-                  </Box>
-                ))}
-              </Box>
-            );
-          })}
-        </Box>
-      ) : null}
-      <Box flexGrow={1} />
-      {context.cwd ? (
-        <Text color={resolve("clai.textMuted")}>{truncate(context.cwd, SIDEBAR_WIDTH - 2)}</Text>
-      ) : null}
-      <Box>
-        <Text color={resolve("clai.accent")}>{glyph("statusDot")} </Text>
-        <Text color={resolve("clai.text")}>clai</Text>
-        <Text color={resolve("clai.textMuted")}>{` ${version}`}</Text>
-      </Box>
+    <Box flexDirection="column" width={SIDEBAR_WIDTH} paddingLeft={2}>
+      <PlanPane todo={todo} width={SIDEBAR_WIDTH - 2} />
     </Box>
   );
 }
 
-// ── footer ───────────────────────────────────────────────────────────────────
+// ── context strip ────────────────────────────────────────────────────────────
 
 export type FooterHint = { id: string; key: string; label: string };
 
-/** Eight-cell progress bar: `███░░░░░`. */
+/**
+ * @deprecated Progress fills removed from the design language. Renders a quiet
+ * muted rule so existing call sites keep compiling.
+ */
 export function ProgressBar({ fraction }: { fraction: number }) {
-  const filled = Math.max(0, Math.min(8, Math.round(fraction * 8)));
-  return (
-    <Text>
-      <Text color={resolve("clai.accent")}>
-        {glyph("progressFull").repeat(filled)}
-      </Text>
-      <Text color={resolve("clai.textFaint")} dimColor={faintUsesDim()}>
-        {glyph("progressIdle").repeat(8 - filled)}
-      </Text>
-    </Text>
-  );
+  void fraction;
+  return <Text color={resolve("border")}>{glyph("hRule").repeat(8)}</Text>;
 }
 
-export function FooterBar({
+/** Slim demoted strip: model · provider · sandbox · tokens/cost · credit. */
+export function ContextStrip({
   width,
-  left,
-  progress,
-  interrupt,
+  context,
+  metrics,
+  lifecycle,
   hints,
+  interrupt,
   registerHint,
 }: {
   width: number;
-  left?: string;
-  /** 0..1 fills the eight-cell progress bar when set. */
-  progress?: number;
-  /** null = hidden, "armed" = `esc interrupt`, "confirm" = `esc again to interrupt` */
-  interrupt: "armed" | "confirm" | null;
-  hints: FooterHint[];
+  context: RunContext;
+  metrics: RunMetrics;
+  lifecycle: LifecyclePhase | null;
+  hints?: FooterHint[];
+  interrupt?: "armed" | "confirm" | null;
   registerHint?: (id: string, node: DOMElement | null) => void;
 }) {
-  const interruptText =
-    interrupt === "confirm" ? "esc again to interrupt" : interrupt === "armed" ? "esc interrupt" : "";
-  const leftPlain = [
-    progress != null ? "████████" : null,
-    left,
-    interruptText,
-  ]
-    .filter(Boolean)
-    .join("  ");
-  const fit: FooterHint[] = [];
-  let rightLen = 0;
-  for (const hint of hints) {
-    const len = hint.key.length + 1 + hint.label.length + (fit.length > 0 ? 2 : 0);
-    if (leftPlain.length + rightLen + len + 2 > width) break;
-    fit.push(hint);
-    rightLen += len;
+  const { model, provider } = splitModel(context.model);
+  const narrow = width < 100;
+  const totalTokens = metrics.tokensIn + metrics.tokensOut;
+  const parts: string[] = [];
+
+  if (model) parts.push(model);
+  if (!narrow && provider) parts.push(provider);
+  if (!narrow && context.sandboxMode) parts.push(context.sandboxMode);
+
+  if (narrow) {
+    if (lifecycle && (lifecycle.state === "pass" || lifecycle.state === "fail")) {
+      parts.push(LIFECYCLE[lifecycle.state].label);
+    }
+  } else {
+    if (totalTokens > 0) {
+      parts.push(`${formatTokens(totalTokens)} tok`);
+    }
+    if (metrics.costUsd != null) {
+      parts.push(formatCost(metrics.costUsd));
+    }
+    if (context.tracePath) {
+      parts.push(truncate(context.tracePath, 28));
+    }
   }
+
+  const left = parts.join(" · ");
 
   return (
     <Box width={width} flexDirection="row" justifyContent="space-between">
       <Box>
-        {progress != null ? <ProgressBar fraction={progress} /> : null}
-        {left ? (
-          <Text color={resolve("clai.textMuted")}>
-            {progress != null ? `  ${left}` : left}
-          </Text>
-        ) : null}
+        <Text color={resolve("text.muted")}>{left}</Text>
         {interrupt != null ? (
           <Box
-            marginLeft={2}
+            marginLeft={left ? 2 : 0}
             ref={(node) => registerHint?.("interrupt", node as DOMElement | null)}
           >
             <Text
               bold
-              color={interrupt === "confirm" ? resolve("clai.warning") : resolve("clai.text")}
+              color={
+                interrupt === "confirm"
+                  ? resolve("state.working")
+                  : resolve("text.primary")
+              }
             >
               esc
             </Text>
-            <Text color={resolve("clai.textMuted")}>
+            <Text color={resolve("text.muted")}>
               {interrupt === "confirm" ? " again to interrupt" : " interrupt"}
             </Text>
           </Box>
         ) : null}
+        {hints?.map((hint) =>
+          hint.id === "interrupt" ? null : (
+            <Box
+              key={hint.id}
+              marginLeft={2}
+              ref={(node) => registerHint?.(hint.id, node as DOMElement | null)}
+            >
+              <Text bold color={resolve("text.primary")}>
+                {hint.key}
+              </Text>
+              <Text color={resolve("text.muted")}>{` ${hint.label}`}</Text>
+            </Box>
+          ),
+        )}
       </Box>
-      <Box>
-        {fit.map((hint, index) => (
-          <Box
-            key={hint.id}
-            marginLeft={index > 0 ? 2 : 0}
-            ref={(node) => registerHint?.(hint.id, node as DOMElement | null)}
-          >
-            <Text bold color={resolve("clai.text")}>
-              {hint.key}
-            </Text>
-            <Text color={resolve("clai.textMuted")}>{` ${hint.label}`}</Text>
-          </Box>
-        ))}
-      </Box>
+      <Credit />
     </Box>
   );
 }
 
-/** Splash footer: `<cwd>  ● <n> MCP  /status` left, `clai <version>` right. */
+/** FooterBar — thin wrapper so existing app code keeps a familiar name. */
+export function FooterBar({
+  width,
+  left: _left,
+  progress: _progress,
+  interrupt,
+  hints,
+  registerHint,
+  context,
+  metrics,
+  lifecycle,
+}: {
+  width: number;
+  left?: string;
+  progress?: number;
+  interrupt: "armed" | "confirm" | null;
+  hints: FooterHint[];
+  registerHint?: (id: string, node: DOMElement | null) => void;
+  context?: RunContext;
+  metrics?: RunMetrics;
+  lifecycle?: LifecyclePhase | null;
+}) {
+  return (
+    <ContextStrip
+      width={width}
+      context={context ?? { mcp: [], lsp: [] }}
+      metrics={metrics ?? { tokensIn: 0, tokensOut: 0 }}
+      lifecycle={lifecycle ?? null}
+      hints={hints}
+      interrupt={interrupt}
+      registerHint={registerHint}
+    />
+  );
+}
+
+/** @deprecated Splash removed — credit + cwd live on the context strip. */
 export function SplashFooter({
   width,
   cwd,
-  mcpCount,
-  version,
+  mcpCount: _mcpCount,
+  version: _version,
 }: {
   width: number;
   cwd?: string;
@@ -872,24 +1238,17 @@ export function SplashFooter({
 }) {
   return (
     <Box width={width} flexDirection="row" justifyContent="space-between">
-      <Box>
-        {cwd ? <Text color={resolve("clai.textMuted")}>{cwd}</Text> : null}
-        {mcpCount > 0 ? (
-          <Box marginLeft={cwd ? 2 : 0}>
-            <Text color={resolve("clai.success")}>{glyph("statusDot")}</Text>
-            <Text color={resolve("clai.text")}>{` ${mcpCount} MCP`}</Text>
-          </Box>
-        ) : null}
-        <Box marginLeft={cwd || mcpCount > 0 ? 2 : 0}>
-          <Text color={resolve("clai.textMuted")}>/status</Text>
-        </Box>
-      </Box>
-      <Box>
-        <Text color={resolve("clai.text")}>clai</Text>
-        <Text color={resolve("clai.textMuted")}>{` ${version}`}</Text>
-      </Box>
+      <Text color={resolve("text.muted")}>{cwd ?? ""}</Text>
+      <Credit />
     </Box>
   );
+}
+
+function splitModel(raw?: string): { model?: string; provider?: string } {
+  if (!raw) return {};
+  const slash = raw.indexOf("/");
+  if (slash <= 0) return { model: raw };
+  return { provider: raw.slice(0, slash), model: raw.slice(slash + 1) };
 }
 
 // ── activity dispatch ────────────────────────────────────────────────────────
@@ -911,7 +1270,13 @@ export function ActivityRowFor({
     case "user":
       return <UserBlock item={item} width={width} />;
     case "assistant":
-      return <AssistantProse item={item} />;
+      return (
+        <AssistantProse
+          item={item}
+          width={width}
+          spinnerFrame={spinnerFrame}
+        />
+      );
     case "tool":
       return (
         <ToolRowLine
@@ -935,11 +1300,11 @@ export function ActivityRowFor({
   }
 }
 
-/** Adjacent single tool rows stay dense (0 blank lines); everything else gets 1. */
+/** Adjacent tool rows stay dense; everything else gets breathing room. */
 function gapBefore(block: RenderBlock, prev: RenderBlock | undefined): number {
-  if (!prev) return 1;
-  const prevTool = prev.kind === "single" && prev.item.kind === "tool";
-  const nextTool = block.kind === "single" && block.item.kind === "tool";
+  if (!prev) return 0;
+  const prevTool = prev.kind === "toolGroup" || (prev.kind === "single" && prev.item.kind === "tool");
+  const nextTool = block.kind === "toolGroup" || (block.kind === "single" && block.item.kind === "tool");
   if (prevTool && nextTool) return 0;
   return 1;
 }
@@ -957,33 +1322,42 @@ export function Activity({
   expandedIds?: ReadonlySet<string>;
   registerRow?: (id: string, node: DOMElement | null) => void;
 }) {
+  const border = resolve("border");
+  const rule = glyph("hRule").repeat(Math.max(8, width));
+  const inner = Math.max(8, width);
   return (
-    <Box flexDirection="column">
-      {blocks.map((block, index) => (
-        <Box
-          key={block.kind === "toolGroup" ? block.id : block.item.id}
-          marginTop={gapBefore(block, blocks[index - 1])}
-        >
-          {block.kind === "toolGroup" ? (
-            <ToolGroupBlock
-              group={block.group}
-              items={block.items}
-              width={width}
-              spinnerFrame={spinnerFrame}
-              expandedIds={expandedIds}
-              registerRow={registerRow}
-            />
-          ) : (
-            <ActivityRowFor
-              item={block.item}
-              width={width}
-              spinnerFrame={spinnerFrame}
-              expandedIds={expandedIds}
-              registerRow={registerRow}
-            />
-          )}
-        </Box>
-      ))}
+    <Box flexDirection="column" width={width}>
+      <Text color={border}>{rule}</Text>
+      {blocks.length === 0 ? (
+        <Text color={resolve("text.muted")}> </Text>
+      ) : (
+        blocks.map((block, index) => (
+          <Box
+            key={block.kind === "toolGroup" ? block.id : block.item.id}
+            marginTop={gapBefore(block, blocks[index - 1])}
+          >
+            {block.kind === "toolGroup" ? (
+              <ToolGroupBlock
+                group={block.group}
+                items={block.items}
+                width={inner}
+                spinnerFrame={spinnerFrame}
+                expandedIds={expandedIds}
+                registerRow={registerRow}
+              />
+            ) : (
+              <ActivityRowFor
+                item={block.item}
+                width={inner}
+                spinnerFrame={spinnerFrame}
+                expandedIds={expandedIds}
+                registerRow={registerRow}
+              />
+            )}
+          </Box>
+        ))
+      )}
+      <Text color={border}>{rule}</Text>
     </Box>
   );
 }

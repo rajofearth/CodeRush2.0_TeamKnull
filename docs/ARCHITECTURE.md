@@ -707,6 +707,7 @@ Bench history: `.clai/bench/history.jsonl`
 
 ## References
 
+- User-facing docs / quick start: [`README.md`](../README.md)
 - Repo agent guide: [`AGENTS.md`](../AGENTS.md)
 - Memory & context spec: [`.scratch/wayfinder-bodies/memory-context-architecture.md`](../.scratch/wayfinder-bodies/memory-context-architecture.md)
 - OpenCode peer verification note: [`.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md`](../.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md)
