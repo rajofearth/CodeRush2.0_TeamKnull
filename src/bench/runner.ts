@@ -16,6 +16,7 @@ import { runAgentLoop, resolveModel, hasApiKey, type ResolvedModel } from "../ad
 import { createSandbox } from "../sandbox/index.js";
 import type { ToolContext } from "../tools/index.js";
 import { createTraceWriter } from "../trace/index.js";
+import { estimateUsdBench } from "./pricing.js";
 import {
   computeAggregates,
   type BenchRunRecord,
@@ -24,21 +25,6 @@ import {
   type LiveTask,
   type TaskResult,
 } from "./types.js";
-
-/**
- * Rough USD per 1M tokens used for the cost column. Providers do not report
- * cost through the AI SDK, so this is an estimate keyed by provider id;
- * unknown providers fall back to `default`.
- */
-const PRICING: Record<string, { inPerM: number; outPerM: number }> = {
-  groq: { inPerM: 0.1, outPerM: 0.5 },
-  cerebras: { inPerM: 0.1, outPerM: 0.1 },
-  openai: { inPerM: 2.5, outPerM: 10 },
-  anthropic: { inPerM: 3, outPerM: 15 },
-  gemini: { inPerM: 0.1, outPerM: 0.4 },
-  openrouter: { inPerM: 1, outPerM: 3 },
-  default: { inPerM: 0.1, outPerM: 0.2 },
-};
 
 const CHECK_TIMEOUT_MS = 30_000;
 
@@ -357,7 +343,6 @@ async function agentSolve(
     },
   };
 
-  const price = PRICING[ctx.provider] ?? PRICING.default!;
   const timedOut = Symbol("timeout");
   let timer: NodeJS.Timeout | undefined;
   const BENCH_SYSTEM = `You are running a scored coding benchmark task in a tiny isolated workspace.
@@ -388,9 +373,8 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
         const tokensOut = Number(usage.completionTokens) || 0;
         out.tokensIn = tokensIn;
         out.tokensOut = tokensOut;
-        const cost =
-          (tokensIn / 1e6) * price.inPerM + (tokensOut / 1e6) * price.outPerM;
-        out.cost = Number.isFinite(cost) ? cost : 0;
+        // Same tokens→$ mapping as compare-pi (no cache-hit discount).
+        out.cost = estimateUsdBench(ctx.provider, tokensIn, tokensOut);
         ctx.onProgress({
           tokensIn: out.tokensIn,
           tokensOut: out.tokensOut,
