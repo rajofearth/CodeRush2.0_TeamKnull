@@ -1,6 +1,5 @@
 /**
- * Load `.env` from package root (and cwd) without printing secrets.
- * Safe no-op if dotenv is missing or files absent.
+ * Load `.env` from package root (and cwd) without printing secrets or tips.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +11,9 @@ export async function loadEnvFiles(): Promise<void> {
       path.dirname(fileURLToPath(import.meta.url)),
       "../..",
     );
-    dotenv.config({ path: path.join(root, ".env") });
-    dotenv.config(); // cwd override
+    const quiet = { quiet: true } as { quiet?: boolean };
+    dotenv.config({ path: path.join(root, ".env"), ...quiet });
+    dotenv.config(quiet);
   } catch {
     // optional
   }

@@ -1,6 +1,6 @@
 /**
  * adapter — Vercel AI SDK soft agent loop + pluggable providers.
- * Default: Cerebras via CEREBRAS_API_KEY; swap with CLAI_PROVIDER.
+ * Default: Cerebras (OpenAI-compatible) via CEREBRAS_API_KEY.
  */
 
 import { generateText, type CoreMessage } from "ai";
@@ -28,7 +28,6 @@ export type ResolveModelOptions = {
   prefer?: ProviderId;
 };
 
-/** True when at least one registered provider key is present. */
 export function hasApiKey(): boolean {
   return hasAnyProviderKey();
 }
@@ -47,6 +46,8 @@ export async function resolveModel(
 export type AgentLoopOptions = {
   ctx: ToolContext;
   prompt: string;
+  /** Prior turns for multi-turn chat (excluding the new user prompt). */
+  history?: CoreMessage[];
   system?: string;
   maxSteps?: number;
   model?: ResolvedModel;
@@ -64,10 +65,14 @@ export type AgentLoopResult = {
   steps: number;
   provider?: string;
   modelId?: string;
+  /** Full message list after this turn (for the next prompt). */
+  messages: CoreMessage[];
 };
 
-const DEFAULT_SYSTEM = `You are CLAI, a coding agent. Use tools to explore and edit the workspace.
-Prefer read-only discovery (grep/glob/read) before edits. After editing, run a command to verify when useful.
+const DEFAULT_SYSTEM = `You are CLAI, a coding agent in an interactive ADE session. Use tools to explore and edit the workspace.
+Prefer read-only discovery (grep/glob/read/repo_intake/LSP) before edits.
+Use lsp_diagnostics after edits on TS/Python; lsp_definition / lsp_references for navigation.
+After editing, run a command to verify when useful.
 Soft completion: stop when the task looks done — there is no hard finish gate. Be concise.`;
 
 export async function runAgentLoop(
@@ -84,7 +89,10 @@ export async function runAgentLoop(
     prompt: opts.prompt.slice(0, 500),
   });
 
-  const messages: CoreMessage[] = [{ role: "user", content: opts.prompt }];
+  const messages: CoreMessage[] = [
+    ...(opts.history ?? []),
+    { role: "user", content: opts.prompt },
+  ];
   const totals = { promptTokens: 0, completionTokens: 0 };
 
   const result = await generateText({
@@ -114,11 +122,19 @@ export async function runAgentLoop(
     },
   });
 
+  const nextMessages: CoreMessage[] = [
+    ...messages,
+    ...(result.response?.messages ?? [
+      { role: "assistant" as const, content: result.text },
+    ]),
+  ];
+
   return {
     text: result.text,
     finishReason: result.finishReason,
     steps: result.steps?.length ?? 1,
     provider: resolved.provider,
     modelId: resolved.modelId,
+    messages: nextMessages,
   };
 }
