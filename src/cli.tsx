@@ -52,8 +52,9 @@ Env:
   GROQ_API_KEY                      Default provider (CLAI_PROVIDER=groq)
   OPENROUTER_API_KEY / CEREBRAS_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
   GEMINI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY
-  CLAI_PROVIDER                     groq | openrouter | cerebras | openai | anthropic | gemini | gateway
-  CLAI_MODEL                        Model id (default openai/gpt-oss-20b; gemini → gemini-3.5-flash-lite; gateway → google/gemini-2.5-flash-lite)
+  DEEPSEEK_API_KEY                  DeepSeek (CLAI_PROVIDER=deepseek)
+  CLAI_PROVIDER                     groq | openrouter | cerebras | openai | anthropic | gemini | gateway | deepseek
+  CLAI_MODEL                        Model id (default openai/gpt-oss-20b; gemini → gemini-3.5-flash-lite; gateway → google/gemma-4-31b-it; deepseek → deepseek-v4-flash)
   AI_GATEWAY_API_KEY                Vercel AI Gateway (CLAI_PROVIDER=gateway)
   CLAI_AUTO_APPROVE=1               Auto-approve gated bash (dev only)
   CLAI_NO_TUI=1                     Headless activity (CI / pipes)
@@ -263,7 +264,7 @@ if (wantsHelp) {
 
   if (!hasApiKey()) {
     console.error(
-      "No API key. Set GROQ_API_KEY (default), or OPENROUTER/CEREBRAS/OPENAI/ANTHROPIC/GEMINI — or use `clai demo`.",
+      "No API key. Set GROQ_API_KEY (default), or OPENROUTER/CEREBRAS/OPENAI/ANTHROPIC/GEMINI/DEEPSEEK/AI_GATEWAY — or use `clai demo`.",
     );
     process.exitCode = 1;
   } else if (!ui.isTuiEnabled() && !initialPrompt) {

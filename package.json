@@ -7,7 +7,8 @@
     "clai": "./bin/clai.js"
   },
   "scripts": {
-    "clai": "tsx src/cli.tsx"
+    "clai": "tsx src/cli.tsx",
+    "bench:compare-pi": "tsx src/bench/compare-pi.ts"
   },
   "engines": {
     "node": ">=20"
