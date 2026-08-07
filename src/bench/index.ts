@@ -197,7 +197,12 @@ export async function runBenchCli(
 
     if (command === "serve") {
       const port = parsePort(argv);
-      const handle = await startBenchServer({ store, live, port });
+      const handle = await startBenchServer({
+        store,
+        live,
+        port,
+        workspaceRoot,
+      });
       console.log(`bench dashboard → ${handle.url}`);
       console.log("Ctrl+C to stop.");
       await waitForInterrupt();
@@ -220,7 +225,12 @@ export async function runBenchCli(
 
       let handle: Awaited<ReturnType<typeof startBenchServer>> | undefined;
       if (wantServe) {
-        handle = await startBenchServer({ store, live, port });
+        handle = await startBenchServer({
+          store,
+          live,
+          port,
+          workspaceRoot,
+        });
         console.log(`bench dashboard → ${handle.url}`);
       }
 
