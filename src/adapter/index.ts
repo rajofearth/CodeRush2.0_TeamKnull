@@ -103,6 +103,13 @@ export type AgentLoopOptions = {
    * streaming; `onText` still fires with the full step text when a step ends.
    */
   onTextDelta?: (delta: string) => void;
+  /**
+   * Incremental model reasoning when the provider surfaces it via the AI SDK
+   * `fullStream` (`reasoning` parts). Many OpenAI-compatible hosts (incl. some
+   * DeepSeek routes on this SDK version) never emit these — callers must not
+   * invent thoughts; only forward real deltas.
+   */
+  onThinkingDelta?: (delta: string) => void;
   onUsage?: (usage: {
     promptTokens: number;
     completionTokens: number;
@@ -380,6 +387,9 @@ export async function runAgentLoop(
           system,
           messages: activeMessages,
           abortSignal: opts.signal,
+          // Stream tool-call args so the TUI can show "preparing write …"
+          // during long argument generation instead of looking hung.
+          toolCallStreaming: true,
           experimental_repairToolCall: async ({
             toolCall,
             parameterSchema,
@@ -404,12 +414,51 @@ export async function runAgentLoop(
           onStepFinish,
         });
 
-        // `await result.text` can hang with some OpenAI-compatible providers;
-        // draining textStream drives multi-step tool loops to completion.
+        // Drain fullStream so multi-step tool loops complete and so we can
+        // forward provider reasoning when present (AI SDK `reasoning` parts).
+        // Falls back to textStream behaviour for plain text-delta parts.
+        // Note: DeepSeek / OpenAI-compat hosts on this SDK version often omit
+        // reasoning stream parts — UI path stays wired; we only emit when present.
         let text = "";
-        for await (const delta of result.textStream) {
-          text += delta;
-          if (delta) opts.onTextDelta?.(delta);
+        let streamingToolArgs = "";
+        for await (const part of result.fullStream) {
+          if (part.type === "text-delta") {
+            text += part.textDelta;
+            if (part.textDelta) opts.onTextDelta?.(part.textDelta);
+          } else if (part.type === "reasoning") {
+            // Only emit real provider reasoning — never synthesize thoughts.
+            if (part.textDelta) opts.onThinkingDelta?.(part.textDelta);
+          } else if (part.type === "tool-call-streaming-start") {
+            streamingToolArgs = "";
+            const name = part.toolName;
+            const verb =
+              name === "write"
+                ? "preparing write"
+                : name === "edit"
+                  ? "preparing edit"
+                  : `preparing ${name}`;
+            opts.onStatus?.({ label: verb });
+          } else if (part.type === "tool-call-delta") {
+            streamingToolArgs += part.argsTextDelta ?? "";
+            // Try to surface the path early for write/edit so the status line
+            // isn't stuck on a bare "preparing write" for tens of seconds.
+            if (
+              (part.toolName === "write" || part.toolName === "edit") &&
+              streamingToolArgs.length < 800
+            ) {
+              const pathMatch =
+                /"path"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(streamingToolArgs) ??
+                /'path'\s*:\s*'((?:\\.|[^'\\])*)'/.exec(streamingToolArgs);
+              if (pathMatch?.[1]) {
+                const path = pathMatch[1].replace(/\\"/g, '"');
+                const verb =
+                  part.toolName === "write" ? "preparing write" : "preparing edit";
+                opts.onStatus?.({ label: verb, detail: path });
+              }
+            }
+          } else if (part.type === "tool-call") {
+            streamingToolArgs = "";
+          }
         }
         const [finishReason, steps, response, usage] = await Promise.all([
           result.finishReason,

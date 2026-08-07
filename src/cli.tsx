@@ -332,12 +332,13 @@ if (wantsHelp) {
       directory: workspace.dataDir,
     });
 
+    const toolBridge = ui.createToolPlaneBridge(bus);
     const ctx = {
       workspaceRoot: cwd,
       sandbox,
       shellJobs,
       trace,
-      onEvent: ui.createToolPlaneBridge(bus),
+      onEvent: toolBridge,
     };
 
     async function ensureIntake(): Promise<void> {
@@ -360,13 +361,50 @@ if (wantsHelp) {
       interrupted = false;
       lastTurnFailed = false;
       turn += 1;
-      const assistantId = `turn-${turn}`;
+      let segment = 0;
+      const assistantId = () => `turn-${turn}-s${segment}`;
+      const thinkId = `turn-${turn}-think`;
       let sawDelta = false;
+      let thinkingOpen = false;
+      let needNewSegment = false;
       let turnTokensIn = 0;
       let turnTokensOut = 0;
+
+      const sealThinking = () => {
+        if (!thinkingOpen) return;
+        bus.emit({
+          type: "thinking",
+          id: thinkId,
+          text: "",
+          done: true,
+        });
+        thinkingOpen = false;
+      };
+
+      const sealAssistant = () => {
+        if (sawDelta) {
+          bus.emit({
+            type: "assistant",
+            id: assistantId(),
+            text: "",
+            done: true,
+          });
+          sawDelta = false;
+        }
+      };
+
+      ctx.onEvent = (ev) => {
+        if (ev.type === "tool_call") {
+          sealThinking();
+          sealAssistant();
+          needNewSegment = true;
+        }
+        toolBridge(ev);
+      };
+
       bus.emit({ type: "user", text: prompt });
       bus.emit({ type: "context", title: prompt.slice(0, 80) });
-      bus.emit({ type: "status", label: "thinking" });
+      bus.emit({ type: "status", label: "working" });
 
       try {
         await ensureIntake();
@@ -390,31 +428,51 @@ if (wantsHelp) {
               done: status.done,
               sticky: status.sticky,
             }),
+          onThinkingDelta: (delta) => {
+            thinkingOpen = true;
+            bus.emit({
+              type: "thinking",
+              id: thinkId,
+              text: delta,
+              done: false,
+            });
+          },
           onTextDelta: (delta) => {
+            sealThinking();
+            if (needNewSegment) {
+              segment += 1;
+              needNewSegment = false;
+            }
             bus.emit({
               type: "assistant",
-              id: assistantId,
+              id: assistantId(),
               text: delta,
               done: false,
             });
             sawDelta = true;
           },
           onText: (text) => {
+            sealThinking();
             if (sawDelta) {
               bus.emit({
                 type: "assistant",
-                id: assistantId,
+                id: assistantId(),
                 text: "",
                 done: true,
               });
             } else if (text.trim()) {
+              if (needNewSegment) {
+                segment += 1;
+                needNewSegment = false;
+              }
               bus.emit({
                 type: "assistant",
-                id: assistantId,
+                id: assistantId(),
                 text,
                 done: true,
               });
             }
+            sawDelta = false;
           },
           onUsage: (usage) => {
             const deltaIn = usage.promptTokens - turnTokensIn;
@@ -436,14 +494,7 @@ if (wantsHelp) {
           },
         });
         history = result.messages;
-        if (sawDelta) {
-          bus.emit({
-            type: "assistant",
-            id: assistantId,
-            text: "",
-            done: true,
-          });
-        }
+        sealAssistant();
         bus.emit({
           type: "status",
           label: interrupted ? "interrupted" : "processed",
@@ -513,7 +564,7 @@ if (wantsHelp) {
       bus.emit({
         type: "status",
         label: "ready",
-        detail: `type a message · pgup/pgdn scroll · log ${sessionLog.path}`,
+        detail: "type a message",
         sticky: true,
         done: true,
       });

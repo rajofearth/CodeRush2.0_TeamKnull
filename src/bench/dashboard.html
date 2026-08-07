@@ -744,23 +744,139 @@
     }
   }
 
+  function historyTasksFromSummary(runId) {
+    const summary = runs.find((r) => r.runId === runId);
+    if (!summary || !summary.tasks || !summary.tasks.length) return null;
+    return summary.tasks.map((t) => ({
+      id: t.id,
+      title: t.title || t.id,
+      category: t.category || "bugfix",
+      status: t.status,
+      wallMs: t.wallMs,
+      steps: t.steps,
+      tokensIn: Number(t.tokensIn) || 0,
+      tokensOut: Number(t.tokensOut) || 0,
+      cost: Number(t.cost) || 0,
+      error: t.error,
+    }));
+  }
+
+  function applyStoredCompare(c) {
+    if (!c || c.partial === true) return false;
+    compare = fillMissingCompareRows(c);
+    renderCompare(true);
+    return true;
+  }
+
+  function compareClaiRunId() {
+    const m = /^(\S+)/.exec((compare && compare.claiLabel) || "");
+    return m ? m[1] : (compare && compare.claiRunId) || null;
+  }
+
+  function historyMatchesCompareClai() {
+    if (!(historyChartsPinned && selectedId && compare)) return false;
+    if (selectedId === compare.compareId) return true;
+    if (selectedId === compare.claiRunId) return true;
+    return selectedId === compareClaiRunId();
+  }
+
+  function historyRowIsCompare(r) {
+    return r.kind === "compare" || r.provider === "clai+pi" || !!(r.compareId && r.runId === r.compareId);
+  }
+
+  function muteHarnessCompareForHistory(runId) {
+    if (!compare) return;
+    const panel = $("compare-panel");
+    if (panel) panel.style.display = "block";
+    const summary = runs.find((r) => r.runId === runId);
+    const tasks = historyDetailTasks && historyDetailTasks.length
+      ? historyDetailTasks
+      : historyTasksFromSummary(runId);
+    const m = harnessMetrics(tasks || []);
+    const passRate = summary
+      ? Number(summary.passRate) || 0
+      : m.passRate;
+    const passed = summary ? (summary.passed || 0) : m.pass;
+    const total = summary ? (summary.total || 0) : m.n;
+    const wall = summary ? summary.totalWallMs : m.totalWallMs;
+    const cost = summary ? summary.totalCost : (m.avgCost != null ? m.avgCost * Math.max(m.n, 1) : 0);
+
+    $("compare-meta").innerHTML =
+      "<span>viewing history <strong>" + esc(runId) + "</strong></span>" +
+      (summary
+        ? "<span>" + esc(summary.provider) + " / " + esc(summary.model) + "</span>"
+        : "") +
+      (compare.claiLabel
+        ? "<span style=\"color:var(--faint)\">latest compare CLAI source: " +
+          esc(compareClaiRunId() || compare.claiLabel) + "</span>"
+        : "");
+
+    const winEl = $("compare-winner");
+    winEl.className = "winner-callout tie";
+    winEl.textContent =
+      "History run selected — Live + Charts show " + runId +
+      ". Click the compare CLAI source row or run Compare for CLAI vs pi.";
+
+    $("compare-scores").innerHTML =
+      '<div class="compare-score">' +
+        '<div class="label">Selected run</div>' +
+        '<div class="value ' + rateClass(passRate) + '">' +
+          passed + "/" + total +
+          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(passRate) + ")</span></div>" +
+        '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+          fmtMinutes(wall) + "</strong></div>" +
+        '<div style="margin-top:4px;font-size:12px;color:var(--muted)">cost <strong style="color:var(--text)">' +
+          fmtCost(cost) + "</strong></div>" +
+      "</div>" +
+      '<div class="compare-score">' +
+        '<div class="label">Harness compare</div>' +
+        '<div class="value" style="color:var(--faint)">—</div>' +
+        '<div style="margin-top:6px;font-size:12px;color:var(--faint)">paused while browsing history</div>' +
+      "</div>";
+
+    const scoreboard = $("scoreboard");
+    if (scoreboard) {
+      scoreboard.innerHTML =
+        '<div class="scoreboard-pending" style="color:var(--faint);font-size:13px;padding:8px 0">' +
+        "Composite CLAI vs pi scoreboard hidden — select " +
+        esc(compareClaiRunId() || "the compare CLAI run") +
+        " in History, or start Compare</div>";
+    }
+    const formula = $("score-formula");
+    if (formula) formula.textContent = "";
+    $("compare-body").innerHTML =
+      '<tr><td colspan="4" class="empty">task table is for harness compare — see Charts / Live for this run</td></tr>';
+    const foldSum = $("compare-fold-summary");
+    if (foldSum) foldSum.textContent = "Task results — history view";
+  }
+
+  function syncHarnessCompareForHistory() {
+    if (!historyChartsPinned || !selectedId) return;
+    if (historyMatchesCompareClai()) return;
+    muteHarnessCompareForHistory(selectedId);
+  }
+
   function refreshChartTitles(mode, runId, taskCount) {
     const passT = $("chart-pass-title");
     const durT = $("chart-dur-title");
     const avgBox = $("chart-avg-box");
+    const avgTitle = avgBox && avgBox.querySelector("h3");
     const n = taskCount != null ? " (" + taskCount + ")" : "";
     if (mode === "compare") {
       passT.textContent = "Pass rate — both harness pies";
       if (durT) durT.textContent = "Per-task metrics — CLAI vs pi" + n;
+      if (avgTitle) avgTitle.textContent = "Averages (per task)";
       if (avgBox) avgBox.classList.remove("hidden");
     } else if (mode === "history" && runId) {
       passT.textContent = "Pass rate — " + runId;
       if (durT) durT.textContent = "Per-task metrics — " + runId + n;
-      if (avgBox) avgBox.classList.add("hidden");
+      if (avgTitle) avgTitle.textContent = "Averages — " + runId;
+      if (avgBox) avgBox.classList.remove("hidden");
     } else {
       passT.textContent = "Pass rate";
       if (durT) durT.textContent = "Per-task metrics" + n;
-      if (avgBox) avgBox.classList.add("hidden");
+      if (avgTitle) avgTitle.textContent = "Averages (per task)";
+      if (avgBox) avgBox.classList.remove("hidden");
     }
   }
 
@@ -907,6 +1023,26 @@
     return out;
   }
 
+  /** Single-harness averages bar chart (history / live). */
+  function singleAvgSvg(m) {
+    const groups = [
+      { label: "avg time", v: m.avgWallMs > 0 ? m.avgWallMs / 1000 : null, fmt: (v) => (v == null ? "n/a" : v.toFixed(1) + "s") },
+      { label: "avg tokens", v: m.avgTokens, fmt: (v) => (v == null ? "n/a" : Math.round(v).toLocaleString()) },
+      { label: "avg cost", v: m.avgCost, fmt: (v) => (v == null ? "n/a" : "$" + v.toFixed(4)) },
+      { label: "total time", v: m.totalWallMs > 0 ? m.totalWallMs / 60_000 : null, fmt: (v) => (v == null ? "n/a" : v.toFixed(1) + " min") },
+    ];
+    let out = '<text x="0" y="16" fill="#5c9cf5" font-size="12">run</text>';
+    groups.forEach((g, i) => {
+      const y = 28 + i * 30;
+      const width = g.v != null && g.v > 0 ? 160 : 0;
+      out +=
+        '<text x="0" y="' + (y + 11) + '" fill="#808080" font-size="12">' + esc(g.label) + "</text>" +
+        '<rect x="90" y="' + y + '" width="' + width + '" height="12" fill="#5c9cf5" />' +
+        '<text x="' + (94 + width) + '" y="' + (y + 11) + '" fill="#eeeeee" font-size="11">' + esc(g.fmt(g.v)) + "</text>";
+    });
+    return out;
+  }
+
   function renderScoreboard(claiM, piM, claiScore, piScore) {
     const board = $("scoreboard");
     const formula = $("score-formula");
@@ -995,6 +1131,12 @@
   function refreshChartsFromBestSource() {
     // Explicit history-row selection wins over compare/live dual charts.
     if (historyChartsPinned && selectedId) {
+      if (historyMatchesCompareClai()) {
+        // Restore full harness-compare panel + dual charts for the CLAI source run.
+        renderCompare(true);
+        if (renderCompareCharts()) return;
+      }
+      syncHarnessCompareForHistory();
       if (historyDetailTasks && historyDetailTasks.length) {
         renderCharts(historyDetailTasks, "history", selectedId);
       }
@@ -1056,12 +1198,14 @@
     const passSvg = $("chart-pass");
     const durHost = $("chart-dur");
     const avgBox = $("chart-avg-box");
-    if (avgBox) avgBox.classList.add("hidden");
+    const avgSvg = $("chart-avg");
     $("chart-tok-box").classList.add("hidden");
     $("chart-cost-box").classList.add("hidden");
     if (!tasks || !tasks.length) {
       passSvg.innerHTML = emptySvg(200, 120);
       durHost.innerHTML = '<div class="metric-empty">no data</div>';
+      if (avgSvg) avgSvg.innerHTML = emptySvg(320, 150);
+      if (avgBox) avgBox.classList.add("hidden");
       refreshChartTitles(mode || "live", runId, 0);
       return;
     }
@@ -1071,6 +1215,12 @@
     passSvg.setAttribute("viewBox", "0 0 320 120");
     passSvg.innerHTML = donutSvg(passed, failed, pending, tasks.length);
     durHost.innerHTML = singleMetricsUnified(tasks);
+    const m = harnessMetrics(tasks);
+    if (avgBox) avgBox.classList.remove("hidden");
+    if (avgSvg) {
+      avgSvg.setAttribute("viewBox", "0 0 320 150");
+      avgSvg.innerHTML = singleAvgSvg(m);
+    }
     refreshChartTitles(mode || "live", runId, tasks.length);
   }
 
@@ -1138,9 +1288,12 @@
 
     body.innerHTML = runs.slice().reverse().map((r) => {
       const sel = r.runId === selectedId ? " selected" : "";
+      const kindPill = historyRowIsCompare(r)
+        ? ' <span class="pill">compare</span>'
+        : (r.offline ? ' <span class="pill">offline</span>' : "");
       return (
         '<tr class="hist' + sel + '" data-id="' + esc(r.runId) + '">' +
-          "<td>" + esc(r.runId) + (r.offline ? ' <span class="pill">offline</span>' : "") + "</td>" +
+          "<td>" + esc(r.runId) + kindPill + "</td>" +
           "<td>" + esc((r.startedAt || "").replace("T", " ").slice(0, 19)) + "</td>" +
           "<td>" + esc(r.provider) + " / " + esc(r.model) + "</td>" +
           '<td class="' + rateClass(r.passRate) + '">' +
@@ -1183,11 +1336,45 @@
     };
   }
 
+  function snapshotFromHistorySummary(summary) {
+    if (!summary) return null;
+    return {
+      runId: summary.runId,
+      startedAt: summary.startedAt,
+      provider: summary.provider,
+      model: summary.model,
+      offline: !!summary.offline,
+      parallel: summary.parallel || 1,
+      tasks: (summary.tasks || []).map((t) => ({
+        id: t.id,
+        title: t.title || t.id,
+        category: t.category || "bugfix",
+        status: t.status,
+        wallMs: t.wallMs,
+        steps: t.steps,
+        tokensIn: Number(t.tokensIn) || 0,
+        tokensOut: Number(t.tokensOut) || 0,
+        cost: Number(t.cost) || 0,
+        error: t.error,
+      })),
+      done: true,
+      rateLimit: null,
+    };
+  }
+
   async function selectRun(id) {
     selectedId = id;
     historyChartsPinned = true;
-    historyDetailTasks = null;
+    viewingHistory = true;
+    historyDetailTasks = historyTasksFromSummary(id);
+    const summary = runs.find((r) => r.runId === id);
+    const quick = snapshotFromHistorySummary(summary);
+    if (quick) {
+      snapshot = quick;
+      renderLive();
+    }
     renderHistory();
+    refreshChartsFromBestSource();
     const detail = $("run-detail");
     detail.className = "detail open";
     detail.innerHTML = '<span class="empty">loading ' + esc(id) + "…</span>";
@@ -1197,6 +1384,7 @@
       const res = await fetch("/api/runs/" + encodeURIComponent(id));
       if (!res.ok) throw new Error("HTTP " + res.status);
       const run = await res.json();
+      if (selectedId !== id) return;
       const rows = (run.tasks || []).map((t) =>
         t.id.padEnd(22) + " " + String(t.status).padEnd(8) + " " +
         fmtMs(t.wallMs).padStart(8) + "  steps=" + (t.steps || 0) +
@@ -1206,6 +1394,7 @@
       detail.innerHTML =
         "<strong>" + esc(run.runId) + "</strong>" +
         '<span class="pill">' + esc(run.provider) + "</span>" +
+        (run.kind === "compare" || run.compare ? '<span class="pill">compare</span>' : "") +
         '<span class="pill">' + fmtPct(run.aggregates?.passRate) + " pass</span>" +
         "<pre>" + esc(rows) + "</pre>";
       if (run.tasks) {
@@ -1221,14 +1410,29 @@
           cost: t.cost,
           error: t.error,
         }));
-        viewingHistory = true;
         snapshot = snapshotFromHistoryRun(run);
         renderLive();
-        renderCharts(historyDetailTasks, "history", selectedId);
-        $("live-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       }
+      // Rebuild harness-compare UI from archived scorecard when available.
+      if (run.compare) {
+        applyStoredCompare(run.compare);
+        refreshChartsFromBestSource();
+      } else if (run.compareId) {
+        try {
+          const cres = await fetch("/api/compare/" + encodeURIComponent(run.compareId));
+          if (cres.ok) {
+            applyStoredCompare(await cres.json());
+          }
+        } catch { /* ignore */ }
+        refreshChartsFromBestSource();
+      } else {
+        refreshChartsFromBestSource();
+      }
+      $("live-panel").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
-      detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
+      if (selectedId === id) {
+        detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
+      }
     }
   }
 
@@ -1346,10 +1550,15 @@
     );
   }
 
-  function renderCompare() {
+  function renderCompare(skipCharts) {
     const panel = $("compare-panel");
     if (!compare) {
       panel.style.display = "none";
+      return;
+    }
+    // Browsing a non-compare history row: don't repaint stale CLAI-vs-pi winner.
+    if (historyChartsPinned && selectedId && !historyMatchesCompareClai()) {
+      muteHarnessCompareForHistory(selectedId);
       return;
     }
     panel.style.display = "block";
@@ -1494,7 +1703,7 @@
         " · pi " + pPass + "/" + piRows.length;
     }
     // Avoid pass-rate pie / composite chart thrash while rows are still streaming.
-    if (scoringReady || !compareRunning) {
+    if (!skipCharts && (scoringReady || !compareRunning)) {
       refreshChartsFromBestSource();
     }
   }
@@ -1705,12 +1914,13 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === "snapshot" && msg.snapshot) {
           const jobLive = job.status === "running" || job.status === "stopping";
-          if (viewingHistory && !jobLive) {
+          if (historyChartsPinned) {
+            // Pinned history row wins over live SSE until startJob clears the pin.
+          } else if (viewingHistory && !jobLive) {
             // Keep history selection in the Live panel until a new job runs.
           } else {
             if (jobLive) {
               viewingHistory = false;
-              historyChartsPinned = false;
               const heading = $("live-heading");
               if (heading) heading.textContent = "Live run";
             }
@@ -1739,10 +1949,11 @@
           job = msg.job;
           renderJob();
           if (wasRunning && job.status === "idle") {
-            viewingHistory = false;
-            historyChartsPinned = false;
-            const heading = $("live-heading");
-            if (heading) heading.textContent = "Live run";
+            if (!historyChartsPinned) {
+              viewingHistory = false;
+              const heading = $("live-heading");
+              if (heading) heading.textContent = "Live run";
+            }
             loadRuns();
             loadCompare();
           }

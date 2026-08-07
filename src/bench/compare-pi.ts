@@ -24,7 +24,7 @@
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -68,6 +68,10 @@ export type CompareResult = {
   piScore: CompareScore;
   claiScore: CompareScore;
   claiLabel?: string;
+  /** Stable id for archived compare scorecards (`compares/<id>.json`). */
+  compareId?: string;
+  /** CLAI bench run id that supplied the CLAI side (when known). */
+  claiRunId?: string;
   /** Requested COMPARE_PARALLEL (before race split). */
   compareParallel?: number;
   /** Effective per-harness worker count during the race. */
@@ -727,6 +731,7 @@ function buildCompareResult(
   partial = false,
   concurrency?: { compareParallel: number; sideParallel: number },
   stopped = false,
+  ids?: { compareId?: string; claiRunId?: string },
 ): CompareResult {
   return {
     at: new Date().toISOString(),
@@ -737,6 +742,8 @@ function buildCompareResult(
     piScore: scoreRows(piRows),
     claiScore: scoreRows(claiRows),
     claiLabel,
+    compareId: ids?.compareId,
+    claiRunId: ids?.claiRunId,
     compareParallel: concurrency?.compareParallel,
     sideParallel: concurrency?.sideParallel,
     partial: partial || undefined,
@@ -800,12 +807,14 @@ export async function runComparePi(
 
   let claiRows: CompareRow[] = [];
   let claiLabel = "pending";
+  let claiRunId: string | undefined;
   let claiLive: LiveSnapshot | null = null;
   const piRows: Array<CompareRow | undefined> = new Array(tasks.length);
   const piRunning = new Set<string>();
   const activeChildren = new Set<ChildProcess>();
 
   const concurrency = { compareParallel: parallel, sideParallel };
+  const compareIds = () => ({ compareId: runId, claiRunId });
 
   const emit = (phase: CompareProgress["phase"], done = false) => {
     const live = buildCompareLiveSnapshot(tasks, claiLive, piRows, piRunning, {
@@ -825,6 +834,8 @@ export async function runComparePi(
       claiLabel,
       !done,
       concurrency,
+      false,
+      compareIds(),
     );
     opts.onProgress?.({
       phase,
@@ -860,6 +871,7 @@ export async function runComparePi(
       const hist = await loadClaiFromHistory(workspaceRoot, tasks);
       claiRows = hist.rows;
       claiLabel = hist.label;
+      claiRunId = /^(\S+)/.exec(hist.label)?.[1];
       emit("clai");
       return;
     }
@@ -895,12 +907,18 @@ export async function runComparePi(
             ),
           );
         claiLabel = `${snap.runId} [${snap.provider}/${snap.model}] fresh`;
+        claiRunId = snap.runId;
         emit(midPhase());
       },
     });
-    await new BenchStore(workspaceRoot).appendRun(record);
+    await new BenchStore(workspaceRoot).appendRun({
+      ...record,
+      kind: "clai",
+      compareId: runId,
+    });
     claiRows = record.tasks.map((t) => taskResultToClaiRow(t, record.provider));
     claiLabel = `${record.runId} [${record.provider}/${record.model}] fresh`;
+    claiRunId = record.runId;
     claiLive = {
       runId: record.runId,
       startedAt: record.startedAt,
@@ -1041,10 +1059,11 @@ export async function runComparePi(
     false,
     concurrency,
     stopped,
+    compareIds(),
   );
 
-  const outPath = path.join(workspaceRoot, ".clai", "bench", "compare-pi.json");
-  await writeFile(outPath, JSON.stringify(result, null, 2), "utf8");
+  const store = new BenchStore(workspaceRoot);
+  await store.appendCompare(result);
 
   claiRows = result.clai;
   for (let i = 0; i < finalPi.length; i++) piRows[i] = result.pi[i];
@@ -1126,7 +1145,10 @@ async function main() {
       `${p.id.padEnd(22)} ${(c?.status ?? "—").padEnd(7)} ${p.status.padEnd(7)} ${(c?.detail || p.detail || "").slice(0, 60)}`,
     );
   }
-  console.log(`\nwrote ${path.join(COMPARE_ROOT, ".clai", "bench", "compare-pi.json")}`);
+  console.log(
+    `\nwrote ${path.join(COMPARE_ROOT, ".clai", "bench", "compares", `${result.compareId}.json`)}` +
+      `\n  latest → ${path.join(COMPARE_ROOT, ".clai", "bench", "compare-pi.json")}`,
+  );
 }
 
 const entry = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";

@@ -248,7 +248,10 @@ export async function runBenchCli(
         offline,
         onUpdate: (snap) => live.update(snap),
       });
-      await store.appendRun(record);
+      await store.appendRun({
+        ...record,
+        kind: offline ? "offline" : "clai",
+      });
       printRunSummary(record);
 
       if (handle) {

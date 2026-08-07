@@ -64,6 +64,8 @@ export type BenchAggregates = {
   totalCost: number;
 };
 
+export type BenchRunKind = "clai" | "offline" | "compare";
+
 export type BenchRunRecord = {
   runId: string;
   startedAt: string;
@@ -75,6 +77,15 @@ export type BenchRunRecord = {
   taskIds: string[];
   tasks: TaskResult[];
   aggregates: BenchAggregates;
+  /** How this record was produced (defaults to clai/offline from flags). */
+  kind?: BenchRunKind;
+  /** When this CLAI run was the fresh side of a CLAI-vs-pi compare. */
+  compareId?: string;
+  /**
+   * Embedded harness-compare scorecard when `kind === "compare"`.
+   * Lets `/api/runs/:id` rebuild Live + Charts + Harness compare from history.
+   */
+  compare?: unknown;
 };
 
 /** Live view of an in-flight (or just-finished) run, pushed to the dashboard. */

@@ -206,19 +206,27 @@ export function createSgrMouseParser(
           break;
         }
 
-        // Some other escape: if it is CSI ending in a letter, skip the whole
-        // CSI so we do not drip it into the prompt. Otherwise forward ESC.
-        const csi = /^\x1b\[[0-9;?]*([A-Za-z])/.exec(tail);
-        if (csi) {
-          pos = escAt + csi[0].length;
+        // Non-mouse CSI (arrows, PageUp `\x1b[5~`, F-keys, etc.) — forward intact.
+        const csiFwd = /^\x1b\[[0-9;?]*[A-Za-z~]/.exec(tail);
+        if (csiFwd) {
+          out.push(Buffer.from(csiFwd[0], "latin1"));
+          pos = escAt + csiFwd[0].length;
           continue;
         }
-        if (/^\x1b\[[0-9;?]*$/.test(tail)) {
+        // SS3 arrows: ESC O A/B/C/D
+        const ss3 = /^\x1bO[A-D]/.exec(tail);
+        if (ss3) {
+          out.push(Buffer.from(ss3[0], "latin1"));
+          pos = escAt + ss3[0].length;
+          continue;
+        }
+        // Incomplete CSI (no final byte yet) — hold
+        if (/^\x1b\[[0-9;?]*$/.test(tail) || /^\x1bO?$/.test(tail)) {
           held = Buffer.from(data.subarray(escAt));
           break;
         }
-
-        // Unknown ESC — drop the ESC byte (safer than leaking into the prompt).
+        // Lone ESC or unknown — forward ESC so user can press Esc for interrupt
+        out.push(Buffer.from([0x1b]));
         pos = escAt + 1;
       }
 

@@ -15,6 +15,12 @@ export type AssistantItem = {
   text: string;
   done: boolean;
 };
+export type ThinkingItem = {
+  kind: "thinking";
+  id: string;
+  text: string;
+  done: boolean;
+};
 export type ToolItem = {
   kind: "tool";
   id: string;
@@ -60,11 +66,25 @@ export type NoteItem = {
 export type ActivityItem =
   | UserItem
   | AssistantItem
+  | ThinkingItem
   | ToolItem
   | PlanItem
   | ApprovalItem
   | VerifyItem
   | NoteItem;
+
+/** Seal any open thinking blocks (e.g. when tools or reply prose start). */
+function sealOpenThinking(items: ActivityItem[]): ActivityItem[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.kind === "thinking" && !item.done) {
+      changed = true;
+      return { ...item, done: true };
+    }
+    return item;
+  });
+  return changed ? next : items;
+}
 
 export type RunMetrics = {
   tokensIn: number;
@@ -136,12 +156,57 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
 
     case "assistant": {
       const id = event.id ?? anonId("asst");
-      const existing = state.items.find(
+      const items = sealOpenThinking(state.items);
+      const last = items[items.length - 1];
+      // Streaming / seal against the open tail (same id or a prior ~cont-*).
+      if (
+        last?.kind === "assistant" &&
+        (last.id === id || last.id.startsWith(`${id}~cont-`))
+      ) {
+        const next: AssistantItem = {
+          kind: "assistant",
+          id: last.id,
+          text: last.text + event.text,
+          done: event.done ?? last.done,
+        };
+        return { ...state, items: replaceById(items, last.id, next) };
+      }
+      const existing = items.find(
         (item): item is AssistantItem =>
           item.kind === "assistant" && item.id === id,
       );
+      // Same id reused after tools/notes intervened — do not replaceById in place.
+      if (existing) {
+        let n = 1;
+        while (items.some((item) => item.id === `${id}~cont-${n}`)) {
+          n += 1;
+        }
+        const contId = `${id}~cont-${n}`;
+        const next: AssistantItem = {
+          kind: "assistant",
+          id: contId,
+          text: event.text,
+          done: event.done ?? false,
+        };
+        return { ...state, items: [...items, next] };
+      }
       const next: AssistantItem = {
         kind: "assistant",
+        id,
+        text: event.text,
+        done: event.done ?? false,
+      };
+      return { ...state, items: [...items, next] };
+    }
+
+    case "thinking": {
+      const id = event.id ?? anonId("think");
+      const existing = state.items.find(
+        (item): item is ThinkingItem =>
+          item.kind === "thinking" && item.id === id,
+      );
+      const next: ThinkingItem = {
+        kind: "thinking",
         id,
         text: (existing?.text ?? "") + event.text,
         done: event.done ?? existing?.done ?? false,
@@ -153,7 +218,7 @@ export function reduceUiEvent(state: UiState, event: UiEvent): UiState {
       return {
         ...state,
         items: [
-          ...state.items,
+          ...sealOpenThinking(state.items),
           {
             kind: "tool",
             id: event.id,

@@ -268,6 +268,123 @@ async function main(): Promise<void> {
       streamed.done === true,
   );
 
+  // chronology defense: same assistant id after a tool must not replaceById above tools
+  let chronoState = initialUiState();
+  chronoState = reduceUiEvent(chronoState, {
+    type: "assistant",
+    id: "a",
+    text: "hello",
+    done: true,
+  });
+  chronoState = reduceUiEvent(chronoState, {
+    type: "tool_call",
+    id: "t",
+    tool: "read",
+    target: "x.ts",
+  });
+  chronoState = reduceUiEvent(chronoState, {
+    type: "assistant",
+    id: "a",
+    text: "world",
+    done: true,
+  });
+  const chronoKinds = chronoState.items.map((i) => i.kind);
+  assert(
+    "assistant/tool/assistant chronology",
+    chronoKinds.includes("assistant") &&
+      chronoKinds.includes("tool") &&
+      chronoKinds.join(",") === "assistant,tool,assistant",
+    `got ${chronoKinds.join(",")}`,
+  );
+  const chronoAsst = chronoState.items.filter((i) => i.kind === "assistant");
+  assert(
+    "post-tool assistant gets ~cont id",
+    chronoAsst.length === 2 &&
+      chronoAsst[0]?.kind === "assistant" &&
+      chronoAsst[0].id === "a" &&
+      chronoAsst[0].text === "hello" &&
+      chronoAsst[1]?.kind === "assistant" &&
+      chronoAsst[1].id === "a~cont-1" &&
+      chronoAsst[1].text === "world",
+  );
+
+  // thinking reduce: deltas append, done seals; tool_call seals open thinking
+  let thinkState = initialUiState();
+  thinkState = reduceUiEvent(thinkState, {
+    type: "thinking",
+    id: "t-think",
+    text: "considering",
+    done: false,
+  });
+  thinkState = reduceUiEvent(thinkState, {
+    type: "thinking",
+    id: "t-think",
+    text: " paths",
+    done: false,
+  });
+  thinkState = reduceUiEvent(thinkState, {
+    type: "tool_call",
+    id: "tw",
+    tool: "write",
+    target: "architecture.html",
+  });
+  const thought = thinkState.items.find((i) => i.kind === "thinking");
+  assert(
+    "thinking appends then seals on tool_call",
+    thought?.kind === "thinking" &&
+      thought.text === "considering paths" &&
+      thought.done === true,
+  );
+
+  const writePendingPhase = deriveLifecycle({
+    status: { label: "thinking", level: "info" },
+    items: thinkState.items,
+  });
+  assert(
+    "pending write surfaces in lifecycle",
+    writePendingPhase?.detail === "Writing architecture.html",
+    writePendingPhase?.detail,
+  );
+
+  {
+    const { createToolPlaneBridge, formatHumanBytes } = await import(
+      "../bridge.js",
+    );
+    assert("formatHumanBytes 43061", formatHumanBytes(43061) === "42KB");
+    const detailBus = createUiBus();
+    const toolResults: Array<{ detail?: string }> = [];
+    detailBus.subscribe((e) => {
+      if (e.type === "tool_result") toolResults.push(e);
+    });
+    const bridge = createToolPlaneBridge(detailBus);
+    bridge({ type: "tool_call", tool: "write", target: "architecture.html" });
+    bridge({
+      type: "tool_result",
+      tool: "write",
+      ok: true,
+      target: "architecture.html",
+      durationMs: 24,
+      output: { path: "architecture.html", ok: true, detail: 43061 },
+    });
+    assert(
+      "bridge write detail is human bytes",
+      toolResults[0]?.detail === "42KB",
+      toolResults[0]?.detail,
+    );
+  }
+
+  const thinkHeadless = formatHeadlessEvent({
+    type: "thinking",
+    id: "th1",
+    text: "plan the edit",
+    done: true,
+  });
+  assert(
+    "headless thinking shape",
+    thinkHeadless === "[think] plan the edit",
+    thinkHeadless ?? "null",
+  );
+
   // ── mouse parser ───────────────────────────────────────────────────────────
   const events: Array<{ kind: string; x: number; y: number }> = [];
   const parser = createSgrMouseParser((e) =>
@@ -367,6 +484,12 @@ async function main(): Promise<void> {
   const working = await renderFrame(140, 40, (bus) => {
     bus.emit({ type: "user", text: "add age verification to signup" });
     bus.emit({
+      type: "thinking",
+      id: "th-smoke",
+      text: "checking the approval seam before edits",
+      done: true,
+    });
+    bus.emit({
       type: "assistant",
       id: "a1",
       text: "I'll explore the signup path first.",
@@ -424,6 +547,11 @@ async function main(): Promise<void> {
 
   assert("working has CLAI wordmark", working.includes(WORDMARK), working.slice(0, 120));
   assert("working has credit", working.includes(CREDIT), working.slice(0, 120));
+  assert(
+    "working has thought header",
+    working.includes("thought"),
+    "missing thinking block",
+  );
   assert(
     "working has Working lifecycle",
     working.includes("Working"),

@@ -18,6 +18,7 @@ import type {
   RenderBlock,
   RunContext,
   RunMetrics,
+  ThinkingItem,
   ToolItem,
   UserItem,
   VerifyItem,
@@ -73,6 +74,14 @@ export function formatCostPrecise(usd?: number): string {
 export function truncate(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length <= max ? flat : `${flat.slice(0, Math.max(1, max - 1))}…`;
+}
+
+/** Keep the end of a path so the filename stays visible. */
+export function truncatePath(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  if (max <= 1) return "…";
+  return `…${flat.slice(-(max - 1))}`;
 }
 
 /** Simple greedy word wrap for block-line content. */
@@ -154,11 +163,25 @@ export function BlockLine({
 // ── brand ────────────────────────────────────────────────────────────────────
 
 /** Single quiet wordmark line — bright metallic silver, bold. No ASCII art. */
-export function Wordmark() {
+export function Wordmark({
+  cwd,
+  showCwd,
+}: {
+  cwd?: string;
+  /** When true and cwd is set, show a truncated path under the wordmark. */
+  showCwd?: boolean;
+} = {}) {
   return (
-    <Text bold color={resolve("brand.wordmark")}>
-      {WORDMARK}
-    </Text>
+    <Box flexDirection="column">
+      <Text bold color={resolve("brand.wordmark")}>
+        {WORDMARK}
+      </Text>
+      {showCwd && cwd ? (
+        <Text color={resolve("text.muted")} dimColor={faintUsesDim()}>
+          {truncatePath(cwd, 48)}
+        </Text>
+      ) : null}
+    </Box>
   );
 }
 
@@ -299,7 +322,10 @@ export type SessionStats = {
   live?: boolean;
 };
 
-/** Compact top-right panel: time · tokens · cost · tool calls (live-updating). */
+/**
+ * Compact top-right panel: two rows so the header stays short.
+ * `session[ · live]` then `time · tokens · cost · tools` on one line.
+ */
 export function StatsPanel({
   stats,
   width = 28,
@@ -310,35 +336,29 @@ export function StatsPanel({
   const totalTokens = stats.tokensIn + stats.tokensOut;
   const timeLabel =
     formatDuration(stats.elapsedMs) ?? (stats.elapsedMs > 0 ? "0ms" : "—");
-  const rows = [
-    { k: "time", v: timeLabel },
-    { k: "tokens", v: formatTokens(totalTokens) },
-    {
-      k: "  in/out",
-      v: `${formatTokens(stats.tokensIn)}/${formatTokens(stats.tokensOut)}`,
-    },
-    { k: "cost", v: formatCostPrecise(stats.costUsd) },
-    { k: "tools", v: String(stats.toolCalls) },
-  ];
-  const inner = Math.max(18, width - 2);
+  const muted = resolve("text.muted");
+  const primary = resolve("text.primary");
   return (
-    <Box flexDirection="column" width={width}>
+    <Box flexDirection="column" width={width} alignItems="flex-end">
       <Box>
-        <Text color={resolve("text.muted")}>session</Text>
+        <Text color={muted}>session</Text>
         {stats.live ? (
           <Text color={resolve("state.working")}> · live</Text>
         ) : null}
       </Box>
-      <Text color={resolve("border")}>{glyph("hRule").repeat(inner)}</Text>
-      {rows.map((row) => (
-        <Box key={row.k} justifyContent="space-between" width={inner}>
-          <Text color={resolve("text.muted")}>{row.k}</Text>
-          <Text bold={row.k === "tokens" || row.k === "cost"} color={resolve("text.primary")}>
-            {row.v}
-          </Text>
-        </Box>
-      ))}
-      <Text color={resolve("border")}>{glyph("hRule").repeat(inner)}</Text>
+      <Text>
+        <Text color={muted}>{timeLabel}</Text>
+        <Text color={muted}> · tokens </Text>
+        <Text bold color={primary}>
+          {formatTokens(totalTokens)}
+        </Text>
+        <Text color={muted}> · cost </Text>
+        <Text bold color={primary}>
+          {formatCostPrecise(stats.costUsd)}
+        </Text>
+        <Text color={muted}> · tools </Text>
+        <Text color={primary}>{String(stats.toolCalls)}</Text>
+      </Text>
     </Box>
   );
 }
@@ -354,7 +374,7 @@ export function ScrollCue({
   label: string;
   register?: (node: DOMElement | null) => void;
 }) {
-  const arrow = direction === "up" ? "↑" : "↓";
+  const arrow = direction === "up" ? "↑" : "▼";
   return (
     <Box ref={(node) => register?.(node as DOMElement | null)}>
       <Text bold color={resolve("brand.wordmark")}>
@@ -363,6 +383,28 @@ export function ScrollCue({
       <Text color={resolve("text.muted")}>{label}</Text>
       <Text color={resolve("text.muted")}>  </Text>
       <Text color={resolve("state.verify")}>[expand]</Text>
+    </Box>
+  );
+}
+
+/**
+ * Sticky one-line cue for the latest user prompt when scrolled away from live.
+ * Grok Build pattern: keep the ask visible above Activity while browsing history.
+ */
+export function StickyUserCue({
+  text,
+  width,
+}: {
+  text: string;
+  width: number;
+}) {
+  const budget = Math.max(4, width - 2);
+  return (
+    <Box width={width} flexShrink={0} marginBottom={0}>
+      <Text color={resolve("text.muted")}>› </Text>
+      <Text color={resolve("text.primary")}>
+        {truncate(text, budget)}
+      </Text>
     </Box>
   );
 }
@@ -457,6 +499,21 @@ export function deriveLifecycle(args: {
     };
   }
 
+  const pendingWriteLabel = (): string | undefined => {
+    for (let i = args.items.length - 1; i >= 0; i -= 1) {
+      const item = args.items[i]!;
+      if (
+        item.kind === "tool" &&
+        item.status === "pending" &&
+        (item.tool === "write" || item.tool === "edit")
+      ) {
+        const verb = item.tool === "write" ? "Writing" : "Editing";
+        return item.target ? `${verb} ${item.target}` : verb;
+      }
+    }
+    return undefined;
+  };
+
   if (args.status) {
     const label = args.status.label.toLowerCase();
     const detail = args.status.detail;
@@ -469,7 +526,27 @@ export function deriveLifecycle(args: {
     if (args.status.level === "error") {
       return { state: "fail", detail: detail ?? args.status.label };
     }
+    // Prefer pending write/edit target over a bare "thinking"/"working" label.
+    const generic = /^(thinking|working)$/i.test(args.status.label.trim());
+    const writeLabel = pendingWriteLabel();
+    if (writeLabel && (generic || !detail)) {
+      return { state: "working", detail: writeLabel };
+    }
+    // "preparing write architecture.html" while tool args stream in.
+    if (/^preparing\b/i.test(args.status.label)) {
+      return {
+        state: "working",
+        detail: detail
+          ? `${args.status.label} ${detail}`
+          : args.status.label,
+      };
+    }
     return { state: "working", detail: detail ?? args.status.label };
+  }
+
+  const writeLabel = pendingWriteLabel();
+  if (writeLabel) {
+    return { state: "working", detail: writeLabel };
   }
 
   for (let i = args.items.length - 1; i >= 0; i -= 1) {
@@ -486,18 +563,22 @@ export function deriveLifecycle(args: {
 }
 
 /**
- * Persistent single-line lifecycle widget. Exactly one icon + one colour.
- * Braille spinner during Working / Verify / Repair.
+ * Persistent single-line lifecycle / turn-status widget.
+ * Sits immediately above the composer (Grok Build turn status).
+ * When busy: spinner + detail + elapsed on the right (`formatDuration`).
  * Detail is omitted when it would just repeat the state name (no grey twin).
  */
 export function LifecycleLine({
   phase,
   frame,
   width,
+  elapsedMs,
 }: {
   phase: LifecyclePhase | null;
   frame: number;
   width: number;
+  /** Turn elapsed ms — shown on the right while Working / Verify / Repair. */
+  elapsedMs?: number;
 }) {
   if (!phase) return null;
   const spec = LIFECYCLE[phase.state];
@@ -519,19 +600,55 @@ export function LifecycleLine({
       ? undefined
       : rawDetail;
 
-  const labelBudget = Math.max(8, width - spec.label.length - 4);
+  const elapsed =
+    spinning && elapsedMs != null && elapsedMs > 0
+      ? formatDuration(elapsedMs)
+      : undefined;
+  const elapsedLen = elapsed ? elapsed.length + 1 : 0;
+  const labelBudget = Math.max(
+    8,
+    width - spec.label.length - 4 - elapsedLen,
+  );
+
   return (
-    <Box>
-      <Text color={color}>{icon} </Text>
-      <Text bold color={color}>
-        {spec.label}
-      </Text>
-      {detail ? (
-        <Text color={resolve("text.muted")}>
-          {`  ${truncate(detail, labelBudget)}`}
+    <Box width={width} flexDirection="row" justifyContent="space-between">
+      <Box>
+        <Text color={color}>{icon} </Text>
+        <Text bold color={color}>
+          {spec.label}
         </Text>
+        {detail ? (
+          <Text color={resolve("text.muted")}>
+            {`  ${truncate(detail, labelBudget)}`}
+          </Text>
+        ) : null}
+      </Box>
+      {elapsed ? (
+        <Text color={resolve("text.muted")}>{elapsed}</Text>
       ) : null}
     </Box>
+  );
+}
+
+/** Thin alias — turn status bar above the composer. */
+export function TurnStatusBar({
+  phase,
+  frame,
+  width,
+  elapsedMs,
+}: {
+  phase: LifecyclePhase | null;
+  frame: number;
+  width: number;
+  elapsedMs?: number;
+}) {
+  return (
+    <LifecycleLine
+      phase={phase}
+      frame={frame}
+      width={width}
+      elapsedMs={elapsedMs}
+    />
   );
 }
 
@@ -566,15 +683,12 @@ export function PromptBox({
       ]
     : [{ text: truncate(placeholder, inner), color: resolve("text.muted") }];
 
-  const modelSegments: Segment[] = [
+  // Model/provider live on ContextStrip — keep only the agent name here.
+  void model;
+  void provider;
+  const agentSegments: Segment[] = [
     { text: agent, color: resolve("text.primary"), bold: true },
   ];
-  if (model) {
-    modelSegments.push({ text: "  " }, { text: model, color: resolve("text.primary") });
-  }
-  if (provider) {
-    modelSegments.push({ text: "  " }, { text: provider, color: resolve("text.muted") });
-  }
 
   return (
     <Box flexDirection="column" width={width}>
@@ -584,7 +698,7 @@ export function PromptBox({
       </Text>
       <Text>
         <Text color={ruleColor}>{glyph("leftRule")} </Text>
-        <Segments segments={modelSegments} />
+        <Segments segments={agentSegments} />
       </Text>
     </Box>
   );
@@ -618,13 +732,25 @@ export function HintLine({
 
 // ── conversation blocks ──────────────────────────────────────────────────────
 
-export function UserBlock({ item, width }: { item: UserItem; width: number }) {
-  const lines = wrapText(item.text, Math.max(8, width - 2));
+export function UserBlock({
+  item,
+  width,
+  skipLines = 0,
+}: {
+  item: UserItem;
+  width: number;
+  /** Skip this many wrapped content lines (mid-message clip). */
+  skipLines?: number;
+}) {
+  const lines = wrapText(item.text, Math.max(8, width - 2)).slice(
+    Math.max(0, skipLines),
+  );
+  if (lines.length === 0) return null;
   return (
     <Box flexDirection="column" marginBottom={1}>
       {lines.map((line, index) => (
         <Text key={index} color={resolve("text.primary")}>
-          {index === 0 ? `› ${line}` : `  ${line}`}
+          {index === 0 && skipLines === 0 ? `› ${line}` : `  ${line}`}
         </Text>
       ))}
     </Box>
@@ -635,10 +761,13 @@ export function AssistantProse({
   item,
   width,
   spinnerFrame = 0,
+  skipLines = 0,
 }: {
   item: AssistantItem;
   width?: number;
   spinnerFrame?: number;
+  /** Skip this many visual lines from the top (header counts as 1). */
+  skipLines?: number;
 }) {
   const STREAM_TAIL = 18;
   const allLines = item.text.replace(/\s+$/, "").split(/\r?\n/);
@@ -646,37 +775,185 @@ export function AssistantProse({
   const display = truncated
     ? allLines.slice(-STREAM_TAIL).join("\n")
     : item.text.trimEnd();
-  const showCode = !item.done && width != null;
+  const showCode = !item.done && width != null && skipLines === 0;
   const caret = glyphs().spinnerFrames[spinnerFrame % glyphs().spinnerFrames.length]!;
+
+  if (skipLines <= 0) {
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Box>
+          {!item.done ? (
+            <Text color={resolve("state.verify")}>streaming </Text>
+          ) : (
+            <Text color={resolve("state.pass")}>processed </Text>
+          )}
+          <Text color={resolve("text.muted")}>
+            {item.done ? "· reply" : "· live"}
+          </Text>
+        </Box>
+        {truncated ? (
+          <Text color={resolve("text.muted")}>… </Text>
+        ) : null}
+        <Text wrap="wrap" color={resolve("text.primary")}>
+          {display}
+          {!item.done ? (
+            <Text color={resolve("state.verify")}>{` ${caret}`}</Text>
+          ) : null}
+        </Text>
+        {showCode ? (
+          <CodeWriteFragment
+            text={item.text}
+            frame={spinnerFrame}
+            width={width}
+          />
+        ) : null}
+      </Box>
+    );
+  }
+
+  // Mid-message clip: skip header + wrapped body lines from the top.
+  const measure = Math.max(8, (width ?? 70) - 2);
+  const bodyLines = display.split(/\r?\n/).flatMap((line) => {
+    if (line.length <= measure) return [line];
+    const out: string[] = [];
+    for (let i = 0; i < line.length; i += measure) {
+      out.push(line.slice(i, i + measure));
+    }
+    return out.length > 0 ? out : [""];
+  });
+  const visual: Array<{ kind: "header" | "ellipsis" | "body"; text?: string }> =
+    [];
+  visual.push({ kind: "header" });
+  if (truncated) visual.push({ kind: "ellipsis" });
+  for (const line of bodyLines) visual.push({ kind: "body", text: line });
+
+  const sliced = visual.slice(skipLines);
+  if (sliced.length === 0) return null;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        {!item.done ? (
-          <Text color={resolve("state.verify")}>streaming </Text>
-        ) : (
-          <Text color={resolve("state.pass")}>processed </Text>
-        )}
-        <Text color={resolve("text.muted")}>
-          {item.done ? "· reply" : "· live"}
-        </Text>
-      </Box>
-      {truncated ? (
-        <Text color={resolve("text.muted")}>… </Text>
-      ) : null}
-      <Text wrap="wrap" color={resolve("text.primary")}>
-        {display}
-        {!item.done ? (
-          <Text color={resolve("state.verify")}>{` ${caret}`}</Text>
-        ) : null}
-      </Text>
-      {showCode ? (
-        <CodeWriteFragment
-          text={item.text}
-          frame={spinnerFrame}
-          width={width}
-        />
-      ) : null}
+      {sliced.map((row, index) => {
+        if (row.kind === "header") {
+          return (
+            <Box key={`h-${index}`}>
+              {!item.done ? (
+                <Text color={resolve("state.verify")}>streaming </Text>
+              ) : (
+                <Text color={resolve("state.pass")}>processed </Text>
+              )}
+              <Text color={resolve("text.muted")}>
+                {item.done ? "· reply" : "· live"}
+              </Text>
+            </Box>
+          );
+        }
+        if (row.kind === "ellipsis") {
+          return (
+            <Text key={`e-${index}`} color={resolve("text.muted")}>
+              …{" "}
+            </Text>
+          );
+        }
+        const isLastBody =
+          index === sliced.length - 1 ||
+          sliced.slice(index + 1).every((r) => r.kind !== "body");
+        return (
+          <Text key={`b-${index}`} wrap="wrap" color={resolve("text.primary")}>
+            {row.text}
+            {!item.done && isLastBody ? (
+              <Text color={resolve("state.verify")}>{` ${caret}`}</Text>
+            ) : null}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
+/**
+ * Model reasoning when the provider emits it. Muted only — never invent text.
+ * Streaming shows the last ~8 lines; sealed folds to ~4 unless expanded.
+ */
+export function ThinkingBlock({
+  item,
+  width,
+  expanded,
+  registerRow,
+  skipLines = 0,
+}: {
+  item: ThinkingItem;
+  width: number;
+  expanded?: boolean;
+  registerRow?: (id: string, node: DOMElement | null) => void;
+  /** Skip this many visual lines (header counts as 1). */
+  skipLines?: number;
+}) {
+  const STREAM_TAIL = 8;
+  const FOLDED = 4;
+  const muted = resolve("text.muted");
+  const allLines = item.text
+    .replace(/\s+$/, "")
+    .split(/\r?\n/)
+    .filter((l, i, a) => !(l === "" && i === a.length - 1));
+  const measure = Math.max(8, width - 2);
+  let bodyLines: string[];
+  let folded = false;
+  if (!item.done) {
+    const slice = allLines.slice(-STREAM_TAIL);
+    folded = allLines.length > STREAM_TAIL;
+    bodyLines = slice.flatMap((line) => wrapText(line, measure));
+  } else if (expanded) {
+    bodyLines = allLines.flatMap((line) => wrapText(line, measure));
+  } else {
+    const slice = allLines.slice(0, FOLDED);
+    folded = allLines.length > FOLDED;
+    bodyLines = slice.flatMap((line) => wrapText(line, measure));
+  }
+
+  const visual: Array<{ kind: "header" | "ellipsis" | "body" | "expand"; text?: string }> =
+    [];
+  visual.push({ kind: "header" });
+  if (folded && !item.done) visual.push({ kind: "ellipsis" });
+  for (const line of bodyLines) visual.push({ kind: "body", text: line });
+  if (folded && item.done && !expanded) visual.push({ kind: "expand" });
+
+  const sliced = visual.slice(Math.max(0, skipLines));
+  if (sliced.length === 0) return null;
+
+  return (
+    <Box
+      flexDirection="column"
+      marginBottom={1}
+      ref={(node: DOMElement | null) => registerRow?.(item.id, node)}
+    >
+      {sliced.map((row, i) => {
+        if (row.kind === "header") {
+          return (
+            <Text key={`h-${i}`} italic color={muted}>
+              {item.done ? "thought" : "thinking"}
+            </Text>
+          );
+        }
+        if (row.kind === "ellipsis") {
+          return (
+            <Text key={`e-${i}`} italic color={muted}>
+              …
+            </Text>
+          );
+        }
+        if (row.kind === "expand") {
+          return (
+            <Text key={`x-${i}`} italic color={muted}>
+              … (expand)
+            </Text>
+          );
+        }
+        return (
+          <Text key={`b-${i}`} italic color={muted}>
+            {row.text || " "}
+          </Text>
+        );
+      })}
     </Box>
   );
 }
@@ -692,6 +969,10 @@ export function toolSigil(tool: string): string {
 function toolVerb(tool: string): string {
   if (!tool) return "Tool";
   return tool.charAt(0).toUpperCase() + tool.slice(1);
+}
+
+function isWriteLike(tool: string): boolean {
+  return tool === "write" || tool === "edit";
 }
 
 export function ToolRowLine({
@@ -712,6 +993,7 @@ export function ToolRowLine({
   const rowRef = (node: DOMElement | null) => registerRow?.(item.id, node);
   const verb = toolVerb(item.tool);
   const target = item.target ?? "";
+  const writeLike = isWriteLike(item.tool);
   const budget = Math.max(12, width - indent - verb.length - 12);
   const frames = glyphs().spinnerFrames;
 
@@ -758,7 +1040,17 @@ export function ToolRowLine({
   }
 
   const duration = formatDuration(item.durationMs);
-  const detail = item.detail && item.detail !== item.target ? item.detail : undefined;
+  // Write/edit: always show bytes/summary inline (even when detail === path).
+  // Other tools: suppress detail that merely repeats the target; keep expand body.
+  const inlineDetail =
+    item.detail && (writeLike || item.detail !== item.target)
+      ? item.detail
+      : undefined;
+  const expandDetail =
+    !writeLike && item.detail && item.detail !== item.target
+      ? item.detail
+      : undefined;
+
   return (
     <Box flexDirection="column" paddingLeft={indent} ref={rowRef}>
       <Box>
@@ -769,13 +1061,16 @@ export function ToolRowLine({
         {target ? (
           <Text color={resolve("text.muted")}>{` ${truncate(target, budget)}`}</Text>
         ) : null}
+        {writeLike && inlineDetail ? (
+          <Text color={resolve("text.muted")}>{` · ${truncate(inlineDetail, 24)}`}</Text>
+        ) : null}
         {duration ? (
           <Text color={resolve("text.muted")}>{`  ${duration}`}</Text>
         ) : null}
       </Box>
-      {expanded && detail ? (
+      {expanded && expandDetail ? (
         <Box flexDirection="column" marginLeft={2}>
-          {wrapText(detail, Math.max(8, width - indent - 4)).map((line, i) => (
+          {wrapText(expandDetail, Math.max(8, width - indent - 4)).map((line, i) => (
             <Text key={i} color={resolve("text.muted")}>
               {line}
             </Text>
@@ -794,6 +1089,7 @@ export function ToolGroupBlock({
   spinnerFrame,
   expandedIds,
   registerRow,
+  skipRows = 0,
 }: {
   group: string;
   items: ToolItem[];
@@ -801,15 +1097,23 @@ export function ToolGroupBlock({
   spinnerFrame: number;
   expandedIds?: ReadonlySet<string>;
   registerRow?: (id: string, node: DOMElement | null) => void;
+  /** Skip this many rows from the top (header counts as 1). */
+  skipRows?: number;
 }) {
   const done = items.filter((item) => item.status !== "pending").length;
+  const showHeader = skipRows < 1;
+  const itemSkip = Math.max(0, skipRows - 1);
+  const shownItems = items.slice(itemSkip);
+  if (!showHeader && shownItems.length === 0) return null;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={resolve("text.primary")}>{group}</Text>
-        <Text color={resolve("text.muted")}>{` ${done}/${items.length}`}</Text>
-      </Box>
-      {items.map((item) => (
+      {showHeader ? (
+        <Box>
+          <Text color={resolve("text.primary")}>{group}</Text>
+          <Text color={resolve("text.muted")}>{` ${done}/${items.length}`}</Text>
+        </Box>
+      ) : null}
+      {shownItems.map((item) => (
         <ToolRowLine
           key={item.id}
           item={item}
@@ -1139,7 +1443,8 @@ export function ContextStrip({
       parts.push(formatCost(metrics.costUsd));
     }
     if (context.tracePath) {
-      parts.push(truncate(context.tracePath, 28));
+      const pathMax = Math.max(20, Math.min(48, Math.floor(width * 0.25)));
+      parts.push(truncatePath(context.tracePath, pathMax));
     }
   }
 
@@ -1259,22 +1564,35 @@ export function ActivityRowFor({
   spinnerFrame,
   expandedIds,
   registerRow,
+  skipLines = 0,
 }: {
   item: ActivityItem;
   width: number;
   spinnerFrame: number;
   expandedIds?: ReadonlySet<string>;
   registerRow?: (id: string, node: DOMElement | null) => void;
+  skipLines?: number;
 }) {
   switch (item.kind) {
     case "user":
-      return <UserBlock item={item} width={width} />;
+      return <UserBlock item={item} width={width} skipLines={skipLines} />;
     case "assistant":
       return (
         <AssistantProse
           item={item}
           width={width}
           spinnerFrame={spinnerFrame}
+          skipLines={skipLines}
+        />
+      );
+    case "thinking":
+      return (
+        <ThinkingBlock
+          item={item}
+          width={width}
+          expanded={expandedIds?.has(item.id)}
+          registerRow={registerRow}
+          skipLines={skipLines}
         />
       );
     case "tool":
@@ -1315,12 +1633,15 @@ export function Activity({
   spinnerFrame,
   expandedIds,
   registerRow,
+  clipTop = 0,
 }: {
   blocks: RenderBlock[];
   width: number;
   spinnerFrame: number;
   expandedIds?: ReadonlySet<string>;
   registerRow?: (id: string, node: DOMElement | null) => void;
+  /** Mid-message clip: skip this many lines of the first visible block. */
+  clipTop?: number;
 }) {
   const border = resolve("border");
   const rule = glyph("hRule").repeat(Math.max(8, width));
@@ -1331,31 +1652,42 @@ export function Activity({
       {blocks.length === 0 ? (
         <Text color={resolve("text.muted")}> </Text>
       ) : (
-        blocks.map((block, index) => (
-          <Box
-            key={block.kind === "toolGroup" ? block.id : block.item.id}
-            marginTop={gapBefore(block, blocks[index - 1])}
-          >
-            {block.kind === "toolGroup" ? (
-              <ToolGroupBlock
-                group={block.group}
-                items={block.items}
-                width={inner}
-                spinnerFrame={spinnerFrame}
-                expandedIds={expandedIds}
-                registerRow={registerRow}
-              />
-            ) : (
-              <ActivityRowFor
-                item={block.item}
-                width={inner}
-                spinnerFrame={spinnerFrame}
-                expandedIds={expandedIds}
-                registerRow={registerRow}
-              />
-            )}
-          </Box>
-        ))
+        blocks.map((block, index) => {
+          const skip = index === 0 ? Math.max(0, clipTop) : 0;
+          return (
+            <Box
+              key={block.kind === "toolGroup" ? block.id : block.item.id}
+              marginTop={gapBefore(block, blocks[index - 1])}
+            >
+              {block.kind === "toolGroup" ? (
+                <ToolGroupBlock
+                  group={block.group}
+                  items={block.items}
+                  width={inner}
+                  spinnerFrame={spinnerFrame}
+                  expandedIds={expandedIds}
+                  registerRow={registerRow}
+                  skipRows={skip}
+                />
+              ) : (
+                <ActivityRowFor
+                  item={block.item}
+                  width={inner}
+                  spinnerFrame={spinnerFrame}
+                  expandedIds={expandedIds}
+                  registerRow={registerRow}
+                  skipLines={
+                    block.item.kind === "assistant" ||
+                    block.item.kind === "user" ||
+                    block.item.kind === "thinking"
+                      ? skip
+                      : 0
+                  }
+                />
+              )}
+            </Box>
+          );
+        })
       )}
       <Text color={border}>{rule}</Text>
     </Box>

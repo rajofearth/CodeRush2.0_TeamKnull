@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CLAI Architecture — Unified Agentic Coding Harness</title>
+<meta name="description" content="Structural map of CLAI: system diagram, harness vs tool planes, run lifecycle, module seams, memory & context, sandbox, trace, and verification." />
+<style>
+  :root {
+    --bg: #07080f;
+    --bg-2: #0b0d1a;
+    --panel: rgba(255, 255, 255, 0.04);
+    --panel-strong: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.09);
+    --text: #e8ecf8;
+    --text-dim: #9aa3c0;
+    --text-faint: #626b8c;
+    --violet: #8b5cf6;
+    --indigo: #6366f1;
+    --cyan: #22d3ee;
+    --pink: #f472b6;
+    --amber: #fbbf24;
+    --green: #34d399;
+    --red: #f87171;
+    --mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --radius: 18px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  ::selection { background: rgba(139, 92, 246, 0.45); color: #fff; }
+
+  /* ---------- backdrop ---------- */
+  .bg-fx { position: fixed; inset: 0; z-index: -2; overflow: hidden; }
+  .bg-fx::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 40%, transparent 100%);
+  }
+  .blob { position: absolute; border-radius: 50%; filter: blur(110px); opacity: 0.5; will-change: transform; }
+  .blob-a { width: 620px; height: 620px; top: -220px; left: -140px; background: radial-gradient(circle, #7c3aed, transparent 65%); animation: drift 22s ease-in-out infinite alternate; }
+  .blob-b { width: 560px; height: 560px; top: 12%; right: -200px; background: radial-gradient(circle, #0e7490, transparent 65%); animation: drift 26s ease-in-out infinite alternate-reverse; }
+  .blob-c { width: 480px; height: 480px; bottom: -180px; left: 30%; background: radial-gradient(circle, #be185d, transparent 65%); animation: drift 30s ease-in-out infinite alternate; }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(40px, -30px) scale(1.08); }
+  }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(7, 8, 15, 0.72);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; gap: 22px; height: 60px; }
+  .nav-inner .logo { font-family: var(--mono); font-weight: 700; color: var(--text); letter-spacing: 0.06em; white-space: nowrap; }
+  .nav-inner .logo span { color: var(--violet); }
+  .nav-links { display: flex; gap: 4px; flex-wrap: wrap; }
+  .nav-links a {
+    color: var(--text-dim); text-decoration: none; font-size: 13px;
+    padding: 6px 10px; border-radius: 999px; transition: color .15s, background .15s;
+  }
+  .nav-links a:hover { color: var(--text); background: var(--panel); }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 90px 0 54px; text-align: center; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; color: var(--cyan);
+    border: 1px solid rgba(34, 211, 238, 0.3); background: rgba(34, 211, 238, 0.07);
+    padding: 6px 14px; border-radius: 999px; letter-spacing: 0.08em;
+  }
+  .hero h1 {
+    font-size: clamp(38px, 6vw, 66px); font-weight: 800; line-height: 1.05;
+    margin: 26px auto 18px; max-width: 760px;
+    background: linear-gradient(120deg, #fff 20%, #c4b5fd 55%, #67e8f9 90%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.sub { max-width: 640px; margin: 0 auto; color: var(--text-dim); font-size: 17px; }
+  .hero .meta { margin-top: 22px; font-family: var(--mono); font-size: 13px; color: var(--text-faint); }
+
+  /* ---------- sections ---------- */
+  section { padding: 64px 0 10px; }
+  h2.sec {
+    font-size: 28px; font-weight: 800; letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 14px;
+  }
+  h2.sec .idx {
+    font-family: var(--mono); font-size: 14px; color: var(--violet);
+    border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 8px;
+    padding: 3px 9px; background: rgba(139, 92, 246, 0.08);
+  }
+  .lede { color: var(--text-dim); margin: 14px 0 28px; max-width: 780px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px 24px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* ---------- system diagram ---------- */
+  .diagram { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+  .plane {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); padding: 16px 18px;
+  }
+  .plane .plane-head {
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px;
+  }
+  .plane .plane-head .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap;
+  }
+  .plane .plane-head .desc { font-size: 13px; color: var(--text-faint); }
+  .plane-h .tag  { color: var(--cyan);   border-color: rgba(34, 211, 238, 0.35);  background: rgba(34, 211, 238, 0.07); }
+  .plane-c .tag  { color: var(--violet); border-color: rgba(139, 92, 246, 0.4);  background: rgba(139, 92, 246, 0.08); }
+  .plane-t .tag  { color: var(--amber);  border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.07); }
+  .plane-b .tag  { color: var(--pink);   border-color: rgba(244, 114, 182, 0.35); background: rgba(244, 114, 182, 0.07); }
+  .plane-x .tag  { color: var(--text-dim); border-color: var(--border); }
+  .plane .boxes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .box {
+    flex: 1 1 150px; min-width: 150px;
+    background: var(--panel-strong); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 14px;
+  }
+  .box .bt { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--text); }
+  .box .bd { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; line-height: 1.45; }
+  .box.glow-violet { border-color: rgba(139, 92, 246, 0.45); }
+  .box.glow-cyan    { border-color: rgba(34, 211, 238, 0.45); }
+  .box.glow-amber   { border-color: rgba(251, 191, 36, 0.45); }
+  .box.glow-green   { border-color: rgba(52, 211, 153, 0.45); }
+  .box.glow-pink    { border-color: rgba(244, 114, 182, 0.45); }
+
+  .flow-arrows { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-faint); font-size: 12px; }
+  .flow-arrows .arrow { font-family: var(--mono); color: var(--violet); font-size: 14px; line-height: 1; }
+  .flow-arrows .lbl { letter-spacing: 0.04em; }
+
+  .edges {
+    margin-top: 16px; font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px;
+    line-height: 1.9; overflow-x: auto; white-space: nowrap;
+  }
+  .edges b { color: var(--cyan); font-weight: 600; }
+
+  /* ---------- chips / tables ---------- */
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid; vertical-align: middle;
+  }
+  .chip.wired    { color: var(--green); border-color: rgba(52, 211, 153, 0.4);  background: rgba(52, 211, 153, 0.08); }
+  .chip.scaffold { color: var(--amber); border-color: rgba(251, 191, 36, 0.4);  background: rgba(251, 191, 36, 0.08); }
+  .chip.designed { color: var(--violet); border-color: rgba(139, 92, 246, 0.4); background: rgba(139, 92, 246, 0.08); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td code, p code, li code { font-family: var(--mono); font-size: 0.9em; color: var(--cyan); background: rgba(34, 211, 238, 0.07); padding: 1px 6px; border-radius: 6px; }
+  tr:last-child td { border-bottom: none; }
+  .table-scroll { overflow-x: auto; }
+
+  pre.tree, pre.cmd {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    color: var(--text-dim);
+  }
+  pre.tree .dir { color: var(--violet); }
+  pre.tree .f   { color: var(--text-dim); }
+  pre.tree .cmt { color: var(--text-faint); font-style: italic; }
+  pre.cmd { color: var(--text); }
+  pre.cmd .cmt { color: var(--text-faint); }
+
+  /* ---------- lifecycle ---------- */
+  ol.life { list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 12px; }
+  ol.life li {
+    counter-increment: step; display: grid; grid-template-columns: 42px 1fr auto; gap: 14px;
+    align-items: baseline; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 16px;
+  }
+  ol.life li::before {
+    content: counter(step); font-family: var(--mono); font-weight: 700; color: var(--violet);
+    border: 1px solid rgba(139, 92, 246, 0.4); background: rgba(139, 92, 246, 0.08);
+    width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; justify-self: start;
+  }
+  ol.life li .body b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+  ol.life li .body { color: var(--text-dim); font-size: 14px; }
+
+  /* ---------- two planes ---------- */
+  .planes .grid-2 .card { position: relative; }
+  .planes h3 { font-size: 17px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .planes h3 .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .planes ul { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  .planes ul li { color: var(--text-dim); font-size: 14px; padding-left: 18px; position: relative; }
+  .planes ul li::before { content: "›"; position: absolute; left: 4px; color: var(--violet); font-weight: 700; }
+  .planes .not { font-size: 12.5px; color: var(--text-faint); margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+  .rule {
+    margin-top: 18px; border: 1px solid rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.06);
+    border-radius: 14px; padding: 14px 18px; font-size: 14.5px; color: var(--text-dim);
+  }
+  .rule b { color: var(--amber); }
+
+  /* ---------- stages strip ---------- */
+  .stages { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .stage {
+    font-family: var(--mono); font-size: 11.5px; color: var(--cyan);
+    border: 1px solid rgba(34, 211, 238, 0.3); background: rgba(34, 211, 238, 0.06);
+    padding: 5px 11px; border-radius: 999px;
+  }
+  .stage:not(:last-child)::after { content: "→"; margin-left: 8px; color: var(--text-faint); }
+
+  /* ---------- footer ---------- */
+  footer { margin-top: 70px; border-top: 1px solid var(--border); padding: 34px 0 60px; color: var(--text-faint); font-size: 13px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+  footer a { color: var(--text-dim); text-decoration: none; }
+  footer a:hover { color: var(--cyan); }
+
+  @media (max-width: 720px) {
+    .nav-links { display: none; }
+    ol.life li { grid-template-columns: 34px 1fr; }
+    ol.life li .chip { grid-column: 2; justify-self: start; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-fx"><div class="blob blob-a"></div><div class="blob blob-b"></div><div class="blob blob-c"></div></div>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="logo">CLAI<span>_</span>ARCH</div>
+    <nav class="nav-links">
+      <a href="#system">System</a>
+      <a href="#planes">Two planes</a>
+      <a href="#lifecycle">Run lifecycle</a>
+      <a href="#seams">Module seams</a>
+      <a href="#storage">Storage</a>
+      <a href="#memory">Memory &amp; context</a>
+      <a href="#sandbox">Sandbox</a>
+      <a href="#trace">Trace</a>
+      <a href="#verify">Verification</a>
+      <a href="#commands">Commands</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ================= HERO ================= -->
+  <div class="hero">
+    <span class="eyebrow">AE-01 · single TS package · binary <code>clai</code></span>
+    <h1>CLAI Architecture</h1>
+    <p class="sub">A visual and structural map of the <b>Unified Agentic Coding Harness</b>: how a run flows through the planes, where the module seams are, and where it deliberately differs from frontier harnesses like OpenCode.</p>
+    <p class="meta">src/ · docs/ARCHITECTURE.md · one package, one CLI, zero vector DB</p>
+  </div>
+
+  <!-- ================= SYSTEM DIAGRAM ================= -->
+  <section id="system">
+    <h2 class="sec"><span class="idx">01</span> System diagram</h2>
+    <p class="lede">Five planes and the external world. Every session is anchored to a single resolved workspace root; tool calls, traces, and memory all flow from it.</p>
+
+    <div class="diagram">
+      <div class="plane plane-h">
+        <div class="plane-head"><span class="tag">Human surface</span><span class="desc">what the operator sees</span></div>
+        <div class="boxes">
+          <div class="box"><div class="bt">Ink ADE TUI</div><div class="bd">activity · plan · approvals · strip</div></div>
+          <div class="box"><div class="bt">Headless printer</div><div class="bd">CLAI_NO_TUI=1 / CI</div></div>
+          <div class="box"><div class="bt">Bench dashboard</div><div class="bd">:4310 SSE</div></div>
+          <div class="box glow-cyan"><div class="bt">UiBus event API</div><div class="bd">typed UiEvent union · TUI &amp; headless both feed it</div></div>
+        </div>
+      </div>
+
+      <div class="flow-arrows"><span class="arrow">▼</span></div>
+
+      <div class="plane plane-c">
+        <div class="plane-head"><span class="tag">clai CLI</span><span class="desc">entry · argv parsing · workspace resolution</span></div>
+        <div class="boxes">
+          <div class="box glow-violet"><div class="bt">cli.tsx</div><div class="bd">launch · run · demo · intake · memory · bench · glass</div></div>
+          <div class="box"><div class="bt">workspace.ts</div><div class="bd">root · .clai paths · --cwd wins over positional</div></div>
+        </div>
+      </div>
+
+      <div class="flow-arrows"><span class="arrow">▼</span></div>
+
+      <div class="plane plane-c">
+        <div class="plane-head"><span class="tag">Harness plane</span><span class="desc">remember &amp; bound context</span></div>
+        <div class="boxes">
+          <div class="box glow-violet"><div class="bt">adapter/</div><div class="bd">AI SDK loop · retry · compaction · system policy</div></div>
+          <div class="box"><div class="bt">context/</div><div class="bd">assemble() · compactHistory() · stages</div></div>
+          <div class="box"><div class="bt">memory/</div><div class="bd">SQLite / JSON tiered store</div></div>
+          <div class="box"><div class="bt">agents/</div><div class="bd">task · explore / general subagents</div></div>
+          <div class="box glow-amber"><div class="bt">verify/</div><div class="bd">completion contract (scaffold)</div></div>
+          <div class="box"><div class="bt">trace/</div><div class="bd">append-only JSONL writer · tail.ts</div></div>
+        </div>
+      </div>
+
+      <div class="flow-arrows"><span class="arrow">▼</span></div>
+
+      <div class="plane plane-t">
+        <div class="plane-head"><span class="tag">Tool plane</span><span class="desc">explore like an engineer</span></div>
+        <div class="boxes">
+          <div class="box glow-amber"><div class="bt">tools/</div><div class="bd">grep · glob · read · edit · write · bash · parallel · bash_bg*</div></div>
+          <div class="box"><div class="bt">tools/limits.ts</div><div class="bd">model-facing output caps — single truncation layer</div></div>
+          <div class="box"><div class="bt">tools/lsp</div><div class="bd">defs · refs · diagnostics (tsserver · pyright)</div></div>
+          <div class="box"><div class="bt">tools/intake</div><div class="bd">repo map JSON scanner</div></div>
+          <div class="box"><div class="bt">shell/jobs</div><div class="bd">ShellJobManager — bg process lifecycle</div></div>
+          <div class="box"><div class="bt">sandbox/</div><div class="bd">approval gates + env scrub</div></div>
+        </div>
+      </div>
+
+      <div class="flow-arrows"><span class="arrow">▼</span></div>
+
+      <div class="plane plane-b">
+        <div class="plane-head"><span class="tag">Benchmark plane</span><span class="desc">81-task eval bench · reproducible</span></div>
+        <div class="boxes">
+          <div class="box"><div class="bt">bench/runner.ts</div><div class="bd">parallel task execution + check.mjs</div></div>
+          <div class="box glow-pink"><div class="bt">bench/compare-pi.ts</div><div class="bd">CLAI vs pi race + scorecard</div></div>
+          <div class="box"><div class="bt">bench/server.ts</div><div class="bd">node:http + SSE dashboard :4310</div></div>
+          <div class="box"><div class="bt">bench/store.ts</div><div class="bd">history.jsonl · LiveRunFeed</div></div>
+        </div>
+      </div>
+
+      <div class="flow-arrows"><span class="arrow">▼</span></div>
+
+      <div class="plane plane-x">
+        <div class="plane-head"><span class="tag">External</span><span class="desc">never trusted by default</span></div>
+        <div class="boxes">
+          <div class="box"><div class="bt">LLM providers</div><div class="bd">Groq · DeepSeek · Cerebras · … via Vercel AI SDK registry</div></div>
+          <div class="box"><div class="bt">Workspace / fixtures</div><div class="bd">tool sandbox boundary · intake scan root</div></div>
+          <div class="box"><div class="bt">Language servers</div><div class="bd">tsserver · pyright</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="edges">
+      <b>Entry</b> → UiBus · <b>Entry</b> → Adapter · <b>Entry</b> → Bench &nbsp;·&nbsp;
+      <b>Adapter</b> ⇄ <span style="color:var(--pink)">generateText + tools</span> → LLM · <b>Adapter</b> → Tools &nbsp;·&nbsp;
+      <b>Tools</b> → Repo · <b>LSP</b> → LspSrv &nbsp;·&nbsp;
+      <b>Trace</b> → <span style="color:var(--text-faint)">.clai/traces/&lt;runId&gt;/events.jsonl</span> · <b>Memory</b> → <span style="color:var(--text-faint)">.clai/memory</span> · <b>Store</b> → <span style="color:var(--text-faint)">.clai/bench/</span>
+    </div>
+  </section>
+
+  <!-- ================= TWO PLANES ================= -->
+  <section id="planes" class="planes">
+    <h2 class="sec"><span class="idx">02</span> Two planes — the core design choice</h2>
+    <p class="lede">CLAI splits <b>exploration</b> from <b>harness intelligence</b>. This is architecture, not a two-panel UI — the operator still sees one Pi/OpenCode-like terminal pane.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="dot" style="background:var(--amber)"></span> Tool plane</h3>
+        <ul>
+          <li>grep / glob / read / edit / write — live repo access</li>
+          <li>bash · bash_bg* · parallel — real execution</li>
+          <li>LSP — defs, refs, diagnostics</li>
+          <li>repo_intake — repo map JSON seed</li>
+          <li>task · explore (read-only) / general (+bash)</li>
+        </ul>
+        <p class="not">Not its job: global AST index, vector search, replacing memory.</p>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background:var(--violet)"></span> Harness plane</h3>
+        <ul>
+          <li>Memory tiers — task · convention · evidence · preference</li>
+          <li>ContextManager — token budget · staleness · ablations</li>
+          <li>compactHistory — deterministic digest, no extra model call</li>
+          <li>Verification — evidence + repair loop (scaffold)</li>
+          <li>Trace — what happened, append-only JSONL</li>
+        </ul>
+        <p class="not">Not its job: replace grep/LSP for discovery.</p>
+      </div>
+    </div>
+
+    <div class="rule"><b>Rule:</b> exploratory discovery is never “search the memory table.” Memory cites paths; tools read the live repo.</div>
+  </section>
+
+  <!-- ================= RUN LIFECYCLE ================= -->
+  <section id="lifecycle">
+    <h2 class="sec"><span class="idx">03</span> Run lifecycle</h2>
+    <p class="lede">One interactive session, traced end to end. “What runs today vs designed” is a first-class status in CLAI.</p>
+
+    <ol class="life">
+      <li>
+        <div class="body"><b>clai / clai run "fix the test"</b> — operator starts a session; UiBus emits <code>run_start</code> into the trace.</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>ensureIntake</b> — <code>repo_intake</code> runs once per session; product one-liner appended to system context.</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>compactHistory</b> — if estimated tokens exceed ~45k, older turns collapse into a deterministic digest (keeps original task + last N messages).</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>Agent loop</b> — up to <code>maxSteps</code> (default 12) of <code>generateText + tools</code> against the provider, with 429/5xx retry + jitter and one-shot tool-arg repair.</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>Tool calls</b> — direct (grep · parallel · read · edit · bash · bash_bg · LSP) or delegated via <code>task</code> subagents (<code>explore</code> read-only / <code>general</code> +bash, ~10 steps, bounded summary). Multiple calls parallelize in one step.</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>Trace</b> — every <code>model_step</code>, <code>tool_call</code>/<code>tool_result</code>, approval, and error appended to <code>.clai/traces/&lt;runId&gt;/events.jsonl</code>.</div>
+        <span class="chip wired">wired</span>
+      </li>
+      <li>
+        <div class="body"><b>Verification gate</b> — designed: <code>PASS | FAIL | BLOCKED</code> + evidence. Today: soft stop on model finish (<code>verify/</code> exports empty).</div>
+        <span class="chip scaffold">scaffold</span>
+      </li>
+      <li>
+        <div class="body"><b>run_end</b> — status <code>ok</code>/<code>fail</code>; footer shows trace path.</div>
+        <span class="chip wired">wired</span>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ================= MODULE SEAMS ================= -->
+  <section id="seams">
+    <h2 class="sec"><span class="idx">04</span> Module seams (<code>src/</code>)</h2>
+    <p class="lede">One package, one binary, deliberately flat seams. Entry → adapter → tools; everything else hangs off those edges.</p>
+
+    <pre class="tree"><span class="dir">src/</span>
+├── <span class="f">cli.tsx</span>              <span class="cmt"># Entry: launch, run, demo, intake, memory, bench, glass</span>
+├── <span class="f">workspace.ts</span>         <span class="cmt"># Workspace root resolution + argv parsing</span>
+├── <span class="dir">adapter/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># runAgentLoop(), resolveModel(), system policy</span>
+│   ├── <span class="f">providers.ts</span>     <span class="cmt"># Pluggable Vercel AI SDK provider registry</span>
+│   ├── <span class="f">retry.ts</span>         <span class="cmt"># 429/5xx exponential backoff</span>
+│   └── <span class="f">env.ts</span>           <span class="cmt"># .env loading</span>
+├── <span class="dir">agents/</span>
+│   └── <span class="f">task.ts</span>          <span class="cmt"># explore/general subagent + `task` AI SDK tool</span>
+├── <span class="dir">tools/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># grep, glob, read, edit, write, bash, parallel, LSP, intake</span>
+│   ├── <span class="f">bg-shell.ts</span>      <span class="cmt"># bash_bg / bash_jobs / bash_output / bash_kill</span>
+│   ├── <span class="f">common.ts</span>        <span class="cmt"># workspace path confinement, tool events</span>
+│   ├── <span class="f">limits.ts</span>        <span class="cmt"># model-facing output caps (single truncation layer)</span>
+│   ├── <span class="f">lsp.ts</span>           <span class="cmt"># TS Language Service + Python pyright</span>
+│   └── <span class="f">intake.ts</span>        <span class="cmt"># repository map scanner</span>
+├── <span class="dir">shell/</span>
+│   └── <span class="f">jobs.ts</span>          <span class="cmt"># session-scoped ShellJobManager (bg processes)</span>
+├── <span class="dir">context/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># ContextManager.assemble() + ablation gates + stage emit</span>
+│   ├── <span class="f">stages.ts</span>        <span class="cmt"># context_stage types + flag heuristics</span>
+│   └── <span class="f">compact.ts</span>       <span class="cmt"># deterministic history compaction</span>
+├── <span class="dir">memory/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># SQLite / JSON tiered store</span>
+│   └── <span class="f">cli.ts</span>           <span class="cmt"># memory list|get|set|delete|export</span>
+├── <span class="dir">sandbox/</span>
+│   └── <span class="f">index.ts</span>         <span class="cmt"># @anthropic-ai/sandbox-runtime + stub fallback</span>
+├── <span class="dir">verify/</span>
+│   └── <span class="f">index.ts</span>         <span class="cmt"># completion contract (scaffold)</span>
+├── <span class="dir">trace/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># append-only JSONL per run</span>
+│   └── <span class="f">tail.ts</span>          <span class="cmt"># reusable read-only events.jsonl tailer</span>
+├── <span class="dir">glass/</span>
+│   └── <span class="f">cli.ts</span>           <span class="cmt"># `clai glass` entry</span>
+├── <span class="dir">ui-glass/</span>
+│   ├── <span class="f">app.tsx</span>          <span class="cmt"># Ink glass pane (reuses ui/theme.ts)</span>
+│   └── <span class="f">model.ts</span>         <span class="cmt"># stage row reducer</span>
+├── <span class="dir">ui/</span>
+│   ├── <span class="f">events.ts</span>        <span class="cmt"># UiBus + typed UiEvent union</span>
+│   ├── <span class="f">state.ts</span>         <span class="cmt"># reduceUiEvent → UiState</span>
+│   ├── <span class="f">app.tsx</span>          <span class="cmt"># Ink ClaiApp shell</span>
+│   ├── <span class="f">bridge.ts</span>        <span class="cmt"># tool plane → UiBus adapter</span>
+│   ├── <span class="f">headless.ts</span>      <span class="cmt"># CLAI_NO_TUI / non-TTY printer</span>
+│   ├── <span class="f">components.tsx</span>   <span class="cmt"># activity, footer, plan, tool rows</span>
+│   ├── <span class="f">theme.ts</span>         <span class="cmt"># colors, glyphs, wordmark</span>
+│   └── <span class="f">mouse.ts</span>         <span class="cmt"># SGR mouse / alt-screen helpers</span>
+├── <span class="dir">bench/</span>
+│   ├── <span class="f">index.ts</span>         <span class="cmt"># runBenchCli entry</span>
+│   ├── <span class="f">runner.ts</span>        <span class="cmt"># parallel task execution + check.mjs</span>
+│   ├── <span class="f">server.ts</span>        <span class="cmt"># live dashboard (node:http + SSE)</span>
+│   ├── <span class="f">store.ts</span>         <span class="cmt"># history.jsonl + LiveRunFeed</span>
+│   ├── <span class="f">jobs.ts</span>          <span class="cmt"># dashboard-triggered clai / offline / compare jobs</span>
+│   ├── <span class="f">types.ts</span>         <span class="cmt"># BenchRunRecord, LiveSnapshot</span>
+│   ├── <span class="f">compare-pi.ts</span>    <span class="cmt"># CLAI vs pi race + scorecard</span>
+│   └── <span class="f">dashboard.html</span>   <span class="cmt"># self-contained metrics + compare UI</span>
+└── <span class="dir">demo/</span>
+    ├── <span class="f">offline.ts</span>       <span class="cmt"># no-API edit+bash happy path</span>
+    ├── <span class="f">lsp.ts</span>           <span class="cmt"># intake + diagnostics demo</span>
+    └── <span class="f">injection.ts</span>     <span class="cmt"># memory/context injection resistance demo</span></pre>
+  </section>
+
+  <!-- ================= STORAGE ================= -->
+  <section id="storage">
+    <h2 class="sec"><span class="idx">05</span> Storage boundaries — no dual-write</h2>
+    <p class="lede">Each store owns one concern. Working memory (current file, last grep) lives in the JSONL / in-process state — never in SQLite. Reserved tiers <code>episodic</code>, <code>procedure</code>, <code>working</code> exist in types but are not writable: they belong in session JSONL.</p>
+
+    <div class="card table-scroll">
+      <table>
+        <thead><tr><th>Store</th><th>Owns</th><th>Mutability</th></tr></thead>
+        <tbody>
+          <tr><td><code>JSONL trace</code></td><td>Messages, tool calls, approvals, costs, full truncated tool output</td><td>Append-only</td></tr>
+          <tr><td><code>Bench history</code></td><td>Run records, aggregates, per-task metrics</td><td>Append-only</td></tr>
+          <tr><td><code>Memory DB</code></td><td>Conventions, evidence, task notes</td><td>Invalidate / supersede</td></tr>
+          <tr><td><code>assemble()</code></td><td>Prompt context for one model turn</td><td>Ephemeral</td></tr>
+          <tr><td><code>compactHistory()</code></td><td>Compressed middle of message list</td><td>Ephemeral</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= CONTEXT & MEMORY ================= -->
+  <section id="memory">
+    <h2 class="sec"><span class="idx">06</span> Context &amp; memory</h2>
+    <p class="lede">Two complementary mechanisms: <b>history compaction</b> (wired in the main loop) and <b>memory assembly</b> (built, demo-wired).</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">compactHistory() <span class="chip wired">wired</span></h3>
+        <ul style="list-style:none; display:flex; flex-direction:column; gap:7px;">
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Keeps original task + last N messages verbatim (<code>CLAI_COMPACT_KEEP_TURNS</code>, default 10)</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Tool call/result pairs → one-line outcomes</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Superseded reads of the same path dropped</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Files touched by edit/write listed</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;"><b style="color:var(--green)">No extra model call</b> — deterministic digest</li>
+        </ul>
+        <p class="not">Triggers at ~45k estimated tokens (<code>CLAI_COMPACT_THRESHOLD_TOKENS</code>).</p>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">ContextManager.assemble() <span class="chip designed">demo-wired</span></h3>
+        <ul style="list-style:none; display:flex; flex-direction:column; gap:7px;">
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Real ablation gates — <code>memoryEnabled</code>, <code>structuralCitationsEnabled</code></li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Hash <code>cite_path</code> → invalidate stale rows at assemble time</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Priority: evidence → convention → task, then fill token budget</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Labels <code>UNTRUSTED_DATA</code> vs <code>TRUSTED_MEMORY</code> — injection resistance</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Emits <code>context_stage</code> into the run trace (glass pane)</li>
+        </ul>
+        <p class="not">Demo: <code>clai demo injection</code> against <code>fixtures/red-team-readme/</code>.</p>
+      </div>
+    </div>
+
+    <div class="card table-scroll" style="margin-top:18px;">
+      <table>
+        <thead><tr><th>Tier</th><th>Writable</th><th>Default TTL</th><th>Backend</th></tr></thead>
+        <tbody>
+          <tr><td><code>task</code></td><td>Yes</td><td>task</td><td rowspan="4" style="color:var(--text-dim);">SQLite (<code>better-sqlite3</code>, WAL) with automatic JSON fallback; force with <code>CLAI_MEMORY_BACKEND=json</code></td></tr>
+          <tr><td><code>convention</code></td><td>Yes</td><td>durable</td></tr>
+          <tr><td><code>evidence</code></td><td>Yes</td><td>permanent</td></tr>
+          <tr><td><code>preference</code></td><td>Yes</td><td>permanent</td></tr>
+          <tr><td><code>episodic · procedure · working</code></td><td>No (reserved)</td><td>—</td><td style="color:var(--text-dim);">belongs in session JSONL</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= SANDBOX ================= -->
+  <section id="sandbox">
+    <h2 class="sec"><span class="idx">07</span> Sandbox &amp; approvals</h2>
+    <p class="lede"><code>src/sandbox/index.ts</code> wraps <code>@anthropic-ai/sandbox-runtime</code> with a structured stub fallback. Deny-by-default unless <code>CLAI_AUTO_APPROVE=1</code>.</p>
+
+    <div class="card table-scroll">
+      <table>
+        <thead><tr><th>Mode</th><th>When</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td><code>runtime</code></td><td>Native sandbox initializes</td><td><code>wrapWithSandbox()</code> + scrubbed env</td></tr>
+          <tr><td><code>stub</code></td><td>Windows ARM, missing binary, init timeout</td><td>Scrubbed env + approval hooks still apply</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-2" style="margin-top:18px;">
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">Approval kinds</h3>
+        <ul style="list-style:none; display:flex; flex-direction:column; gap:7px;">
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;"><code>egress</code> — curl, wget, npm publish…</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;"><code>destructive</code> — rm -rf, format, dd…</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;"><code>out_of_repo</code> — cwd outside workspace root</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">Env scrub</h3>
+        <p style="color:var(--text-dim); font-size:14px;">Removes <code>*_API_KEY</code>, <code>*_TOKEN</code>, <code>*_SECRET</code> and similar before any shell execution. <code>.env</code> / <code>.env.local</code> are deny-write in runtime filesystem policy.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TRACE ================= -->
+  <section id="trace">
+    <h2 class="sec"><span class="idx">08</span> Trace &amp; glass pane</h2>
+    <p class="lede">Append-only JSONL at <code>.clai/traces/&lt;runId&gt;/events.jsonl</code> — a judge-grade audit of what happened. Every run gets an 8-char UUID prefix; bench tasks write per-task traces under temp workspaces.</p>
+
+    <div class="card table-scroll">
+      <table>
+        <thead><tr><th>Event</th><th>Payload</th></tr></thead>
+        <tbody>
+          <tr><td><code>run_start</code> / <code>run_end</code></td><td>cwd · timestamp / status (<code>ok</code>|<code>fail</code>)</td></tr>
+          <tr><td><code>model_step</code></td><td>provider, finishReason, toolCalls, usage</td></tr>
+          <tr><td><code>assistant_text</code></td><td>model prose (truncated at 4k chars)</td></tr>
+          <tr><td><code>tool_call</code> / <code>tool_result</code></td><td>tool name, target, duration; full output when capped</td></tr>
+          <tr><td><code>tool_repair</code></td><td>schema repair attempts</td></tr>
+          <tr><td><code>approval</code></td><td>gate decisions</td></tr>
+          <tr><td><code>error</code> / <code>info</code></td><td>failures + recovery / compaction, provider_retry, subagent scope</td></tr>
+          <tr><td><code>context_stage</code></td><td>ContextManager.assemble() stage start/complete</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3 style="font-size:15px; margin-bottom:6px;"><code>clai glass</code> — parallel observability</h3>
+      <p style="color:var(--text-dim); font-size:14px;">A second terminal process that tails the active (or pinned) run's <code>events.jsonl</code> and renders the Context Manager pipeline stage-by-stage. Read-only consumer; does not modify UiBus or the main Ink ADE. <code>--follow-latest</code> (default) / <code>--run &lt;runId&gt;</code> to pin &amp; replay.</p>
+      <div class="stages">
+        <span class="stage">query_planner</span><span class="stage">structural_retrieval</span><span class="stage">memory_retrieval</span><span class="stage">relevance_scoring</span><span class="stage">stale_check</span><span class="stage">injection_scan</span><span class="stage">token_budget</span><span class="stage">summarizer</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VERIFICATION ================= -->
+  <section id="verify">
+    <h2 class="sec"><span class="idx">09</span> Verification — the biggest delta vs OpenCode</h2>
+    <p class="lede">OpenCode treats a model <code>stop</code> finish reason as done; tests are advisory. CLAI's design contract is <b>done means evidence</b>: <code>PASS | FAIL | BLOCKED</code> + a repair loop.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">CLAI (designed)</h3>
+        <ul style="list-style:none; display:flex; flex-direction:column; gap:7px;">
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Terminal states <code>PASS</code> / <code>FAIL</code> / <code>BLOCKED</code></li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Evidence-driven repair loop before declaring done</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Verify seam scaffolded at <code>src/verify/index.ts</code></li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Bench checkers (<code>check.mjs</code>) already encode this contract per task</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:10px;">Today (honest status)</h3>
+        <ul style="list-style:none; display:flex; flex-direction:column; gap:7px;">
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Loop uses <b>soft completion</b> on model finish</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;"><code>verify/</code> exports are empty — scaffold only</li>
+          <li style="color:var(--text-dim); font-size:14px; padding-left:18px; position:relative;">Intake, compaction, retry, repair, subagents all wired today</li>
+        </ul>
+        <p class="not">Status chips throughout this page mark wired vs scaffold honestly.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= QUICK COMMANDS ================= -->
+  <section id="commands">
+    <h2 class="sec"><span class="idx">10</span> Quick commands</h2>
+    <pre class="cmd">pnpm install
+cp .env.example .env          <span class="cmt"># provider keys</span>
+
+pnpm clai --help              <span class="cmt"># light entry (lazy heavy imports)</span>
+pnpm clai                     <span class="cmt"># interactive session on cwd</span>
+pnpm clai fixtures/tiny-edit  <span class="cmt"># session on a fixture</span>
+pnpm clai demo                <span class="cmt"># offline tool plane: edit + bash</span>
+pnpm clai demo lsp            <span class="cmt"># intake + LSP diagnostics</span>
+pnpm clai demo injection      <span class="cmt"># memory/context injection demo</span>
+pnpm clai intake --cwd .      <span class="cmt"># repo map JSON</span>
+pnpm clai memory list         <span class="cmt"># harness plane store</span>
+pnpm clai bench list          <span class="cmt"># 81 eval tasks</span>
+pnpm clai bench run --offline --serve   <span class="cmt"># offline run + dashboard :4310</span>
+pnpm bench:compare-pi         <span class="cmt"># CLAI vs pi scorecard (DeepSeek + pi)</span>
+CLAI_NO_TUI=1 pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit</pre>
+    <p style="margin-top:14px; color:var(--text-faint); font-size:13px;">
+      Trace artifact: <code>.clai/traces/&lt;runId&gt;/events.jsonl</code> · Bench history: <code>.clai/bench/history.jsonl</code>
+    </p>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>CLAI — Unified Agentic Coding Harness (AE-01)</span>
+    <span>Source: <a href="docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a> · <a href="README.md">README.md</a> · <a href="docs/CLAI-AGENT.md">CLAI-AGENT.md</a> · <a href="AGENTS.md">AGENTS.md</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -54,6 +54,47 @@ assert(scrubMouseJunk("keep me") === "keep me", "scrub leaves normal text");
   assert(events[0]?.kind === "wheelUp", "wheel up");
 }
 
+// PageUp / PageDown / arrows must forward intact (not swallowed as non-mouse CSI).
+{
+  const events: MouseEvent[] = [];
+  const parser = createSgrMouseParser((e) => events.push(e));
+  const rest = parser.feed(Buffer.from("\x1b[5~", "latin1"));
+  assert(rest.toString("latin1") === "\x1b[5~", "PageUp CSI forwarded intact");
+  assert(events.length === 0, "PageUp produces no mouse events");
+}
+{
+  const events: MouseEvent[] = [];
+  const parser = createSgrMouseParser((e) => events.push(e));
+  const rest = parser.feed(Buffer.from("\x1b[6~", "latin1"));
+  assert(rest.toString("latin1") === "\x1b[6~", "PageDown CSI forwarded intact");
+  assert(events.length === 0, "PageDown produces no mouse events");
+}
+{
+  const events: MouseEvent[] = [];
+  const parser = createSgrMouseParser((e) => events.push(e));
+  const rest = parser.feed(Buffer.from("\x1b[A", "latin1"));
+  assert(rest.toString("latin1") === "\x1b[A", "arrow-up CSI forwarded intact");
+  assert(events.length === 0, "arrow-up produces no mouse events");
+}
+{
+  const events: MouseEvent[] = [];
+  const parser = createSgrMouseParser((e) => events.push(e));
+  const rest = parser.feed(Buffer.from("\x1b[<64;10;10M", "latin1"));
+  assert(rest.length === 0, "wheel SGR → empty rest");
+  assert(events.length === 1 && events[0]!.kind === "wheelUp", "wheel SGR still stripped");
+}
+{
+  const events: MouseEvent[] = [];
+  const parser = createSgrMouseParser((e) => events.push(e));
+  const rest = parser.feed(Buffer.from("hi\x1b[5~", "latin1"));
+  assert(rest.toString("latin1") === "hi\x1b[5~", "text + PageUp forwarded intact");
+  assert(events.length === 0, "mixed PageUp produces no mouse events");
+}
+
+// PageUp bare fragment must not be scrubbed as mouse junk.
+assert(scrubMouseJunk("[5~") === "[5~", "scrub leaves PageUp bare fragment");
+assert(scrubMouseJunk("\x1b[5~") === "\x1b[5~", "scrub leaves PageUp CSI");
+
 if (failed) {
   console.error(`\n${failed} failed`);
   process.exit(1);

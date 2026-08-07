@@ -213,6 +213,16 @@ export function createLogPrinter(
         return;
       }
 
+      case "thinking": {
+        if (!event.text.trim()) return;
+        print(
+          paintText("clai.textMuted", `[think] ${truncate(event.text, 200)}`, {
+            dim: true,
+          }),
+        );
+        return;
+      }
+
       case "tool_call": {
         pendingCalls.set(event.id, {
           tool: event.tool,
