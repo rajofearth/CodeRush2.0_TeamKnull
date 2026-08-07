@@ -12,8 +12,9 @@
  *   per harness → up to 16 in-flight API calls)
  *   PI_PROVIDER=deepseek  PI_MODEL=deepseek-v4-flash
  *
- * Pi token/cost: `--mode json` sums `message_end` usage
- * (input+cacheRead+cacheWrite / output / cost.total).
+ * Pi tokens: `--mode json` sums `message_end` usage
+ * (input+cacheRead+cacheWrite / output). Cost uses estimateUsdBench —
+ * all tokensIn × inputPerM + tokensOut × outputPerM (no cache-hit discount).
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -23,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadEnvFiles } from "../adapter/env.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
+import { estimateUsdBench } from "./pricing.js";
 import { runBench } from "./runner.js";
 import { BenchStore } from "./store.js";
 import type { BenchTaskSpec, LiveSnapshot, LiveTask } from "./types.js";
@@ -60,14 +62,20 @@ export type CompareResult = {
   piScore: CompareScore;
   claiScore: CompareScore;
   claiLabel?: string;
+  /**
+   * True while either harness is still running. Dashboard keeps the task table
+   * live but freezes winner/composite until this is false (phase "done").
+   */
+  partial?: boolean;
 };
 
 export type CompareProgress = {
-  phase: "clai" | "pi" | "done";
+  /** "both" = fresh CLAI + pi in parallel; "clai"/"pi" = single-side updates; "done" = final. */
+  phase: "clai" | "pi" | "both" | "done";
   claiRows: CompareRow[];
   piRows: CompareRow[];
   claiLabel: string;
-  /** Synthetic live snapshot for the dashboard Live panel (pi tasks). */
+  /** Synthetic live snapshot for the dashboard Live panel (both harnesses). */
   live?: LiveSnapshot;
   compare?: CompareResult;
 };
@@ -132,25 +140,33 @@ function resolvePiInvocation(piBin: string): { command: string; prefixArgs: stri
 }
 
 type PiUsageAcc = {
-  tokensIn: number;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
   tokensOut: number;
-  cost: number;
   textParts: string[];
 };
 
 function emptyPiUsage(): PiUsageAcc {
-  return { tokensIn: 0, tokensOut: 0, cost: 0, textParts: [] };
+  return { input: 0, cacheRead: 0, cacheWrite: 0, tokensOut: 0, textParts: [] };
 }
 
 function addPiUsage(acc: PiUsageAcc, usage: unknown): void {
   if (!usage || typeof usage !== "object") return;
   const u = usage as Record<string, unknown>;
-  const cost = u.cost && typeof u.cost === "object" ? (u.cost as Record<string, unknown>) : null;
-  // Match session-format Usage: prompt ≈ input + cacheRead + cacheWrite.
-  acc.tokensIn +=
-    (Number(u.input) || 0) + (Number(u.cacheRead) || 0) + (Number(u.cacheWrite) || 0);
+  acc.input += Number(u.input) || 0;
+  acc.cacheRead += Number(u.cacheRead) || 0;
+  acc.cacheWrite += Number(u.cacheWrite) || 0;
   acc.tokensOut += Number(u.output) || 0;
-  acc.cost += Number(cost?.total) || 0;
+}
+
+function piUsageTotals(acc: PiUsageAcc, provider: string) {
+  // tokensIn keeps the full prompt volume (miss + cache read/write) for display.
+  // Cache splits stay on `acc` for COMPARE_PI_DEBUG; dollars ignore cache rates.
+  const tokensIn = acc.input + acc.cacheRead + acc.cacheWrite;
+  const tokensOut = acc.tokensOut;
+  const cost = estimateUsdBench(provider, tokensIn, tokensOut);
+  return { tokensIn, tokensOut, cost };
 }
 
 function extractAssistantText(message: unknown): string {
@@ -271,6 +287,7 @@ function runPi(
       clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onAbort);
       if (lineBuf.trim()) ingestPiJsonLine(usage, lineBuf);
+      const totals = piUsageTotals(usage, opts.provider);
       const textTail = usage.textParts.join("\n").slice(-2000);
       if (process.env.COMPARE_PI_DEBUG === "1") {
         const jsonLines = raw.split(/\r?\n/).filter((l) => l.trim().startsWith("{")).length;
@@ -278,7 +295,9 @@ function runPi(
           args[i - 1] === "--api-key" ? "***" : a.length > 80 ? `${a.slice(0, 77)}…` : a,
         );
         console.error(
-          `[pi-usage] jsonLines=${jsonLines} in=${usage.tokensIn} out=${usage.tokensOut} cost=${usage.cost} raw=${raw.length}`,
+          `[pi-usage] jsonLines=${jsonLines} in=${totals.tokensIn} out=${totals.tokensOut}` +
+            ` cost=${totals.cost} (miss=${usage.input} cacheRead=${usage.cacheRead}` +
+            ` cacheWrite=${usage.cacheWrite}) raw=${raw.length}`,
         );
         console.error(`[pi-usage] argv=${JSON.stringify(safeArgs)}`);
       }
@@ -287,9 +306,9 @@ function runPi(
         timedOut,
         output: textTail || raw.slice(-4000),
         wallMs: Date.now() - started,
-        tokensIn: usage.tokensIn,
-        tokensOut: usage.tokensOut,
-        cost: usage.cost,
+        tokensIn: totals.tokensIn,
+        tokensOut: totals.tokensOut,
+        cost: totals.cost,
       });
     };
 
@@ -443,24 +462,30 @@ async function runPiTask(
   }
 }
 
-function taskResultToClaiRow(t: {
-  id: string;
-  status: string;
-  wallMs: number;
-  error?: string;
-  tokensIn?: number;
-  tokensOut?: number;
-  cost?: number;
-}): CompareRow {
+function taskResultToClaiRow(
+  t: {
+    id: string;
+    status: string;
+    wallMs: number;
+    error?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    cost?: number;
+  },
+  provider = "deepseek",
+): CompareRow {
+  const tokensIn = Number(t.tokensIn) || 0;
+  const tokensOut = Number(t.tokensOut) || 0;
   return {
     id: t.id,
     harness: "clai",
     status: t.status === "pass" ? "pass" : t.status === "fail" ? "fail" : "error",
     wallMs: t.wallMs,
     detail: t.error?.slice(0, 120),
-    tokensIn: Number(t.tokensIn) || 0,
-    tokensOut: Number(t.tokensOut) || 0,
-    cost: Number(t.cost) || 0,
+    tokensIn,
+    tokensOut,
+    // Same estimateUsdBench path as pi (all tokensIn × inputPerM).
+    cost: estimateUsdBench(provider, tokensIn, tokensOut),
   };
 }
 
@@ -485,7 +510,7 @@ async function loadClaiFromHistory(
   const wanted = new Set(tasks.map((t) => t.id));
   const rows = (full?.tasks ?? [])
     .filter((t) => wanted.has(t.id))
-    .map((t) => taskResultToClaiRow(t));
+    .map((t) => taskResultToClaiRow(t, live.provider));
   return {
     label: `${live.runId} [${live.provider}/${live.model}] history`,
     rows,
@@ -576,6 +601,7 @@ function buildCompareResult(
   provider: string,
   model: string,
   claiLabel?: string,
+  partial = false,
 ): CompareResult {
   return {
     at: new Date().toISOString(),
@@ -586,6 +612,7 @@ function buildCompareResult(
     piScore: scoreRows(piRows),
     claiScore: scoreRows(claiRows),
     claiLabel,
+    partial: partial || undefined,
   };
 }
 
@@ -640,12 +667,15 @@ export async function runComparePi(
       parallel,
       done,
     });
+    // Always publish compare rows for the live task table; mark partial so the
+    // dashboard freezes winner/composite until both harnesses finish.
     const compare = buildCompareResult(
       claiRows,
       piRows.filter(Boolean) as CompareRow[],
       provider,
       model,
       claiLabel,
+      !done,
     );
     opts.onProgress?.({
       phase,
@@ -657,7 +687,8 @@ export async function runComparePi(
     });
   };
 
-  emit("clai");
+  // Mid-run phase: "both" when fresh CLAI + pi race; else history CLAI then pi.
+  emit(freshClai ? "both" : "clai");
 
   const onAbort = () => {
     for (const child of activeChildren) {
@@ -672,6 +703,8 @@ export async function runComparePi(
     }
   };
   opts.signal?.addEventListener("abort", onAbort);
+
+  const midPhase = (): CompareProgress["phase"] => (freshClai ? "both" : "pi");
 
   const runClaiSide = async () => {
     if (!freshClai) {
@@ -698,22 +731,25 @@ export async function runComparePi(
               t.status === "timeout",
           )
           .map((t) =>
-            taskResultToClaiRow({
-              id: t.id,
-              status: t.status,
-              wallMs: t.wallMs ?? 0,
-              error: t.error,
-              tokensIn: t.tokensIn,
-              tokensOut: t.tokensOut,
-              cost: t.cost,
-            }),
+            taskResultToClaiRow(
+              {
+                id: t.id,
+                status: t.status,
+                wallMs: t.wallMs ?? 0,
+                error: t.error,
+                tokensIn: t.tokensIn,
+                tokensOut: t.tokensOut,
+                cost: t.cost,
+              },
+              snap.provider,
+            ),
           );
         claiLabel = `${snap.runId} [${snap.provider}/${snap.model}] fresh`;
-        emit("clai");
+        emit(midPhase());
       },
     });
     await new BenchStore(workspaceRoot).appendRun(record);
-    claiRows = record.tasks.map((t) => taskResultToClaiRow(t));
+    claiRows = record.tasks.map((t) => taskResultToClaiRow(t, record.provider));
     claiLabel = `${record.runId} [${record.provider}/${record.model}] fresh`;
     claiLive = {
       runId: record.runId,
@@ -736,7 +772,7 @@ export async function runComparePi(
       })),
       done: true,
     };
-    emit("clai");
+    emit(midPhase());
   };
 
   const runPiSide = async () => {
@@ -747,7 +783,7 @@ export async function runComparePi(
         const i = next++;
         const task = tasks[i]!;
         piRunning.add(task.id);
-        emit("pi");
+        emit(midPhase());
         try {
           piRows[i] = await runPiTask(task, {
             provider,
@@ -762,7 +798,7 @@ export async function runComparePi(
         } finally {
           piRunning.delete(task.id);
         }
-        emit("pi");
+        emit(midPhase());
       }
     };
     await Promise.all(
@@ -771,7 +807,8 @@ export async function runComparePi(
   };
 
   try {
-    // Fresh CLAI and pi share the same task pool concurrency (default 8 each).
+    // Truly parallel: both harnesses start immediately (up to `parallel` tasks each).
+    // Live snapshot provider is "clai+pi" so the dashboard shows both progressing.
     await Promise.all([runClaiSide(), runPiSide()]);
   } finally {
     opts.signal?.removeEventListener("abort", onAbort);
@@ -809,6 +846,7 @@ export async function runComparePi(
     provider,
     model,
     claiLabel,
+    false,
   );
 
   const outPath = path.join(workspaceRoot, ".clai", "bench", "compare-pi.json");
