@@ -378,37 +378,72 @@ function truncate(s: string, max: number): string {
   return `${s.slice(0, max)}\n…(truncated ${s.length - max} chars)`;
 }
 
-/** AI SDK tool map — same implementations, swappable model. */
+/** AI SDK tool map — same implementations, swappable model.
+ * Schemas keep every property in `required` (Groq rejects optional-only keys).
+ */
 export function createAiTools(ctx: ToolContext) {
   return {
     grep: tool({
       description: "Search file contents with ripgrep (or Node fallback).",
       parameters: z.object({
         pattern: z.string(),
-        path: z.string().optional(),
-        glob: z.string().optional(),
-        caseInsensitive: z.boolean().optional(),
-        maxResults: z.number().int().positive().optional(),
+        path: z
+          .string()
+          .nullable()
+          .describe("Subdir to search, or null for workspace root"),
+        glob: z.string().nullable().describe("File glob filter, or null"),
+        caseInsensitive: z.boolean().describe("Case-insensitive match"),
+        maxResults: z.number().int().positive().describe("Max matches to return"),
       }),
-      execute: async (args) => grepTool(ctx, args),
+      execute: async (args) =>
+        grepTool(ctx, {
+          pattern: args.pattern,
+          path: args.path ?? undefined,
+          glob: args.glob ?? undefined,
+          caseInsensitive: args.caseInsensitive,
+          maxResults: args.maxResults,
+        }),
     }),
     glob: tool({
       description: "Find files by glob pattern within the workspace.",
       parameters: z.object({
         pattern: z.string(),
-        path: z.string().optional(),
-        maxResults: z.number().int().positive().optional(),
+        path: z
+          .string()
+          .nullable()
+          .describe("Subdir to search, or null for workspace root"),
+        maxResults: z.number().int().positive().describe("Max paths to return"),
       }),
-      execute: async (args) => globTool(ctx, args),
+      execute: async (args) =>
+        globTool(ctx, {
+          pattern: args.pattern,
+          path: args.path ?? undefined,
+          maxResults: args.maxResults,
+        }),
     }),
     read: tool({
       description: "Read a text file (optional offset/limit by line).",
       parameters: z.object({
         path: z.string(),
-        offset: z.number().int().positive().optional(),
-        limit: z.number().int().positive().optional(),
+        offset: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .describe("1-based start line, or null"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .describe("Max lines to read, or null"),
       }),
-      execute: async (args) => readTool(ctx, args),
+      execute: async (args) =>
+        readTool(ctx, {
+          path: args.path,
+          offset: args.offset ?? undefined,
+          limit: args.limit ?? undefined,
+        }),
     }),
     edit: tool({
       description: "Exact string replacement edit in an existing file.",
@@ -416,7 +451,7 @@ export function createAiTools(ctx: ToolContext) {
         path: z.string(),
         oldString: z.string(),
         newString: z.string(),
-        replaceAll: z.boolean().optional(),
+        replaceAll: z.boolean().describe("Replace every occurrence"),
       }),
       execute: async (args) => editTool(ctx, args),
     }),
@@ -433,10 +468,23 @@ export function createAiTools(ctx: ToolContext) {
         "Run a shell command in the sandboxed workspace (network deny-by-default).",
       parameters: z.object({
         command: z.string(),
-        cwd: z.string().optional(),
-        timeoutMs: z.number().int().positive().optional(),
+        cwd: z
+          .string()
+          .nullable()
+          .describe("Relative cwd inside workspace, or null"),
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .describe("Timeout ms, or null for default"),
       }),
-      execute: async (args) => bashTool(ctx, args),
+      execute: async (args) =>
+        bashTool(ctx, {
+          command: args.command,
+          cwd: args.cwd ?? undefined,
+          timeoutMs: args.timeoutMs ?? undefined,
+        }),
     }),
     lsp_definition: tool({
       description:
@@ -444,7 +492,11 @@ export function createAiTools(ctx: ToolContext) {
       parameters: z.object({
         path: z.string(),
         line: z.number().int().positive(),
-        character: z.number().int().nonnegative().optional(),
+        character: z
+          .number()
+          .int()
+          .nonnegative()
+          .describe("0-based column"),
       }),
       execute: async (args) => lspDefinitionTool(ctx, args),
     }),
@@ -454,7 +506,11 @@ export function createAiTools(ctx: ToolContext) {
       parameters: z.object({
         path: z.string(),
         line: z.number().int().positive(),
-        character: z.number().int().nonnegative().optional(),
+        character: z
+          .number()
+          .int()
+          .nonnegative()
+          .describe("0-based column"),
       }),
       execute: async (args) => lspReferencesTool(ctx, args),
     }),
@@ -462,17 +518,25 @@ export function createAiTools(ctx: ToolContext) {
       description:
         "Get diagnostics for a file or the TS workspace (errors/warnings). Prefer after edits.",
       parameters: z.object({
-        path: z.string().optional(),
+        path: z
+          .string()
+          .nullable()
+          .describe("File path, or null for workspace-wide (TS)"),
       }),
-      execute: async (args) => lspDiagnosticsTool(ctx, args),
+      execute: async (args) =>
+        lspDiagnosticsTool(ctx, { path: args.path ?? undefined }),
     }),
     repo_intake: tool({
       description:
         "Thin repository intake map: languages, entrypoints, configs, test command hints, bounded issue prompt.",
       parameters: z.object({
-        path: z.string().optional(),
+        path: z
+          .string()
+          .nullable()
+          .describe("Subdir to scan, or null for workspace root"),
       }),
-      execute: async (args) => intakeTool(ctx, args),
+      execute: async (args) =>
+        intakeTool(ctx, { path: args.path ?? undefined }),
     }),
   };
 }
