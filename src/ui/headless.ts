@@ -22,6 +22,10 @@ export function formatHeadlessEvent(event: UiEvent): string | null {
       return `> ${event.text}`;
     case "assistant":
       return event.text.trim() ? event.text.trimEnd() : null;
+    case "thinking":
+      return event.text.trim()
+        ? `[think] ${event.text.trimEnd()}${event.done ? "" : " …"}`
+        : null;
     case "tool_call":
       return `[··] ${event.tool}${event.target ? `  ${event.target}` : ""}`;
     case "tool_result":

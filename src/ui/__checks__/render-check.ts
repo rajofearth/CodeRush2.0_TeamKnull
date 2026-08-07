@@ -268,6 +268,123 @@ async function main(): Promise<void> {
       streamed.done === true,
   );
 
+  // chronology defense: same assistant id after a tool must not replaceById above tools
+  let chronoState = initialUiState();
+  chronoState = reduceUiEvent(chronoState, {
+    type: "assistant",
+    id: "a",
+    text: "hello",
+    done: true,
+  });
+  chronoState = reduceUiEvent(chronoState, {
+    type: "tool_call",
+    id: "t",
+    tool: "read",
+    target: "x.ts",
+  });
+  chronoState = reduceUiEvent(chronoState, {
+    type: "assistant",
+    id: "a",
+    text: "world",
+    done: true,
+  });
+  const chronoKinds = chronoState.items.map((i) => i.kind);
+  assert(
+    "assistant/tool/assistant chronology",
+    chronoKinds.includes("assistant") &&
+      chronoKinds.includes("tool") &&
+      chronoKinds.join(",") === "assistant,tool,assistant",
+    `got ${chronoKinds.join(",")}`,
+  );
+  const chronoAsst = chronoState.items.filter((i) => i.kind === "assistant");
+  assert(
+    "post-tool assistant gets ~cont id",
+    chronoAsst.length === 2 &&
+      chronoAsst[0]?.kind === "assistant" &&
+      chronoAsst[0].id === "a" &&
+      chronoAsst[0].text === "hello" &&
+      chronoAsst[1]?.kind === "assistant" &&
+      chronoAsst[1].id === "a~cont-1" &&
+      chronoAsst[1].text === "world",
+  );
+
+  // thinking reduce: deltas append, done seals; tool_call seals open thinking
+  let thinkState = initialUiState();
+  thinkState = reduceUiEvent(thinkState, {
+    type: "thinking",
+    id: "t-think",
+    text: "considering",
+    done: false,
+  });
+  thinkState = reduceUiEvent(thinkState, {
+    type: "thinking",
+    id: "t-think",
+    text: " paths",
+    done: false,
+  });
+  thinkState = reduceUiEvent(thinkState, {
+    type: "tool_call",
+    id: "tw",
+    tool: "write",
+    target: "architecture.html",
+  });
+  const thought = thinkState.items.find((i) => i.kind === "thinking");
+  assert(
+    "thinking appends then seals on tool_call",
+    thought?.kind === "thinking" &&
+      thought.text === "considering paths" &&
+      thought.done === true,
+  );
+
+  const writePendingPhase = deriveLifecycle({
+    status: { label: "thinking", level: "info" },
+    items: thinkState.items,
+  });
+  assert(
+    "pending write surfaces in lifecycle",
+    writePendingPhase?.detail === "Writing architecture.html",
+    writePendingPhase?.detail,
+  );
+
+  {
+    const { createToolPlaneBridge, formatHumanBytes } = await import(
+      "../bridge.js",
+    );
+    assert("formatHumanBytes 43061", formatHumanBytes(43061) === "42KB");
+    const detailBus = createUiBus();
+    const toolResults: Array<{ detail?: string }> = [];
+    detailBus.subscribe((e) => {
+      if (e.type === "tool_result") toolResults.push(e);
+    });
+    const bridge = createToolPlaneBridge(detailBus);
+    bridge({ type: "tool_call", tool: "write", target: "architecture.html" });
+    bridge({
+      type: "tool_result",
+      tool: "write",
+      ok: true,
+      target: "architecture.html",
+      durationMs: 24,
+      output: { path: "architecture.html", ok: true, detail: 43061 },
+    });
+    assert(
+      "bridge write detail is human bytes",
+      toolResults[0]?.detail === "42KB",
+      toolResults[0]?.detail,
+    );
+  }
+
+  const thinkHeadless = formatHeadlessEvent({
+    type: "thinking",
+    id: "th1",
+    text: "plan the edit",
+    done: true,
+  });
+  assert(
+    "headless thinking shape",
+    thinkHeadless === "[think] plan the edit",
+    thinkHeadless ?? "null",
+  );
+
   // ── mouse parser ───────────────────────────────────────────────────────────
   const events: Array<{ kind: string; x: number; y: number }> = [];
   const parser = createSgrMouseParser((e) =>
@@ -359,13 +476,29 @@ async function main(): Promise<void> {
   );
   assert("idle agent Build", /\bBuild\b/.test(idle), "missing Build");
   assert(
-    "idle keybind hints",
+    "idle composer hRule chrome",
+    idle.includes("─".repeat(8)) || idle.includes("-".repeat(8)),
+    "missing composer ── rules",
+  );
+  assert(
+    "idle keybind hints in strip",
     idle.includes("switch agent") && idle.includes("commands"),
+  );
+  assert(
+    "idle footer has cwd or model",
+    /gpt-oss|Projects\/clai|P:\/Projects/.test(idle),
+    idle.slice(0, 280),
   );
 
   // ── working screen render (≥120 → plan side column) ────────────────────────
   const working = await renderFrame(140, 40, (bus) => {
     bus.emit({ type: "user", text: "add age verification to signup" });
+    bus.emit({
+      type: "thinking",
+      id: "th-smoke",
+      text: "checking the approval seam before edits",
+      done: true,
+    });
     bus.emit({
       type: "assistant",
       id: "a1",
@@ -425,6 +558,11 @@ async function main(): Promise<void> {
   assert("working has CLAI wordmark", working.includes(WORDMARK), working.slice(0, 120));
   assert("working has credit", working.includes(CREDIT), working.slice(0, 120));
   assert(
+    "working has thought header",
+    working.includes("thought"),
+    "missing thinking block",
+  );
+  assert(
     "working has Working lifecycle",
     working.includes("Working"),
     `len=${working.length} snippet=${JSON.stringify(working.replace(/\s+/g, " ").slice(0, 240))}`,
@@ -435,16 +573,36 @@ async function main(): Promise<void> {
     "missing stats panel fields",
   );
   assert("working has plan pane", working.includes("plan") || working.includes("Todo") || working.includes("sandbox approval"));
-  assert("working has token strip", /\btok\b|tokens|28,221|28221/.test(working));
-  assert("working has cost on strip", working.includes("$0.24"));
+  assert(
+    "working has compact token strip or stats",
+    /↑20,000|↑20000|tokens/.test(working),
+    "missing ↑in or stats tokens",
+  );
+  assert(
+    "working cost on stats",
+    working.includes("$0.24") || working.includes("0.24"),
+  );
+  assert(
+    "working strip has scroll/interrupt hints",
+    working.includes("interrupt") && working.includes("scroll"),
+  );
   assert(
     "working tool verb Read",
     working.includes("Read") && working.includes("edit.ts"),
   );
   assert("working tool verb Grep", working.includes("Grep"));
   assert("working explore group", working.includes("explore"));
+  assert(
+    "working omits processed badge",
+    !working.includes("processed"),
+    "done assistant should not show processed · reply",
+  );
   assert("working interrupt hint", working.includes("interrupt"));
   assert("working has no Context sidebar heading", !/\bContext\b/.test(working));
+  assert(
+    "working composer hRule chrome",
+    working.includes("─".repeat(8)) || working.includes("-".repeat(8)),
+  );
 
   const narrow = await renderFrame(90, 30, (bus) => {
     bus.emit({ type: "user", text: "hi" });

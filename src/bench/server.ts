@@ -6,7 +6,8 @@
  *   GET /events         SSE — snapshot + compare + job events
  *   GET /api/runs       run summaries from history.jsonl (oldest first)
  *   GET /api/runs/:id   full BenchRunRecord for one run
- *   GET /api/compare    CLAI vs pi harness scorecard (compare-pi.json)
+ *   GET /api/compare    CLAI vs pi harness scorecard (latest compare-pi.json)
+ *   GET /api/compare/:id archived compare scorecard
  *   GET /api/tasks      catalog ids + count
  *   GET /api/jobs/current
  *   POST /api/jobs      start clai | offline | compare ({ limit?, parallel?, sideParallel?, … })
@@ -14,7 +15,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadEnvFiles } from "../adapter/env.js";
@@ -103,25 +104,24 @@ export async function startBenchServer(
       return mem;
     }
     try {
-      const comparePath = path.join(opts.store.benchDir, "compare-pi.json");
-      await access(comparePath);
-      const disk = JSON.parse(await readFile(comparePath, "utf8")) as {
-        at?: string;
-      };
+      const disk = await opts.store.getCompare();
       if (
         mem &&
         mem.partial !== true &&
-        mem.at &&
+        (mem as { at?: string }).at &&
         disk?.at &&
-        Date.parse(mem.at) >= Date.parse(disk.at)
+        Date.parse((mem as { at: string }).at) >= Date.parse(disk.at)
       ) {
         return mem;
       }
-      return disk;
+      return disk ?? mem;
     } catch {
       return mem;
     }
   }
+
+  // Import legacy compare-pi.json into compares/ so history can replay dual charts.
+  void opts.store.getCompare();
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -177,6 +177,17 @@ export async function startBenchServer(
         const compare = await loadCompareFromDisk();
         if (!compare) {
           sendJson(res, 404, { error: "compare-pi.json not found" });
+          return;
+        }
+        sendJson(res, 200, compare);
+        return;
+      }
+      const compareMatch = /^\/api\/compare\/([^/]+)$/.exec(url.pathname);
+      if (compareMatch && method === "GET") {
+        const id = decodeURIComponent(compareMatch[1]!);
+        const compare = await opts.store.getCompare(id);
+        if (!compare) {
+          sendJson(res, 404, { error: "compare not found" });
           return;
         }
         sendJson(res, 200, compare);
@@ -253,12 +264,21 @@ export async function startBenchServer(
       }
       const runMatch = /^\/api\/runs\/([^/]+)$/.exec(url.pathname);
       if (runMatch && method === "GET") {
-        const run = await opts.store.getRun(decodeURIComponent(runMatch[1]!));
+        const id = decodeURIComponent(runMatch[1]!);
+        const run = await opts.store.getRun(id);
         if (!run) {
           sendJson(res, 404, { error: "run not found" });
           return;
         }
-        sendJson(res, 200, run);
+        let linkedCompare = run.compare ?? null;
+        if (!linkedCompare) {
+          linkedCompare = await opts.store.findCompareForRun(id);
+        }
+        sendJson(res, 200, {
+          ...run,
+          compare: linkedCompare || undefined,
+          compareId: run.compareId || (linkedCompare as { compareId?: string } | null)?.compareId,
+        });
         return;
       }
       sendJson(res, 404, { error: "not found" });

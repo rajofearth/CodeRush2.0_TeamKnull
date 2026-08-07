@@ -30,18 +30,24 @@ import {
   BRAND_INTRO_INTERVAL_MS,
   BRAND_INTRO_TOTAL_TICKS,
   ContextStrip,
-  HintLine,
   LifecycleLine,
   PlanPane,
   PromptBox,
   SIDEBAR_WIDTH,
   ScrollCue,
   StatsPanel,
+  StickyUserCue,
   Wordmark,
   deriveLifecycle,
+  formatHomePath,
+  measureContextStripRows,
+  measurePromptRows,
   shouldPlayBrandIntro,
+  truncatePath,
+  visiblePromptBodyLines,
   type FooterHint,
 } from "./components.js";
+import { CREDIT } from "./theme.js";
 import {
   armMouse,
   createHitRegistry,
@@ -50,6 +56,7 @@ import {
   scrubMouseJunk,
   type HitRegistry,
 } from "./mouse.js";
+import { measureHeights, windowByLines } from "./scroll.js";
 import { glyphs } from "./theme.js";
 
 const SIDEBAR_MIN_WIDTH = 120;
@@ -107,91 +114,6 @@ function useTerminalSize(): { columns: number; rows: number } {
   return size;
 }
 
-function blockHeight(block: RenderBlock): number {
-  if (block.kind === "toolGroup") return block.items.length + 2;
-  const item: ActivityItem = block.item;
-  switch (item.kind) {
-    case "plan":
-      return item.steps.length + 2;
-    case "approval":
-      return 4;
-    case "verify":
-      return item.logPath ? 3 : 2;
-    case "assistant": {
-      // Streaming view tails the last ~18 lines so the live edge stays on screen.
-      const lines = item.text.split(/\r?\n/);
-      const shown = item.done ? lines.length : Math.min(18, lines.length);
-      return 3 + Math.max(1, shown);
-    }
-    case "user":
-      return 2 + Math.ceil(item.text.length / 70);
-    default:
-      return 1;
-  }
-}
-
-function windowBlocks(
-  blocks: RenderBlock[],
-  budget: number,
-  scrollFromBottom: number,
-): {
-  visible: RenderBlock[];
-  atBottom: boolean;
-  canScrollUp: boolean;
-  hiddenBelow: number;
-  hiddenAbove: number;
-  maxScroll: number;
-} {
-  if (blocks.length === 0) {
-    return {
-      visible: [],
-      atBottom: true,
-      canScrollUp: false,
-      hiddenBelow: 0,
-      hiddenAbove: 0,
-      maxScroll: 0,
-    };
-  }
-
-  const heights = blocks.map(blockHeight);
-
-  // Fit as many trailing blocks as the budget allows (follow / live edge).
-  let used = 0;
-  let fitCount = 0;
-  for (let i = blocks.length - 1; i >= 0; i -= 1) {
-    const h = heights[i]!;
-    if (used + h > budget && fitCount > 0) break;
-    used += h;
-    fitCount += 1;
-  }
-
-  const maxScroll = Math.max(0, blocks.length - fitCount);
-  // Grok-style follow: scrollFromBottom === 0 pins to the live edge.
-  const scroll = Math.max(0, Math.min(scrollFromBottom, maxScroll));
-  const end = blocks.length - scroll;
-
-  const visibleIdx: number[] = [];
-  let u = 0;
-  for (let i = end - 1; i >= 0; i -= 1) {
-    const h = heights[i]!;
-    if (u + h > budget && visibleIdx.length > 0) break;
-    visibleIdx.unshift(i);
-    u += h;
-  }
-
-  const first = visibleIdx[0] ?? 0;
-  const last = visibleIdx[visibleIdx.length - 1] ?? -1;
-
-  return {
-    visible: visibleIdx.map((i) => blocks[i]!),
-    atBottom: scroll <= 0,
-    canScrollUp: first > 0 || scroll > 0,
-    hiddenBelow: Math.max(0, blocks.length - 1 - last),
-    hiddenAbove: first,
-    maxScroll,
-  };
-}
-
 function latestTodo(items: ActivityItem[]): PlanItem | null {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i]!;
@@ -210,6 +132,16 @@ function pendingApprovals(items: ActivityItem[]): ApprovalItem[] {
       item.kind === "approval" && item.decision == null,
   );
 }
+
+/** Latest user prompt text for the sticky scrolled-up cue. */
+function latestUserText(items: ActivityItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]!;
+    if (item.kind === "user" && item.text.trim()) return item.text;
+  }
+  return null;
+}
+
 
 /** Activity stream without the latest plan/todo (shown in the plan pane). */
 function activityBlocks(items: ActivityItem[], todo: PlanItem | null): RenderBlock[] {
@@ -265,8 +197,6 @@ export function ClaiApp(props: ClaiAppProps) {
         stdout,
       }),
   );
-  /** Extra activity rows unlocked by clicking "more below". */
-  const [expandBoost, setExpandBoost] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   /** Forces StatsPanel to refresh even when Ink batches quietly. */
   const [statsEpoch, setStatsEpoch] = useState(0);
@@ -283,7 +213,8 @@ export function ClaiApp(props: ClaiAppProps) {
   onSubmit.current = props.onSubmit;
   const scrollRef = useRef(0);
   scrollRef.current = scrollFromBottom;
-  const blockCountRef = useRef(0);
+  const maxScrollRef = useRef(0);
+  const totalLinesRef = useRef(0);
   const hitRegistry = useRef<HitRegistry>(createHitRegistry());
   const hintActions = useRef(new Map<string, () => void>());
   const toggleExpand = useCallback((id: string) => {
@@ -323,12 +254,15 @@ export function ClaiApp(props: ClaiAppProps) {
         handlers: {
           onWheel: (direction) => {
             // direction -1 = wheel up → older; +1 = toward live edge (follow).
+            // Pi-style: ±3 lines; snap to follow when ≤2 lines from live edge.
             if (direction < 0) {
-              setScrollFromBottom((n) => n + 3);
+              setScrollFromBottom((n) =>
+                Math.min(n + 3, maxScrollRef.current),
+              );
             } else {
               setScrollFromBottom((n) => {
                 const next = Math.max(0, n - 3);
-                return next <= 1 ? 0 : next;
+                return next <= 2 ? 0 : next;
               });
             }
           },
@@ -367,7 +301,6 @@ export function ClaiApp(props: ClaiAppProps) {
 
       if (event.type === "user") {
         setScrollFromBottom(0);
-        setExpandBoost(0);
         setBusy(true);
         taskStartedAt.current = Date.now();
         setElapsedMs(0);
@@ -401,18 +334,6 @@ export function ClaiApp(props: ClaiAppProps) {
     () => activityBlocks(state.items, todo),
     [state.items, todo],
   );
-
-  // Grok-style sticky follow: when pinned to bottom, new blocks stay in view.
-  // When the user has scrolled up, keep their anchor by advancing the offset.
-  useEffect(() => {
-    const prev = blockCountRef.current;
-    const next = blocks.length;
-    blockCountRef.current = next;
-    if (next <= prev) return;
-    if (scrollRef.current > 0) {
-      setScrollFromBottom((n) => n + (next - prev));
-    }
-  }, [blocks.length]);
 
   const pendingTools = state.items.some(
     (item) => item.kind === "tool" && item.status === "pending",
@@ -518,26 +439,162 @@ export function ClaiApp(props: ClaiAppProps) {
     return () => clearTimeout(timer);
   }, [escArmedUntil]);
 
+  // Full-terminal layout: conversation fills remaining width; soft wrap for prose.
+  const PAD = columns >= 100 ? 2 : 1;
+  const showStats = columns >= 72;
+  const showSidebar = columns >= SIDEBAR_MIN_WIDTH;
+  // Compact horizontal stats need ~44–52 cols for `time · tokens · cost · tools`.
+  const STATS_W = columns >= 140 ? 52 : columns >= 100 ? 48 : 44;
+  const conversationWidth = Math.max(
+    24,
+    showSidebar ? columns - SIDEBAR_WIDTH - PAD * 2 : columns - PAD * 2,
+  );
+  const contentWidth = Math.max(16, conversationWidth - 2);
+  // Cap readable prose on ultra-wide; column stays full-width around it.
+  const proseWidth = Math.min(
+    contentWidth,
+    columns >= 140 ? 100 : contentWidth,
+  );
+  const showPlanInline = !showSidebar;
+  const stickyUser =
+    scrollFromBottom > 0 ? latestUserText(state.items) : null;
+
+  // Wordmark + compact StatsPanel (2 rows) share a row; +1 for header marginBottom.
+  const headerRows = showStats ? 3 : 2;
+  const placeholder = busy ? "working…" : placeholderFor(placeholderTick);
+  const promptBodyVisible = props.interactive
+    ? visiblePromptBodyLines(input, proseWidth, placeholder).length
+    : 0;
+  const promptRows = props.interactive
+    ? measurePromptRows(promptBodyVisible)
+    : 0;
+  const planRows =
+    showPlanInline && todo
+      ? Math.min(10, 2 + (todo.steps?.length ?? 0))
+      : 0;
+  const approvalRows =
+    approvals.length > 0 ? Math.min(8, 1 + approvals.length * 3) : 0;
+  const cueRows = 2;
+  // Lifecycle docks flush above composer — only reserve a row when visible.
+  const lifecycleRows = lifecycle ? 1 : 0;
+
+  // Approximate footer meta length (mirrors ContextStrip) for 1 vs 2 row budget.
+  const stripMetaParts: string[] = [];
+  {
+    const { model: m, provider: p } = splitModel(state.context.model);
+    if (m) stripMetaParts.push(m);
+    if (columns >= 100 && p) stripMetaParts.push(p);
+    if (columns >= 100 && state.context.sandboxMode) {
+      stripMetaParts.push(state.context.sandboxMode);
+    }
+    const cwdLabel = formatHomePath(state.context.cwd);
+    if (cwdLabel) {
+      stripMetaParts.push(
+        truncatePath(cwdLabel, Math.max(12, Math.min(36, Math.floor(columns * 0.28)))),
+      );
+    }
+  }
+  const stripHintsPlain = [
+    ...(props.onInterrupt && (busy || state.status != null)
+      ? ["esc interrupt"]
+      : []),
+    "pgup/dn scroll",
+    ...(props.interactive ? ["tab switch agent", "ctrl+p commands"] : []),
+  ].join(" · ");
+  const stripRows = measureContextStripRows(
+    columns,
+    stripMetaParts.join(" · ").length,
+    stripHintsPlain.length,
+    CREDIT.length,
+  );
+
+  const activityBudget = Math.max(
+    6,
+    rows -
+      headerRows -
+      promptRows -
+      planRows -
+      approvalRows -
+      cueRows -
+      lifecycleRows -
+      stripRows -
+      2,
+  );
+  // Activity paints a single muted top rule — reserve 1 row in the window budget.
+  // Sticky user cue takes one row when scrolled up.
+  const stickyRows = stickyUser ? 1 : 0;
+  const budget = Math.max(4, activityBudget - 1 - stickyRows);
+
+  const heights = useMemo(
+    () => measureHeights(blocks, proseWidth),
+    [blocks, proseWidth],
+  );
+  const totalLines = useMemo(
+    () => heights.reduce((a, b) => a + b, 0),
+    [heights],
+  );
+
+  // Pi-style sticky follow: when pinned (scrollFromBottom === 0), stay at end.
+  // When scrolled up, keep scrollTop fixed → grow scrollFromBottom by Δ totalLines.
+  useEffect(() => {
+    const prev = totalLinesRef.current;
+    totalLinesRef.current = totalLines;
+    if (totalLines <= prev) return;
+    if (scrollRef.current > 0) {
+      setScrollFromBottom((n) => n + (totalLines - prev));
+    }
+  }, [totalLines]);
+
+  const {
+    visible,
+    clipTop,
+    atBottom,
+    canScrollUp,
+    hiddenBelowLines,
+    hiddenAboveLines,
+    maxScroll,
+  } = useMemo(
+    () => windowByLines(blocks, heights, budget, scrollFromBottom),
+    [blocks, heights, budget, scrollFromBottom],
+  );
+
+  maxScrollRef.current = maxScroll;
+
+  // Clamp when maxScroll shrinks (resize / fewer lines).
+  useEffect(() => {
+    setScrollFromBottom((n) => Math.min(n, maxScroll));
+  }, [maxScroll]);
+
+  // Pi page step: viewport − 1 lines.
+  const pageLines = Math.max(1, budget - 1);
+
   const scrollUp = useCallback(() => {
-    setScrollFromBottom((n) => n + 3);
-  }, []);
-  /** Resume follow mode (Grok: jump to live edge). */
-  const followLive = useCallback(() => {
-    setScrollFromBottom(0);
-    setExpandBoost(0);
-  }, []);
-  /** Reveal newer content; snap to live edge when close enough. */
-  const expandBelow = useCallback(() => {
+    setScrollFromBottom((n) => Math.min(n + pageLines, maxScroll));
+  }, [pageLines, maxScroll]);
+
+  const scrollDown = useCallback(() => {
     setScrollFromBottom((n) => {
-      const next = Math.max(0, n - 5);
+      const next = Math.max(0, n - pageLines);
       return next <= 2 ? 0 : next;
     });
-    setExpandBoost((b) => Math.min(48, b + 8));
+  }, [pageLines]);
+
+  /** Resume follow mode (jump to live edge). */
+  const followLive = useCallback(() => {
+    setScrollFromBottom(0);
   }, []);
+
+  /** Reveal newer content; snap to live edge when close enough (≤2 lines). */
+  const expandBelow = useCallback(() => {
+    setScrollFromBottom((n) => {
+      const next = Math.max(0, n - pageLines);
+      return next <= 2 ? 0 : next;
+    });
+  }, [pageLines]);
+
   const expandAbove = useCallback(() => {
-    setScrollFromBottom((n) => n + 5);
-    setExpandBoost((b) => Math.min(48, b + 8));
-  }, []);
+    setScrollFromBottom((n) => Math.min(n + pageLines, maxScroll));
+  }, [pageLines, maxScroll]);
 
   useInput(
     (ch, key) => {
@@ -556,17 +613,30 @@ export function ClaiApp(props: ClaiAppProps) {
         return;
       }
       if (key.pageDown || (key.ctrl && ch === "d")) {
-        expandBelow();
+        scrollDown();
         return;
       }
       if (!props.interactive || busy || exitCode != null) return;
 
+      // Alt+Enter → newline. Plain Enter submits (Ink often lacks Shift).
+      if (key.return && key.meta) {
+        setInput((v) => scrubMouseJunk(`${v}\n`));
+        return;
+      }
       if (key.return) {
         const text = input.trim();
         if (!text) return;
         setInput("");
         setBusy(true);
         onSubmit.current?.(text);
+        return;
+      }
+      // Ctrl+J (often delivered as ch === "\n" with ctrl) inserts a newline.
+      if (
+        (key.ctrl && (ch === "j" || ch === "J")) ||
+        ch === "\n"
+      ) {
+        setInput((v) => scrubMouseJunk(`${v}\n`));
         return;
       }
       if (key.backspace || key.delete) {
@@ -582,36 +652,6 @@ export function ClaiApp(props: ClaiAppProps) {
       }
     },
     { isActive: true },
-  );
-
-  // Readable column width on large terminals (don't stretch prose edge-to-edge).
-  const STATS_W = columns >= 140 ? 34 : columns >= 100 ? 28 : 24;
-  const CONTENT_MAX =
-    columns >= 180 ? 112 : columns >= 140 ? 100 : columns >= 110 ? 92 : 88;
-  const showStats = columns >= 72;
-  const showSidebar = columns >= SIDEBAR_MIN_WIDTH && columns < 160;
-  const chromePad =
-    columns >= 140
-      ? Math.max(
-          2,
-          Math.floor(
-            (columns - CONTENT_MAX - (showStats ? STATS_W + 4 : 0)) / 2,
-          ),
-        )
-      : 1;
-  const conversationWidth = Math.max(
-    24,
-    Math.min(
-      CONTENT_MAX + 2,
-      showSidebar ? columns - SIDEBAR_WIDTH - chromePad : columns - chromePad * 2,
-    ),
-  );
-  const contentWidth = Math.max(16, Math.min(CONTENT_MAX, conversationWidth - 2));
-
-  const budget = Math.max(6, rows - (columns >= 140 ? 14 : 12) + expandBoost);
-  const { visible, atBottom, canScrollUp, hiddenBelow, hiddenAbove } = useMemo(
-    () => windowBlocks(blocks, budget, scrollFromBottom),
-    [blocks, budget, scrollFromBottom],
   );
 
   const agentLabel = titleCaseAgent(state.context.agent);
@@ -646,17 +686,13 @@ export function ClaiApp(props: ClaiAppProps) {
       : null;
 
   const footerHints: FooterHint[] = [
-    ...(interruptMode
+    { id: "scroll", key: "pgup/dn", label: "scroll" },
+    ...(props.interactive
       ? [
-          {
-            id: "interrupt",
-            key: "esc",
-            label:
-              interruptMode === "confirm" ? "again to interrupt" : "interrupt",
-          },
+          { id: "tab", key: "tab", label: "switch agent" },
+          { id: "commands", key: "ctrl+p", label: "commands" },
         ]
       : []),
-    { id: "scroll", key: "pgup/dn", label: "scroll" },
   ];
 
   hintActions.current.set("interrupt", () => requestInterrupt());
@@ -664,6 +700,8 @@ export function ClaiApp(props: ClaiAppProps) {
   hintActions.current.set("more-below", () => expandBelow());
   hintActions.current.set("more-above", () => expandAbove());
   hintActions.current.set("follow", () => followLive());
+  hintActions.current.set("tab", () => {});
+  hintActions.current.set("commands", () => {});
 
   const registerRow = useCallback(
     (id: string, node: DOMElement | null) => {
@@ -693,13 +731,6 @@ export function ClaiApp(props: ClaiAppProps) {
     [registerHint],
   );
 
-  const promptHints = [
-    { key: "tab", label: "switch agent" },
-    { key: "ctrl+p", label: "commands" },
-  ];
-
-  const showPlanInline = !showSidebar;
-
   if (!introDone) {
     return (
       <Box
@@ -715,18 +746,20 @@ export function ClaiApp(props: ClaiAppProps) {
   }
 
   return (
-    <Box flexDirection="column" width={columns} height={rows} paddingX={chromePad > 1 ? 0 : 0}>
+    <Box flexDirection="column" width={columns} height={rows}>
+      {/* Header — flexShrink 0 */}
       <Box
         flexDirection="row"
         justifyContent="space-between"
-        paddingLeft={chromePad}
-        paddingRight={chromePad}
+        flexShrink={0}
+        paddingX={PAD}
         marginBottom={1}
         width={columns}
       >
-        <Box flexDirection="column">
-          <Wordmark />
-        </Box>
+        <Wordmark
+          cwd={state.context.cwd}
+          showCwd={columns >= 100 && Boolean(state.context.cwd)}
+        />
         {showStats ? (
           <StatsPanel
             key={`stats-${statsEpoch}-${tokensOut}-${toolCalls}-${elapsedMs}`}
@@ -736,101 +769,138 @@ export function ClaiApp(props: ClaiAppProps) {
         ) : null}
       </Box>
 
-      <Box flexDirection="row" flexGrow={1} paddingLeft={chromePad} paddingRight={chromePad}>
+      {/* Body — grows: scrollback → turn status → composer → strip */}
+      <Box
+        flexDirection="row"
+        flexGrow={1}
+        width={columns}
+        paddingX={PAD}
+        minHeight={0}
+      >
         <Box
           flexDirection="column"
+          flexGrow={1}
           width={conversationWidth}
-          paddingRight={1}
+          minHeight={0}
+          height="100%"
         >
+          {/* Sticky latest-user cue when scrolled away from live edge */}
+          {stickyUser && !atBottom ? (
+            <StickyUserCue text={stickyUser} width={proseWidth} />
+          ) : null}
+
           {canScrollUp ? (
             <ScrollCue
               direction="up"
               label={
-                hiddenAbove > 0
-                  ? `${hiddenAbove} more above`
-                  : `scroll (${scrollFromBottom} from bottom)`
+                hiddenAboveLines > 0
+                  ? `${hiddenAboveLines} lines above`
+                  : `scroll (${scrollFromBottom} lines from bottom)`
               }
               register={(node) => registerScrollCue("more-above", node)}
             />
           ) : null}
 
-          <Box flexGrow={1} flexDirection="column">
-            <Activity
-              blocks={visible}
-              width={contentWidth}
-              spinnerFrame={frame}
-              expandedIds={expandedIds}
-              registerRow={registerRow}
-            />
-            {!atBottom ? (
-              <ScrollCue
-                direction="down"
-                label={
-                  hiddenBelow > 0
-                    ? `${hiddenBelow} more below · click to follow`
-                    : "follow live"
-                }
-                register={(node) => registerScrollCue("more-below", node)}
-              />
-            ) : null}
-            <Box marginTop={1}>
-              <LifecycleLine
-                phase={lifecycle}
-                frame={frame}
-                width={contentWidth}
+          {/* ONLY this region grows — prose capped, column full-width */}
+          <Box
+            flexGrow={1}
+            flexDirection="column"
+            width={conversationWidth}
+            justifyContent="flex-start"
+            minHeight={0}
+            overflow="hidden"
+          >
+            <Box width={proseWidth}>
+              <Activity
+                blocks={visible}
+                width={proseWidth}
+                spinnerFrame={frame}
+                expandedIds={expandedIds}
+                registerRow={registerRow}
+                clipTop={clipTop}
               />
             </Box>
           </Box>
 
-          {showPlanInline ? (
-            <PlanPane todo={todo} width={contentWidth} />
+          {!atBottom ? (
+            <ScrollCue
+              direction="down"
+              label={
+                hiddenBelowLines > 0
+                  ? `${hiddenBelowLines} lines below · follow live`
+                  : "follow live"
+              }
+              register={(node) => registerScrollCue("more-below", node)}
+            />
           ) : null}
-          <ApprovalsPane items={approvals} width={contentWidth} />
+
+          {/* Approvals stay near composer; plan is secondary (sidebar or quiet inline) */}
+          <Box flexShrink={0}>
+            <ApprovalsPane items={approvals} width={proseWidth} />
+          </Box>
+          {showPlanInline ? (
+            <Box flexShrink={0}>
+              <PlanPane todo={todo} width={proseWidth} />
+            </Box>
+          ) : null}
+
+          {/* Turn status flush above composer — no spacer when idle */}
+          {lifecycle ? (
+            <Box flexShrink={0} width={proseWidth}>
+              <LifecycleLine
+                phase={lifecycle}
+                frame={frame}
+                width={proseWidth}
+                elapsedMs={taskActive ? elapsedMs : undefined}
+              />
+            </Box>
+          ) : null}
 
           {props.interactive ? (
-            <Box flexDirection="column" marginTop={1}>
+            <Box flexDirection="column" flexShrink={0} marginTop={0}>
               <PromptBox
-                width={contentWidth}
+                width={proseWidth}
                 value={input}
-                placeholder={
-                  busy ? "working…" : placeholderFor(placeholderTick)
-                }
+                placeholder={placeholder}
                 focused={!busy}
                 agent={agentLabel}
                 model={model}
                 provider={provider}
                 showCaret={!busy && input.length > 0}
               />
-              <HintLine width={contentWidth} hints={promptHints} />
             </Box>
           ) : null}
         </Box>
 
         {showSidebar ? (
           <Box
-            flexDirection="column"
+            flexShrink={0}
             width={SIDEBAR_WIDTH}
             paddingLeft={1}
+            height="100%"
           >
             <PlanPane todo={todo} width={SIDEBAR_WIDTH - 2} />
           </Box>
         ) : null}
       </Box>
 
-      <ContextStrip
-        width={columns}
-        context={state.context}
-        metrics={{
-          tokensIn,
-          tokensOut,
-          costUsd: liveCost,
-          contextPct: state.metrics.contextPct,
-        }}
-        lifecycle={lifecycle}
-        hints={footerHints}
-        interrupt={interruptMode}
-        registerHint={registerHint}
-      />
+      <Box flexShrink={0} width={columns}>
+        <ContextStrip
+          width={columns}
+          context={state.context}
+          metrics={{
+            tokensIn,
+            tokensOut,
+            costUsd: liveCost,
+            contextPct: state.metrics.contextPct,
+          }}
+          lifecycle={lifecycle}
+          hints={footerHints}
+          interrupt={interruptMode}
+          registerHint={registerHint}
+          showStats={showStats}
+        />
+      </Box>
     </Box>
   );
 }

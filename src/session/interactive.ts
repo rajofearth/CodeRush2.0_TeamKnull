@@ -97,12 +97,13 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   let sessionTokensOut = 0;
   let sessionCostUsd = 0;
 
+  const toolBridge = createToolPlaneBridge(opts.bus);
   const ctx = {
     workspaceRoot: cwd,
     sandbox,
     shellJobs,
     trace,
-    onEvent: createToolPlaneBridge(opts.bus),
+    onEvent: toolBridge,
   };
 
   opts.bus.emit({
@@ -135,11 +136,49 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
     running = true;
     lastTurnFailed = false;
     turnCount += 1;
+    let segment = 0;
+    const assistantId = () => `turn-${turnCount}-s${segment}`;
+    const thinkId = `turn-${turnCount}-think`;
     let sawDelta = false;
+    let thinkingOpen = false;
+    let needNewSegment = false;
     let turnTokensIn = 0;
     let turnTokensOut = 0;
+
+    const sealThinking = () => {
+      if (!thinkingOpen) return;
+      opts.bus.emit({
+        type: "thinking",
+        id: thinkId,
+        text: "",
+        done: true,
+      });
+      thinkingOpen = false;
+    };
+
+    const sealAssistant = () => {
+      if (sawDelta) {
+        opts.bus.emit({
+          type: "assistant",
+          id: assistantId(),
+          text: "",
+          done: true,
+        });
+        sawDelta = false;
+      }
+    };
+
+    ctx.onEvent = (ev) => {
+      if (ev.type === "tool_call") {
+        sealThinking();
+        sealAssistant();
+        needNewSegment = true;
+      }
+      toolBridge(ev);
+    };
+
     opts.bus.emit({ type: "user", text: prompt });
-    opts.bus.emit({ type: "status", label: "thinking" });
+    opts.bus.emit({ type: "status", label: "working" });
 
     try {
       await ensureIntake();
@@ -167,31 +206,51 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
             done: status.done,
             sticky: status.sticky,
           }),
+        onThinkingDelta: (delta) => {
+          thinkingOpen = true;
+          opts.bus.emit({
+            type: "thinking",
+            id: thinkId,
+            text: delta,
+            done: false,
+          });
+        },
         onTextDelta: (delta) => {
+          sealThinking();
+          if (needNewSegment) {
+            segment += 1;
+            needNewSegment = false;
+          }
           opts.bus.emit({
             type: "assistant",
-            id: `turn-${turnCount}`,
+            id: assistantId(),
             text: delta,
             done: false,
           });
           sawDelta = true;
         },
         onText: (text) => {
+          sealThinking();
           if (sawDelta) {
             opts.bus.emit({
               type: "assistant",
-              id: `turn-${turnCount}`,
+              id: assistantId(),
               text: "",
               done: true,
             });
           } else if (text.trim()) {
+            if (needNewSegment) {
+              segment += 1;
+              needNewSegment = false;
+            }
             opts.bus.emit({
               type: "assistant",
-              id: `turn-${turnCount}`,
+              id: assistantId(),
               text,
               done: true,
             });
           }
+          sawDelta = false;
         },
         onUsage: (usage) => {
           const deltaIn = usage.promptTokens - turnTokensIn;
@@ -214,14 +273,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
         },
       });
       history = result.messages;
-      if (sawDelta) {
-        opts.bus.emit({
-          type: "assistant",
-          id: `turn-${turnCount}`,
-          text: "",
-          done: true,
-        });
-      }
+      sealAssistant();
       opts.bus.emit({
         type: "status",
         label: "processed",

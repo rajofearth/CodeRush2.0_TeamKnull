@@ -30,6 +30,12 @@ export type UiEvent =
       text: string;
       done?: boolean;
     }
+  /**
+   * Model reasoning / thinking deltas when the provider surfaces them.
+   * Same streaming rules as `assistant` — append by `id`, seal with `done`.
+   * Never invent text; only emit when the adapter has real reasoning.
+   */
+  | { type: "thinking"; id?: string; text: string; done?: boolean }
   /** Tool invocation started. `group` clusters sibling calls (e.g. "explore"). */
   | {
       type: "tool_call";

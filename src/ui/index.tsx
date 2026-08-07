@@ -21,6 +21,7 @@ export type {
   RenderBlock,
   RunContext,
   RunMetrics,
+  ThinkingItem,
   ToolStatus,
   UiState,
 } from "./state.js";
@@ -30,7 +31,11 @@ export type { ClaiAppProps, RenderShellOptions, ShellApi, ShellHandle } from "./
 export { ClaiApp, renderShell } from "./app.js";
 
 export type { ToolBridgeOptions, ToolPlaneLike } from "./bridge.js";
-export { createToolPlaneBridge } from "./bridge.js";
+export {
+  createToolPlaneBridge,
+  detailFromToolOutput,
+  formatHumanBytes,
+} from "./bridge.js";
 
 export {
   attachHeadless,
@@ -72,6 +77,7 @@ export {
   Sidebar,
   SplashFooter,
   StatsPanel,
+  ThinkingBlock,
   ToolRowLine,
   VerifyResult,
   Wordmark,
@@ -82,9 +88,14 @@ export {
   formatCost,
   formatCostPrecise,
   formatDuration,
+  formatHomePath,
   formatTokens,
+  measureContextStripRows,
+  measurePromptRows,
+  promptBodyLines,
   shouldPlayBrandIntro,
   toolSigil,
+  visiblePromptBodyLines,
 } from "./components.js";
 
 export type { FooterHint, LifecyclePhase, Segment } from "./components.js";

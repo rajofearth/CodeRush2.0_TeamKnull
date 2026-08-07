@@ -10,7 +10,7 @@ icons, or brand chrome into `headless.ts` — that path stays plain and parseabl
 |---------|------|
 | Wordmark | Render **`CLAI`** once, top of the active pane — `brand.wordmark`, bold. |
 | Launch intro | Large half-block `WORDMARK_LARGE` + letter shimmer (~2.2s). Skip with any key; `CLAI_NO_INTRO=1` disables. Never headless. |
-| Stats panel | Top-right: time · tokens · cost · tools (session-derived, render-only). |
+| Stats panel | Top-right, two-row compact: `session` then time · tokens · cost · tools (session-derived, render-only). |
 | Credit | **`by team knull`** — `text.muted`, far right of the context strip. |
 | Forbidden | Neon splash screens, emoji. |
 
@@ -83,26 +83,38 @@ Working / Verify, in the matching state colour. One spinner at a time.
 
 ### Context strip
 
-One muted line, right-aligned credit:
+Pi-density 1–2 line footer (credit far right). Stats stay in **StatsPanel** —
+strip may show compact `↑in ↓out` once, not a second full tok/cost block:
 
 ```
-model · provider · sandbox · tokens/cost · trace     by team knull
+model · provider · sandbox · ~/cwd · ↑in ↓out          by team knull
+esc interrupt · pgup/dn scroll · tab switch agent · ctrl+p commands
 ```
 
-When terminal width **&lt; 100** cols, collapse to:
+When terminal width **&lt; 100** cols, collapse meta to:
 
 ```
-model · PASS|FAIL     by team knull
+model · ~/cwd · PASS|FAIL     by team knull
 ```
+
+Trace path only when there is room (`truncatePath`).
 
 ## Layout
 
-Panes: **activity · plan · approvals · strip**.
+Vertical stack (pi / Grok Build dock): **scrollback → turn status → composer → strip**.
 
-- Activity pane: single unicode box-drawing border in `border` colour — not every sub-element.
-- Plan / approvals: quiet secondary regions (side column ≥ 120 cols for plan).
+- Activity pane: one muted top rule in `border` colour — not every sub-element; no bottom rule.
+- **Pi density**: tight tool groups (zero tool↔tool gap, muted group header); at most one blank row between prose turns or tool↔prose; no per-block `marginBottom` on user / assistant / thinking / tool groups.
+- **Turn status** (`LifecycleLine`): flush above the composer (no blank spacer when idle); while busy shows spinner + detail + turn elapsed on the right.
+- **Composer** (`PromptBox`): full-width `─` rules (brand when focused), multiline body (wrap, last ≤5 lines), agent name (`Build`) below bottom rule. Enter submits; **Ctrl+J** inserts newline.
+- Prompt keybinds (tab / ctrl+p) live on the context strip — no separate HintLine.
+- **Sticky user cue**: when scrolled up (`scrollFromBottom > 0`), a one-line `› {prompt}` header stays above Activity.
+- **Follow**: when not at the live edge, show `▼ follow live` (click / wheel down resumes follow).
+- **Prose width**: conversation column stays full-width; readable Activity prose caps around **100** cols on ultra-wide (`columns ≥ 140`).
+- Plan / approvals: quiet secondary regions (side column ≥ 120 cols for plan — never compete with transcript).
+- Chronology: activity segments stay in event order (thinking → tools → reply); do not hoist later assistant text above tools.
 - Primary demo target: **120** cols.
-- More whitespace between event blocks; drop labels Ink already implies by position.
+- Drop labels Ink already implies by position.
 
 ## Motion
 
@@ -113,14 +125,20 @@ Panes: **activity · plan · approvals · strip**.
 ## Streaming & logging
 
 - Live assistant tokens arrive as `assistant` events with `done: false` (deltas), sealed with `done: true`.
-- While streaming, the activity pane shows a **streaming** badge and tails the last ~18 lines so the caret stays visible (Grok-style follow).
-- When complete, the badge flips to **processed**.
+- While streaming, the activity pane shows a dim **streaming** status and tails the last ~18 lines so the caret stays visible (Grok-style follow).
+- When complete, omit the status line — reply text only.
 - Interactive TUI writes every `UiEvent` to `<traceDir>/session.jsonl` via `attachSessionLog` (stdout stays clean for Ink).
 - Headless / `clai chat` keep using `attachHeadless` / `attachLogPrinter` on stdout — unchanged parseable lines.
 
 ## Scroll (follow mode)
 
-Pinned to the live edge by default (`scrollFromBottom === 0`). Scroll up to leave follow; wheel down / **↓ more below** resumes follow when near the bottom.
+Line-based (pi-style): `scrollFromBottom` is **lines** from the live edge, not
+block indices. `scrollFromBottom === 0` follows the end; `maxScroll =
+max(0, totalLines − viewportRows)`. PageUp/Down moves `viewport − 1` lines;
+wheel moves ±3. Snap back to follow when within 2 lines of the live edge.
+Tall assistant replies can be scrolled through mid-message (`clipTop`). While
+scrolled, the latest user prompt sticks above the activity window; ScrollCue
+shows `N lines above` / `follow live`.
 
 ## Adding a `UiEvent` type
 

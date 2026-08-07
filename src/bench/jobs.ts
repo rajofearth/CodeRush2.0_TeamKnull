@@ -126,7 +126,10 @@ export function createJobManager(opts: {
       signal,
       onUpdate: (snap) => opts.live.update(snap),
     });
-    await opts.store.appendRun(record);
+    await opts.store.appendRun({
+      ...record,
+      kind: offline ? "offline" : "clai",
+    });
   };
 
   return {
