@@ -164,7 +164,7 @@ export async function withProviderRetry<T>(
       opts.onStatus?.({
         label,
         detail: isQuota
-          ? "Gemini/API quota hit — slowing down so we do not thrash the limit"
+          ? "Provider quota/rate limit — slowing down so we do not thrash the limit"
           : undefined,
         level: "warn",
         sticky: true,

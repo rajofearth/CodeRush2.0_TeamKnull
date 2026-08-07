@@ -12,7 +12,8 @@ export type ProviderId =
   | "cerebras"
   | "openai"
   | "anthropic"
-  | "gemini";
+  | "gemini"
+  | "gateway";
 
 /** Opaque AI SDK language model. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,6 +190,23 @@ const PROVIDERS: Record<ProviderId, ProviderDef> = {
       })(modelId);
     },
   },
+  /**
+   * Vercel AI Gateway — one key, many models via OpenAI-compatible /v1.
+   * https://vercel.com/docs/ai-gateway
+   * Model ids are provider-prefixed, e.g. google/gemini-2.5-flash-lite
+   */
+  gateway: {
+    id: "gateway",
+    envKey: "AI_GATEWAY_API_KEY",
+    envKeyAliases: ["VERCEL_AI_GATEWAY_API_KEY"],
+    // Gateway free-tier–friendly Gemma (set CLAI_MODEL to override).
+    defaultModel: "google/gemma-4-31b-it",
+    create: (apiKey, modelId) =>
+      openaiCompatible(apiKey, modelId, {
+        baseURL: "https://ai-gateway.vercel.sh/v1",
+        name: "vercel-ai-gateway",
+      }),
+  },
 };
 
 /** Default provider — Groq for fast free/hackathon runs. */
@@ -212,10 +230,31 @@ export function hasProviderKey(id: ProviderId): boolean {
 
 export function pickProviderId(prefer?: ProviderId): ProviderId {
   const fromEnv = process.env.CLAI_PROVIDER as ProviderId | undefined;
-  const order: ProviderId[] = [];
-  if (prefer) order.push(prefer);
-  if (fromEnv && PROVIDERS[fromEnv]) order.push(fromEnv);
-  order.push(DEFAULT_PROVIDER);
+  // Explicit prefer (CLI/tests) must win or fail clearly — never silently fall
+  // through to another provider with a mismatched CLAI_MODEL.
+  if (prefer) {
+    if (!PROVIDERS[prefer]) {
+      throw new Error(`Unknown provider: ${prefer}`);
+    }
+    if (!hasProviderKey(prefer)) {
+      throw new Error(
+        `CLAI_PROVIDER=${prefer} but ${providerEnvKeys(PROVIDERS[prefer]).join(" / ")} is not set. Add it to .env or pick another provider.`,
+      );
+    }
+    return prefer;
+  }
+  if (fromEnv) {
+    if (!PROVIDERS[fromEnv]) {
+      throw new Error(`Unknown CLAI_PROVIDER: ${fromEnv}`);
+    }
+    if (!hasProviderKey(fromEnv)) {
+      throw new Error(
+        `CLAI_PROVIDER=${fromEnv} but ${providerEnvKeys(PROVIDERS[fromEnv]).join(" / ")} is not set. Add it to .env or unset CLAI_PROVIDER.`,
+      );
+    }
+    return fromEnv;
+  }
+  const order: ProviderId[] = [DEFAULT_PROVIDER];
   for (const id of listProviders()) {
     if (!order.includes(id)) order.push(id);
   }
