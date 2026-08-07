@@ -71,19 +71,6 @@ export function formatStageSummary(
   detail: Record<string, unknown>,
 ): string {
   switch (stage) {
-    case "prompt_synthesis": {
-      const raw = String(detail.rawInput ?? "");
-      const sq =
-        detail.synthesizedQuery &&
-        typeof detail.synthesizedQuery === "object"
-          ? (detail.synthesizedQuery as Record<string, unknown>)
-          : {};
-      const role = String(sq.agentRole ?? "");
-      const frags = Array.isArray(sq.targetFragments)
-        ? sq.targetFragments.length
-        : 0;
-      return `› ${truncate(raw, 40)}${role ? ` · ${role}` : ""}${frags ? ` · ${frags} frag` : ""}`;
-    }
     case "query_planner": {
       const tiers = Array.isArray(detail.tiers) ? detail.tiers.join(",") : "";
       const targets = Array.isArray(detail.targetFragments)
@@ -274,14 +261,10 @@ export function reduceGlassEvent(
   let agentRole = state.agentRole;
   let stagesReset = stages;
 
-  // New assembly request → reset pipeline rows. Origin is prompt_synthesis
-  // (stage 0); older traces that start at query_planner still reset here.
-  const isPipelineOrigin =
-    stageEvent.stage === "prompt_synthesis" ||
-    stageEvent.stage === "query_planner";
+  // New assemble request → reset pipeline rows
   if (
     stageEvent.status === "start" &&
-    isPipelineOrigin &&
+    stageEvent.stage === "query_planner" &&
     stageEvent.requestId !== state.requestId
   ) {
     stagesReset = emptyStages();
@@ -307,18 +290,6 @@ export function reduceGlassEvent(
     row.summary = formatStageSummary(stageEvent.stage, row.detail);
     row.state = stageHasFlags(stageEvent.stage, row.detail) ? "flagged" : "pass";
 
-    if (stageEvent.stage === "prompt_synthesis") {
-      const sq =
-        row.detail.synthesizedQuery &&
-        typeof row.detail.synthesizedQuery === "object"
-          ? (row.detail.synthesizedQuery as Record<string, unknown>)
-          : {};
-      agentRole = String(sq.agentRole ?? agentRole);
-      const raw = String(row.detail.rawInput ?? "");
-      if (raw) {
-        trigger = `user turn: '${truncate(raw, 60)}'`;
-      }
-    }
     if (stageEvent.stage === "query_planner") {
       agentRole = String(row.detail.agentRole ?? agentRole);
     }

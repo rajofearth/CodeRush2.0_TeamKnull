@@ -271,29 +271,29 @@ export async function runAgentLoop(
   const totals = { promptTokens: 0, completionTokens: 0 };
   let systemExtra = opts.system;
 
-  // Glass-box: stage 0 (prompt_synthesis) then assemble() stages into the same
-  // trace. Prompt injection is opt-in so loop behaviour stays unchanged by default.
+  // Glass-box: emit context_stage events into the same trace. Prompt injection
+  // is opt-in so existing loop behaviour stays unchanged by default.
   if (opts.trace && opts.memoryStore) {
     try {
-      const {
-        ContextManager,
-        createTraceStageEmitter,
-        synthesizeContextRequest,
-      } = await import("../context/index.js");
-      const emitStage = createTraceStageEmitter(opts.trace);
-      const req = synthesizeContextRequest(opts.prompt, {
+      const { ContextManager, createTraceStageEmitter } = await import(
+        "../context/index.js"
+      );
+      const { randomUUID } = await import("node:crypto");
+      const assembled = new ContextManager(
+        opts.memoryStore,
+        opts.ctx.workspaceRoot,
+      ).assemble({
+        taskId: opts.prompt.slice(0, 80) || "turn",
         runId: opts.trace.runId,
+        requestId: randomUUID().slice(0, 12),
         tokenBudget: opts.assembleTokenBudget ?? 8000,
         memoryEnabled: process.env.CLAI_MEMORY_ENABLED !== "0",
         structuralCitationsEnabled:
           process.env.CLAI_STRUCTURAL_CITATIONS !== "0",
+        taskInstruction: opts.prompt,
         agentRole: opts.agentRole ?? "main",
-        emitStage,
+        emitStage: createTraceStageEmitter(opts.trace),
       });
-      const assembled = new ContextManager(
-        opts.memoryStore,
-        opts.ctx.workspaceRoot,
-      ).assemble(req);
       if (opts.injectAssembledContext && assembled.systemExtras.length > 0) {
         systemExtra = [opts.system, ...assembled.systemExtras]
           .filter(Boolean)

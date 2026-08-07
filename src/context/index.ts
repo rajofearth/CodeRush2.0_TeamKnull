@@ -29,7 +29,6 @@ export {
   type ContextStageStatus,
   type InjectionScanDetail,
   type MemoryRetrievalDetail,
-  type PromptSynthesisDetail,
   type QueryPlannerDetail,
   type RelevanceScoringDetail,
   type StaleCheckDetail,
@@ -37,14 +36,6 @@ export {
   type SummarizerDetail,
   type TokenBudgetDetail,
 } from "./stages.js";
-
-export {
-  inferAgentRole,
-  inferTargetFragments,
-  synthesizeContextRequest,
-  type SynthesizeSessionState,
-  type SynthesizedContextRequest,
-} from "./synthesize.js";
 
 export interface ContextRequest {
   taskId: string;
@@ -54,7 +45,7 @@ export interface ContextRequest {
   structuralCitationsEnabled: boolean;
   taskInstruction?: string;
   citations?: { path: string; start?: number; end?: number }[];
-  /** Correlates all stages of one assembly (minted by prompt_synthesis / synthesizeContextRequest; auto-generated in assemble if omitted). */
+  /** Correlates all stages of one assemble() call (auto-generated if omitted). */
   requestId?: string;
   /** Human-readable role for glass (e.g. main, explore, chat). */
   agentRole?: string;
@@ -211,7 +202,7 @@ export class ContextManager {
     const excluded: AssembledContext["excluded"] = [];
     const staleInvalidations: AssembledContext["staleInvalidations"] = [];
 
-    // ── 1. query_planner (pipeline stage 1; stage 0 is prompt_synthesis) ────
+    // ── 1. query_planner ────────────────────────────────────────────────────
     const qpStart = nowMs();
     stage("query_planner", "start", {});
     const tiers = req.memoryEnabled ? [...DEFAULT_TIERS] : [];

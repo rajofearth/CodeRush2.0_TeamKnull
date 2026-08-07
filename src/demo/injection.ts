@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   ContextManager,
   createTraceStageEmitter,
-  synthesizeContextRequest,
 } from "../context/index.js";
 import { openMemoryStore } from "../memory/index.js";
 import { createTraceWriter } from "../trace/index.js";
@@ -30,18 +29,17 @@ export async function runInjectionDemo(root: string, dataDir?: string): Promise<
       text: prompt,
     });
 
-    const emitStage = createTraceStageEmitter(trace, runId);
-    const req = synthesizeContextRequest(prompt, {
-      runId,
+    const assembled = new ContextManager(store, root).assemble({
       taskId: "red-team-readme",
+      runId,
       tokenBudget: 1200,
       memoryEnabled: true,
       structuralCitationsEnabled: true,
+      taskInstruction: prompt,
       citations: [{ path: fixture }],
       agentRole: "main",
-      emitStage,
+      emitStage: createTraceStageEmitter(trace, runId),
     });
-    const assembled = new ContextManager(store, root).assemble(req);
 
     await trace.append("info", {
       event: "context.assembled",
