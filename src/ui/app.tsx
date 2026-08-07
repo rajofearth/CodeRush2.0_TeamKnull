@@ -30,7 +30,6 @@ import {
   BRAND_INTRO_INTERVAL_MS,
   BRAND_INTRO_TOTAL_TICKS,
   ContextStrip,
-  HintLine,
   LifecycleLine,
   PlanPane,
   PromptBox,
@@ -40,9 +39,15 @@ import {
   StickyUserCue,
   Wordmark,
   deriveLifecycle,
+  formatHomePath,
+  measureContextStripRows,
+  measurePromptRows,
   shouldPlayBrandIntro,
+  truncatePath,
+  visiblePromptBodyLines,
   type FooterHint,
 } from "./components.js";
+import { CREDIT } from "./theme.js";
 import {
   armMouse,
   createHitRegistry,
@@ -456,7 +461,13 @@ export function ClaiApp(props: ClaiAppProps) {
 
   // Wordmark + compact StatsPanel (2 rows) share a row; +1 for header marginBottom.
   const headerRows = showStats ? 3 : 2;
-  const promptRows = props.interactive ? 4 : 0;
+  const placeholder = busy ? "working…" : placeholderFor(placeholderTick);
+  const promptBodyVisible = props.interactive
+    ? visiblePromptBodyLines(input, proseWidth, placeholder).length
+    : 0;
+  const promptRows = props.interactive
+    ? measurePromptRows(promptBodyVisible)
+    : 0;
   const planRows =
     showPlanInline && todo
       ? Math.min(10, 2 + (todo.steps?.length ?? 0))
@@ -464,7 +475,39 @@ export function ClaiApp(props: ClaiAppProps) {
   const approvalRows =
     approvals.length > 0 ? Math.min(8, 1 + approvals.length * 3) : 0;
   const cueRows = 2;
-  const stripRows = 1;
+  // Lifecycle docks flush above composer — only reserve a row when visible.
+  const lifecycleRows = lifecycle ? 1 : 0;
+
+  // Approximate footer meta length (mirrors ContextStrip) for 1 vs 2 row budget.
+  const stripMetaParts: string[] = [];
+  {
+    const { model: m, provider: p } = splitModel(state.context.model);
+    if (m) stripMetaParts.push(m);
+    if (columns >= 100 && p) stripMetaParts.push(p);
+    if (columns >= 100 && state.context.sandboxMode) {
+      stripMetaParts.push(state.context.sandboxMode);
+    }
+    const cwdLabel = formatHomePath(state.context.cwd);
+    if (cwdLabel) {
+      stripMetaParts.push(
+        truncatePath(cwdLabel, Math.max(12, Math.min(36, Math.floor(columns * 0.28)))),
+      );
+    }
+  }
+  const stripHintsPlain = [
+    ...(props.onInterrupt && (busy || state.status != null)
+      ? ["esc interrupt"]
+      : []),
+    "pgup/dn scroll",
+    ...(props.interactive ? ["tab switch agent", "ctrl+p commands"] : []),
+  ].join(" · ");
+  const stripRows = measureContextStripRows(
+    columns,
+    stripMetaParts.join(" · ").length,
+    stripHintsPlain.length,
+    CREDIT.length,
+  );
+
   const activityBudget = Math.max(
     6,
     rows -
@@ -473,13 +516,14 @@ export function ClaiApp(props: ClaiAppProps) {
       planRows -
       approvalRows -
       cueRows -
+      lifecycleRows -
       stripRows -
       2,
   );
-  // Activity paints top+bottom border rules — reserve 2 rows in the window budget.
+  // Activity paints a single muted top rule — reserve 1 row in the window budget.
   // Sticky user cue takes one row when scrolled up.
   const stickyRows = stickyUser ? 1 : 0;
-  const budget = Math.max(4, activityBudget - 2 - stickyRows);
+  const budget = Math.max(4, activityBudget - 1 - stickyRows);
 
   const heights = useMemo(
     () => measureHeights(blocks, proseWidth),
@@ -574,12 +618,25 @@ export function ClaiApp(props: ClaiAppProps) {
       }
       if (!props.interactive || busy || exitCode != null) return;
 
+      // Alt+Enter → newline. Plain Enter submits (Ink often lacks Shift).
+      if (key.return && key.meta) {
+        setInput((v) => scrubMouseJunk(`${v}\n`));
+        return;
+      }
       if (key.return) {
         const text = input.trim();
         if (!text) return;
         setInput("");
         setBusy(true);
         onSubmit.current?.(text);
+        return;
+      }
+      // Ctrl+J (often delivered as ch === "\n" with ctrl) inserts a newline.
+      if (
+        (key.ctrl && (ch === "j" || ch === "J")) ||
+        ch === "\n"
+      ) {
+        setInput((v) => scrubMouseJunk(`${v}\n`));
         return;
       }
       if (key.backspace || key.delete) {
@@ -629,17 +686,13 @@ export function ClaiApp(props: ClaiAppProps) {
       : null;
 
   const footerHints: FooterHint[] = [
-    ...(interruptMode
+    { id: "scroll", key: "pgup/dn", label: "scroll" },
+    ...(props.interactive
       ? [
-          {
-            id: "interrupt",
-            key: "esc",
-            label:
-              interruptMode === "confirm" ? "again to interrupt" : "interrupt",
-          },
+          { id: "tab", key: "tab", label: "switch agent" },
+          { id: "commands", key: "ctrl+p", label: "commands" },
         ]
       : []),
-    { id: "scroll", key: "pgup/dn", label: "scroll" },
   ];
 
   hintActions.current.set("interrupt", () => requestInterrupt());
@@ -647,6 +700,8 @@ export function ClaiApp(props: ClaiAppProps) {
   hintActions.current.set("more-below", () => expandBelow());
   hintActions.current.set("more-above", () => expandAbove());
   hintActions.current.set("follow", () => followLive());
+  hintActions.current.set("tab", () => {});
+  hintActions.current.set("commands", () => {});
 
   const registerRow = useCallback(
     (id: string, node: DOMElement | null) => {
@@ -675,11 +730,6 @@ export function ClaiApp(props: ClaiAppProps) {
     },
     [registerHint],
   );
-
-  const promptHints = [
-    { key: "tab", label: "switch agent" },
-    { key: "ctrl+p", label: "commands" },
-  ];
 
   if (!introDone) {
     return (
@@ -794,33 +844,30 @@ export function ClaiApp(props: ClaiAppProps) {
             </Box>
           ) : null}
 
-          {/* Turn status immediately above composer */}
-          <Box flexShrink={0} marginTop={1} width={proseWidth}>
-            <LifecycleLine
-              phase={lifecycle}
-              frame={frame}
-              width={proseWidth}
-              elapsedMs={taskActive ? elapsedMs : undefined}
-            />
-          </Box>
+          {/* Turn status flush above composer — no spacer when idle */}
+          {lifecycle ? (
+            <Box flexShrink={0} width={proseWidth}>
+              <LifecycleLine
+                phase={lifecycle}
+                frame={frame}
+                width={proseWidth}
+                elapsedMs={taskActive ? elapsedMs : undefined}
+              />
+            </Box>
+          ) : null}
 
           {props.interactive ? (
             <Box flexDirection="column" flexShrink={0} marginTop={0}>
               <PromptBox
                 width={proseWidth}
                 value={input}
-                placeholder={
-                  busy ? "working…" : placeholderFor(placeholderTick)
-                }
+                placeholder={placeholder}
                 focused={!busy}
                 agent={agentLabel}
                 model={model}
                 provider={provider}
                 showCaret={!busy && input.length > 0}
               />
-              {!busy ? (
-                <HintLine width={proseWidth} hints={promptHints} />
-              ) : null}
             </Box>
           ) : null}
         </Box>
@@ -851,6 +898,7 @@ export function ClaiApp(props: ClaiAppProps) {
           hints={footerHints}
           interrupt={interruptMode}
           registerHint={registerHint}
+          showStats={showStats}
         />
       </Box>
     </Box>

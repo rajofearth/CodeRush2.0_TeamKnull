@@ -6,6 +6,7 @@
  * is reserved for the verification state machine.
  */
 
+import { homedir } from "node:os";
 import React from "react";
 import { Box, Text, type DOMElement } from "ink";
 import type { PlanStep } from "./events.js";
@@ -652,8 +653,54 @@ export function TurnStatusBar({
   );
 }
 
-// ── prompt box ───────────────────────────────────────────────────────────────
+// ── prompt box (pi editor chrome) ────────────────────────────────────────────
 
+/** Max visual lines shown in the composer body (scroll to last N). */
+export const PROMPT_BODY_MAX_LINES = 5;
+
+/**
+ * Wrap composer value (or placeholder) into visual lines for the given width.
+ * Empty value → single placeholder line.
+ */
+export function promptBodyLines(
+  value: string,
+  width: number,
+  placeholder: string,
+): string[] {
+  const inner = Math.max(8, width);
+  if (!value) return [truncate(placeholder, inner)];
+  const lines = wrapText(value, inner);
+  return lines.length > 0 ? lines : [""];
+}
+
+/** Last ≤ `PROMPT_BODY_MAX_LINES` visual lines of the composer body. */
+export function visiblePromptBodyLines(
+  value: string,
+  width: number,
+  placeholder: string,
+): string[] {
+  const lines = promptBodyLines(value, width, placeholder);
+  if (lines.length <= PROMPT_BODY_MAX_LINES) return lines;
+  return lines.slice(-PROMPT_BODY_MAX_LINES);
+}
+
+/**
+ * Rows occupied by PromptBox: top rule + body + bottom rule + agent.
+ * HintLine is gone — prompt keybinds live on the context strip.
+ */
+export function measurePromptRows(visibleBodyLineCount: number): number {
+  return 2 + Math.max(1, visibleBodyLineCount) + 1;
+}
+
+/**
+ * Pi-style multiline composer:
+ * ```
+ * ────────────────────────────────────────
+ * Ask anything... / user input
+ * ────────────────────────────────────────
+ * Build
+ * ```
+ */
 export function PromptBox({
   width,
   value,
@@ -674,37 +721,43 @@ export function PromptBox({
   showCaret: boolean;
 }) {
   const ruleColor = focused ? resolve("brand.wordmark") : resolve("border");
-  const inner = Math.max(8, width - 2);
-
-  const inputSegments: Segment[] = value
-    ? [
-        { text: truncate(value, showCaret ? inner - 1 : inner), color: resolve("text.primary") },
-        ...(showCaret ? [{ text: "▏", color: resolve("text.muted") }] : []),
-      ]
-    : [{ text: truncate(placeholder, inner), color: resolve("text.muted") }];
+  const rule = glyph("hRule").repeat(Math.max(8, width));
+  const body = visiblePromptBodyLines(value, width, placeholder);
 
   // Model/provider live on ContextStrip — keep only the agent name here.
   void model;
   void provider;
-  const agentSegments: Segment[] = [
-    { text: agent, color: resolve("text.primary"), bold: true },
-  ];
 
   return (
     <Box flexDirection="column" width={width}>
-      <Text>
-        <Text color={ruleColor}>{glyph("leftRule")} </Text>
-        <Segments segments={inputSegments} />
-      </Text>
-      <Text>
-        <Text color={ruleColor}>{glyph("leftRule")} </Text>
-        <Segments segments={agentSegments} />
+      <Text color={ruleColor}>{rule}</Text>
+      {body.map((line, index) => {
+        const isLast = index === body.length - 1;
+        const caretHere = Boolean(showCaret && value && isLast);
+        const budget = Math.max(1, width - (caretHere ? 1 : 0));
+        const text = line.length <= budget ? line : `${line.slice(0, Math.max(1, budget - 1))}…`;
+        return (
+          <Text key={index}>
+            <Text color={value ? resolve("text.primary") : resolve("text.muted")}>
+              {text || " "}
+            </Text>
+            {caretHere ? (
+              <Text color={resolve("text.muted")}>▏</Text>
+            ) : null}
+          </Text>
+        );
+      })}
+      <Text color={ruleColor}>{rule}</Text>
+      <Text bold color={resolve("text.muted")}>
+        {agent}
       </Text>
     </Box>
   );
 }
 
-/** Right-aligned keybind hint line: `tab switch agent  ctrl+p commands`. */
+/**
+ * @deprecated Prompt keybinds moved into ContextStrip. Kept for export stability.
+ */
 export function HintLine({
   width,
   hints,
@@ -747,7 +800,7 @@ export function UserBlock({
   );
   if (lines.length === 0) return null;
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={0}>
       {lines.map((line, index) => (
         <Text key={index} color={resolve("text.primary")}>
           {index === 0 && skipLines === 0 ? `› ${line}` : `  ${line}`}
@@ -780,17 +833,12 @@ export function AssistantProse({
 
   if (skipLines <= 0) {
     return (
-      <Box flexDirection="column" marginBottom={1}>
-        <Box>
-          {!item.done ? (
-            <Text color={resolve("state.verify")}>streaming </Text>
-          ) : (
-            <Text color={resolve("state.pass")}>processed </Text>
-          )}
-          <Text color={resolve("text.muted")}>
-            {item.done ? "· reply" : "· live"}
+      <Box flexDirection="column" marginBottom={0}>
+        {!item.done ? (
+          <Text color={resolve("text.muted")} dimColor={faintUsesDim()}>
+            streaming
           </Text>
-        </Box>
+        ) : null}
         {truncated ? (
           <Text color={resolve("text.muted")}>… </Text>
         ) : null}
@@ -811,7 +859,7 @@ export function AssistantProse({
     );
   }
 
-  // Mid-message clip: skip header + wrapped body lines from the top.
+  // Mid-message clip: optional streaming status + wrapped body from the top.
   const measure = Math.max(8, (width ?? 70) - 2);
   const bodyLines = display.split(/\r?\n/).flatMap((line) => {
     if (line.length <= measure) return [line];
@@ -823,7 +871,8 @@ export function AssistantProse({
   });
   const visual: Array<{ kind: "header" | "ellipsis" | "body"; text?: string }> =
     [];
-  visual.push({ kind: "header" });
+  // Done replies omit the status line — just body (matches measureBlockHeight).
+  if (!item.done) visual.push({ kind: "header" });
   if (truncated) visual.push({ kind: "ellipsis" });
   for (const line of bodyLines) visual.push({ kind: "body", text: line });
 
@@ -831,20 +880,17 @@ export function AssistantProse({
   if (sliced.length === 0) return null;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={0}>
       {sliced.map((row, index) => {
         if (row.kind === "header") {
           return (
-            <Box key={`h-${index}`}>
-              {!item.done ? (
-                <Text color={resolve("state.verify")}>streaming </Text>
-              ) : (
-                <Text color={resolve("state.pass")}>processed </Text>
-              )}
-              <Text color={resolve("text.muted")}>
-                {item.done ? "· reply" : "· live"}
-              </Text>
-            </Box>
+            <Text
+              key={`h-${index}`}
+              color={resolve("text.muted")}
+              dimColor={faintUsesDim()}
+            >
+              streaming
+            </Text>
           );
         }
         if (row.kind === "ellipsis") {
@@ -923,7 +969,7 @@ export function ThinkingBlock({
   return (
     <Box
       flexDirection="column"
-      marginBottom={1}
+      marginBottom={0}
       ref={(node: DOMElement | null) => registerRow?.(item.id, node)}
     >
       {sliced.map((row, i) => {
@@ -1106,10 +1152,10 @@ export function ToolGroupBlock({
   const shownItems = items.slice(itemSkip);
   if (!showHeader && shownItems.length === 0) return null;
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={0}>
       {showHeader ? (
         <Box>
-          <Text color={resolve("text.primary")}>{group}</Text>
+          <Text color={resolve("text.muted")}>{group}</Text>
           <Text color={resolve("text.muted")}>{` ${done}/${items.length}`}</Text>
         </Box>
       ) : null}
@@ -1404,7 +1450,52 @@ export function ProgressBar({ fraction }: { fraction: number }) {
   return <Text color={resolve("border")}>{glyph("hRule").repeat(8)}</Text>;
 }
 
-/** Slim demoted strip: model · provider · sandbox · tokens/cost · credit. */
+/** Collapse `$HOME` / user profile prefix to `~` for the footer cwd. */
+export function formatHomePath(cwd?: string, home = homedir()): string {
+  if (!cwd) return "";
+  const normalized = cwd.replace(/\\/g, "/");
+  const homeNorm = home.replace(/\\/g, "/");
+  if (!homeNorm) return normalized;
+  if (
+    normalized === homeNorm ||
+    normalized.startsWith(`${homeNorm}/`)
+  ) {
+    return `~${normalized.slice(homeNorm.length)}`;
+  }
+  // Windows drive-letter home mismatch — still tidy separators.
+  return normalized;
+}
+
+/**
+ * Rows for the pi-density footer (1 if meta+hints+credit fit, else 2).
+ */
+export function measureContextStripRows(
+  width: number,
+  metaLen: number,
+  hintsLen: number,
+  creditLen = CREDIT.length,
+): 1 | 2 {
+  const single =
+    metaLen +
+    (hintsLen > 0 ? 2 + hintsLen : 0) +
+    (metaLen > 0 || hintsLen > 0 ? 2 : 0) +
+    creditLen;
+  return single <= width ? 1 : 2;
+}
+
+function hintPlain(hints: FooterHint[]): string {
+  return hints.map((h) => `${h.key} ${h.label}`).join(" · ");
+}
+
+/**
+ * Pi-density footer (1–2 lines):
+ * ```
+ * model · provider · sandbox · ~/cwd          by team knull
+ * esc interrupt · pgup/dn scroll · tab · ctrl+p
+ * ```
+ * Stats stay in StatsPanel — strip uses compact `↑in ↓out` when tokens exist
+ * and full tok/cost is not duplicated when `showStats` is true.
+ */
 export function ContextStrip({
   width,
   context,
@@ -1413,6 +1504,7 @@ export function ContextStrip({
   hints,
   interrupt,
   registerHint,
+  showStats = false,
 }: {
   width: number;
   context: RunContext;
@@ -1421,75 +1513,104 @@ export function ContextStrip({
   hints?: FooterHint[];
   interrupt?: "armed" | "confirm" | null;
   registerHint?: (id: string, node: DOMElement | null) => void;
+  /** When true, StatsPanel owns tokens/cost — strip only shows compact ↑↓. */
+  showStats?: boolean;
 }) {
   const { model, provider } = splitModel(context.model);
   const narrow = width < 100;
-  const totalTokens = metrics.tokensIn + metrics.tokensOut;
   const parts: string[] = [];
 
   if (model) parts.push(model);
   if (!narrow && provider) parts.push(provider);
   if (!narrow && context.sandboxMode) parts.push(context.sandboxMode);
 
+  const cwdLabel = formatHomePath(context.cwd);
+  if (cwdLabel) {
+    const cwdMax = Math.max(12, Math.min(36, Math.floor(width * 0.28)));
+    parts.push(truncatePath(cwdLabel, cwdMax));
+  }
+
   if (narrow) {
     if (lifecycle && (lifecycle.state === "pass" || lifecycle.state === "fail")) {
       parts.push(LIFECYCLE[lifecycle.state].label);
     }
-  } else {
-    if (totalTokens > 0) {
-      parts.push(`${formatTokens(totalTokens)} tok`);
-    }
-    if (metrics.costUsd != null) {
+  } else if (metrics.tokensIn > 0 || metrics.tokensOut > 0) {
+    // Compact pi-style once; never re-print full tok/$ when StatsPanel is up.
+    parts.push(`↑${formatTokens(metrics.tokensIn)} ↓${formatTokens(metrics.tokensOut)}`);
+    if (!showStats && metrics.costUsd != null) {
       parts.push(formatCost(metrics.costUsd));
     }
-    if (context.tracePath) {
-      const pathMax = Math.max(20, Math.min(48, Math.floor(width * 0.25)));
+  }
+
+  if (!narrow && context.tracePath) {
+    const used = parts.join(" · ").length;
+    const room = width - used - CREDIT.length - 8;
+    if (room >= 16) {
+      const pathMax = Math.max(12, Math.min(40, room));
       parts.push(truncatePath(context.tracePath, pathMax));
     }
   }
 
-  const left = parts.join(" · ");
+  const meta = parts.join(" · ");
+
+  const hintList: FooterHint[] = [];
+  if (interrupt != null) {
+    hintList.push({
+      id: "interrupt",
+      key: "esc",
+      label: interrupt === "confirm" ? "again to interrupt" : "interrupt",
+    });
+  }
+  for (const hint of hints ?? []) {
+    if (hint.id === "interrupt") continue;
+    hintList.push(hint);
+  }
+
+  const hintsPlain = hintPlain(hintList);
+  const rows = measureContextStripRows(width, meta.length, hintsPlain.length);
+
+  const renderHints = (leadingMargin: boolean) =>
+    hintList.map((hint, index) => (
+      <Box
+        key={hint.id}
+        marginLeft={leadingMargin || index > 0 ? 2 : 0}
+        ref={(node) => registerHint?.(hint.id, node as DOMElement | null)}
+      >
+        <Text
+          bold
+          color={
+            hint.id === "interrupt" && interrupt === "confirm"
+              ? resolve("state.working")
+              : resolve("text.primary")
+          }
+        >
+          {hint.key}
+        </Text>
+        <Text color={resolve("text.muted")}>{` ${hint.label}`}</Text>
+      </Box>
+    ));
+
+  if (rows === 1) {
+    return (
+      <Box width={width} flexDirection="row" justifyContent="space-between">
+        <Box>
+          {meta ? (
+            <Text color={resolve("text.muted")}>{meta}</Text>
+          ) : null}
+          {renderHints(Boolean(meta))}
+        </Box>
+        <Credit />
+      </Box>
+    );
+  }
 
   return (
-    <Box width={width} flexDirection="row" justifyContent="space-between">
-      <Box>
-        <Text color={resolve("text.muted")}>{left}</Text>
-        {interrupt != null ? (
-          <Box
-            marginLeft={left ? 2 : 0}
-            ref={(node) => registerHint?.("interrupt", node as DOMElement | null)}
-          >
-            <Text
-              bold
-              color={
-                interrupt === "confirm"
-                  ? resolve("state.working")
-                  : resolve("text.primary")
-              }
-            >
-              esc
-            </Text>
-            <Text color={resolve("text.muted")}>
-              {interrupt === "confirm" ? " again to interrupt" : " interrupt"}
-            </Text>
-          </Box>
-        ) : null}
-        {hints?.map((hint) =>
-          hint.id === "interrupt" ? null : (
-            <Box
-              key={hint.id}
-              marginLeft={2}
-              ref={(node) => registerHint?.(hint.id, node as DOMElement | null)}
-            >
-              <Text bold color={resolve("text.primary")}>
-                {hint.key}
-              </Text>
-              <Text color={resolve("text.muted")}>{` ${hint.label}`}</Text>
-            </Box>
-          ),
-        )}
+    <Box width={width} flexDirection="column">
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text color={resolve("text.muted")}>{meta || " "}</Text>
+        <Credit />
       </Box>
-      <Credit />
+      {hintList.length > 0 ? <Box>{renderHints(false)}</Box> : null}
     </Box>
   );
 }
@@ -1505,6 +1626,7 @@ export function FooterBar({
   context,
   metrics,
   lifecycle,
+  showStats,
 }: {
   width: number;
   left?: string;
@@ -1515,6 +1637,7 @@ export function FooterBar({
   context?: RunContext;
   metrics?: RunMetrics;
   lifecycle?: LifecyclePhase | null;
+  showStats?: boolean;
 }) {
   return (
     <ContextStrip
@@ -1525,6 +1648,7 @@ export function FooterBar({
       hints={hints}
       interrupt={interrupt}
       registerHint={registerHint}
+      showStats={showStats}
     />
   );
 }
@@ -1618,7 +1742,10 @@ export function ActivityRowFor({
   }
 }
 
-/** Adjacent tool rows stay dense; everything else gets breathing room. */
+/**
+ * Pi density: 0 between adjacent tools; at most 1 between prose↔prose or
+ * tool↔prose (and other non-tool↔tool) transitions.
+ */
 function gapBefore(block: RenderBlock, prev: RenderBlock | undefined): number {
   if (!prev) return 0;
   const prevTool = prev.kind === "toolGroup" || (prev.kind === "single" && prev.item.kind === "tool");
@@ -1689,7 +1816,6 @@ export function Activity({
           );
         })
       )}
-      <Text color={border}>{rule}</Text>
     </Box>
   );
 }

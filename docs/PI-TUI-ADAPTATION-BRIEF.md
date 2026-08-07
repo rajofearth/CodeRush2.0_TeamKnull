@@ -20,6 +20,14 @@ header → sticky user (when scrolled) → scrollback → turn status → compos
 
 Docked chrome stays outside the scroll region (pi fullscreen pattern).
 
+## Visual + ergonomics (ported into Ink)
+
+- Dense transcript: tight tool rows, modest prose gaps, single Activity top rule
+- Quiet assistant: dim `streaming` only while live (no processed badge)
+- Composer: full-width `─` chrome, multiline body (Ctrl+J newline), agent under rule
+- Footer: model · cwd · ↑↓ tokens + keybinds; StatsPanel keeps full session stats
+- Turn status docked flush above composer
+
 ## Not copied
 
-pi-tui custom renderer, Kitty images, full Editor (~2k lines) as a dependency, dual Ink/pi stacks, OSC 133 (defer), pi branding.
+pi-tui as a dependency (incompatible with Ink TTY ownership; see `PI-TUI-ADOPTION-EVAL.md`), Kitty images, full 2k-line Editor, dual Ink/pi stacks, OSC 133 (defer), pi cyan branding.

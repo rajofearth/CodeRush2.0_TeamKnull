@@ -476,8 +476,18 @@ async function main(): Promise<void> {
   );
   assert("idle agent Build", /\bBuild\b/.test(idle), "missing Build");
   assert(
-    "idle keybind hints",
+    "idle composer hRule chrome",
+    idle.includes("─".repeat(8)) || idle.includes("-".repeat(8)),
+    "missing composer ── rules",
+  );
+  assert(
+    "idle keybind hints in strip",
     idle.includes("switch agent") && idle.includes("commands"),
+  );
+  assert(
+    "idle footer has cwd or model",
+    /gpt-oss|Projects\/clai|P:\/Projects/.test(idle),
+    idle.slice(0, 280),
   );
 
   // ── working screen render (≥120 → plan side column) ────────────────────────
@@ -563,16 +573,36 @@ async function main(): Promise<void> {
     "missing stats panel fields",
   );
   assert("working has plan pane", working.includes("plan") || working.includes("Todo") || working.includes("sandbox approval"));
-  assert("working has token strip", /\btok\b|tokens|28,221|28221/.test(working));
-  assert("working has cost on strip", working.includes("$0.24"));
+  assert(
+    "working has compact token strip or stats",
+    /↑20,000|↑20000|tokens/.test(working),
+    "missing ↑in or stats tokens",
+  );
+  assert(
+    "working cost on stats",
+    working.includes("$0.24") || working.includes("0.24"),
+  );
+  assert(
+    "working strip has scroll/interrupt hints",
+    working.includes("interrupt") && working.includes("scroll"),
+  );
   assert(
     "working tool verb Read",
     working.includes("Read") && working.includes("edit.ts"),
   );
   assert("working tool verb Grep", working.includes("Grep"));
   assert("working explore group", working.includes("explore"));
+  assert(
+    "working omits processed badge",
+    !working.includes("processed"),
+    "done assistant should not show processed · reply",
+  );
   assert("working interrupt hint", working.includes("interrupt"));
   assert("working has no Context sidebar heading", !/\bContext\b/.test(working));
+  assert(
+    "working composer hRule chrome",
+    working.includes("─".repeat(8)) || working.includes("-".repeat(8)),
+  );
 
   const narrow = await renderFrame(90, 30, (bus) => {
     bus.emit({ type: "user", text: "hi" });

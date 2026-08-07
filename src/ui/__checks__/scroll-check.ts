@@ -163,6 +163,52 @@ function main(): void {
     `sum=${withGap.reduce((a, b) => a + b, 0)} bare=${bare}`,
   );
 
+  // Done assistant: body only (no status, no marginBottom).
+  const doneAsst: RenderBlock = {
+    kind: "single",
+    item: { kind: "assistant", id: "d", text: "one line", done: true },
+  };
+  assert(
+    "done assistant height is body only",
+    measureBlockHeight(doneAsst, width) === 1,
+    `h=${measureBlockHeight(doneAsst, width)}`,
+  );
+  const liveAsst: RenderBlock = {
+    kind: "single",
+    item: { kind: "assistant", id: "l", text: "one line", done: false },
+  };
+  assert(
+    "streaming assistant adds status line",
+    measureBlockHeight(liveAsst, width) === 2,
+    `h=${measureBlockHeight(liveAsst, width)}`,
+  );
+  const tools: RenderBlock = {
+    kind: "toolGroup",
+    id: "g",
+    group: "explore",
+    items: [
+      {
+        kind: "tool",
+        id: "t1",
+        tool: "read",
+        target: "a",
+        status: "ok",
+      },
+      {
+        kind: "tool",
+        id: "t2",
+        tool: "grep",
+        target: "x",
+        status: "ok",
+      },
+    ],
+  };
+  assert(
+    "tool group height is header + rows",
+    measureBlockHeight(tools, width) === 3,
+    `h=${measureBlockHeight(tools, width)}`,
+  );
+
   const failed = checks.filter((c) => !c.ok);
   for (const check of checks) {
     const mark = check.ok ? "ok" : "FAIL";

@@ -31,8 +31,8 @@ export function measureBlockHeight(
   contentWidth: number,
 ): number {
   if (block.kind === "toolGroup") {
-    // header + tool rows + marginBottom
-    return block.items.length + 2;
+    // header + tool rows (no marginBottom)
+    return block.items.length + 1;
   }
 
   const item: ActivityItem = block.item;
@@ -49,20 +49,21 @@ export function measureBlockHeight(
       const wrapped = wrappedLineCount(item.text, w);
       // Streaming caps shown body lines at 18 (Grok-style tail).
       const shown = item.done ? wrapped : Math.min(18, wrapped);
-      // status line + body + marginBottom
-      return 2 + Math.max(1, shown);
+      // Optional dim "streaming" status only while in flight; no done badge.
+      const status = item.done ? 0 : 1;
+      return status + Math.max(1, shown);
     }
     case "thinking": {
       const lines = item.text.split(/\r?\n/);
       const raw = Math.max(1, lines.length);
       // Fold caps: streaming ≤8, sealed ≤4.
       const shown = item.done ? Math.min(4, raw) : Math.min(8, raw);
-      // header + body + marginBottom
-      return 2 + shown;
+      // header + body (no marginBottom)
+      return 1 + shown;
     }
     case "user": {
-      // body lines + marginBottom
-      return 1 + wrappedLineCount(item.text, w);
+      // body lines only (no marginBottom)
+      return wrappedLineCount(item.text, w);
     }
     case "tool":
       return 1;

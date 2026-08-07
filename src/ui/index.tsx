@@ -88,9 +88,14 @@ export {
   formatCost,
   formatCostPrecise,
   formatDuration,
+  formatHomePath,
   formatTokens,
+  measureContextStripRows,
+  measurePromptRows,
+  promptBodyLines,
   shouldPlayBrandIntro,
   toolSigil,
+  visiblePromptBodyLines,
 } from "./components.js";
 
 export type { FooterHint, LifecyclePhase, Segment } from "./components.js";
