@@ -155,6 +155,19 @@
   .conn { float: right; font-size: 11px; color: var(--muted); }
   .conn.on { color: var(--success); }
   .conn.off { color: var(--error); }
+  .banner {
+    display: none;
+    margin: 12px 0 0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--warning);
+    background: #2a1f14;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .banner.show { display: block; }
+  .banner strong { color: var(--warning); }
+  .banner .detail { color: var(--muted); margin-top: 4px; font-size: 12px; }
   .spark { vertical-align: middle; }
 </style>
 </head>
@@ -165,6 +178,7 @@
 
   <section class="panel live" id="live-panel">
     <h2>Live run</h2>
+    <div class="banner" id="rate-banner" role="status"></div>
     <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
     <div class="progress" id="live-progress" aria-hidden="true"></div>
     <div class="grid" id="task-grid"></div>
@@ -254,7 +268,39 @@
       meta.innerHTML = '<span class="empty">waiting for a run…</span>';
       grid.innerHTML = "";
       prog.innerHTML = "";
+      const ban0 = $("rate-banner");
+      if (ban0) { ban0.className = "banner"; ban0.innerHTML = ""; }
       return;
+    }
+    const banner = $("rate-banner");
+    if (banner) {
+      const rl = snapshot.rateLimit;
+      const quotaTask = (snapshot.tasks || []).find(
+        (t) => t.error && /quota|rate.?limit|429/i.test(t.error)
+      );
+      if (rl && rl.label) {
+        banner.className = "banner show";
+        banner.innerHTML =
+          "<strong>" + esc(rl.label) + "</strong>" +
+          (rl.detail ? '<div class="detail">' + esc(rl.detail) + "</div>" : "") +
+          (rl.taskId ? '<div class="detail">task: ' + esc(rl.taskId) + "</div>" : "");
+      } else if (quotaTask && !snapshot.done) {
+        banner.className = "banner show";
+        banner.innerHTML =
+          "<strong>Provider quota / rate limit</strong>" +
+          '<div class="detail">' + esc((quotaTask.error || "").slice(0, 280)) + "</div>" +
+          '<div class="detail">CLAI waits ~60s between retries so we do not thrash the limit.</div>';
+      } else if (quotaTask && snapshot.done) {
+        banner.className = "banner show";
+        banner.innerHTML =
+          "<strong>Run hit provider quota (429)</strong>" +
+          '<div class="detail">' +
+          esc(String((snapshot.tasks || []).filter((t) => t.status === "error").length)) +
+          " task(s) errored on rate limit — not harness logic bugs. Re-run with --parallel 1 after quota resets, or use --offline / another provider.</div>";
+      } else {
+        banner.className = "banner";
+        banner.innerHTML = "";
+      }
     }
     const tasks = snapshot.tasks || [];
     const counts = { queued: 0, running: 0, pass: 0, fail: 0, timeout: 0, error: 0 };
