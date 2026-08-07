@@ -16,11 +16,13 @@ import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvFiles } from "../adapter/env.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
 import { runBench } from "./runner.js";
 import { BenchStore } from "./store.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+await loadEnvFiles();
 const AGY_MODEL = process.env.AGY_MODEL ?? "gemini-3.5-flash-low";
 const AGY_BIN = process.env.AGY_BIN ?? "agy";
 const PARALLEL = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 1));
