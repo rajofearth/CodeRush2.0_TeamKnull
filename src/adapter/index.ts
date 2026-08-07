@@ -4,7 +4,7 @@
  */
 
 import {
-  generateText,
+  streamText,
   InvalidToolArgumentsError,
   NoSuchToolError,
   type CoreMessage,
@@ -76,6 +76,11 @@ export type AgentLoopOptions = {
   model?: ResolvedModel;
   trace?: TraceWriter;
   onText?: (text: string) => void;
+  /**
+   * Incremental assistant prose (token/chunk deltas). Prefer this for live TUI
+   * streaming; `onText` still fires with the full step text when a step ends.
+   */
+  onTextDelta?: (delta: string) => void;
   onUsage?: (usage: {
     promptTokens: number;
     completionTokens: number;
@@ -267,7 +272,7 @@ export async function runAgentLoop(
     };
   };
 
-  const onStepFinish = async (
+  const onStepFinish = (
     step: {
       text?: string;
       finishReason?: string;
@@ -277,11 +282,11 @@ export async function runAgentLoop(
   ) => {
     if (step.text) {
       opts.onText?.(step.text);
-      await opts.trace?.append("assistant_text", {
+      void opts.trace?.append("assistant_text", {
         text: step.text.slice(0, 4000),
       });
     }
-    await opts.trace?.append("model_step", {
+    void opts.trace?.append("model_step", {
       finishReason: step.finishReason,
       toolCalls: step.toolCalls?.map((c) => ({
         toolName: c.toolName,
@@ -299,9 +304,9 @@ export async function runAgentLoop(
     // maxRetries: 0 — we own 429/5xx backoff via withProviderRetry so the SDK
     // does not double-retry underneath us.
     return withProviderRetry(
-      () =>
-        generateText({
-          model: resolved.model as Parameters<typeof generateText>[0]["model"],
+      async () => {
+        const result = streamText({
+          model: resolved.model as Parameters<typeof streamText>[0]["model"],
           tools,
           maxSteps,
           maxRetries: 0,
@@ -329,7 +334,35 @@ export async function runAgentLoop(
             return { ...toolCall, args: repaired };
           },
           onStepFinish,
-        }),
+        });
+
+        // `await result.text` can hang with some OpenAI-compatible providers;
+        // draining textStream drives multi-step tool loops to completion.
+        let text = "";
+        for await (const delta of result.textStream) {
+          text += delta;
+          if (delta) opts.onTextDelta?.(delta);
+        }
+        const [finishReason, steps, response, usage] = await Promise.all([
+          result.finishReason,
+          result.steps,
+          result.response,
+          result.usage,
+        ]);
+        const totalUsage =
+          "totalUsage" in result
+            ? await (result as { totalUsage: Promise<unknown> }).totalUsage
+            : undefined;
+
+        return {
+          text,
+          finishReason,
+          steps,
+          response,
+          usage,
+          totalUsage,
+        };
+      },
       {
         onStatus: opts.onStatus,
         onTrace: async (payload) => {

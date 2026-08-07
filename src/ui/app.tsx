@@ -1,13 +1,14 @@
 /**
- * ui/app — CLAI ADE shell: splash home, working screen, alt-buffer, mouse.
+ * ui/app — CLAI ADE shell: activity · plan · approvals · strip.
  *
- * Layout follows assets/23-visual-language.md. Terminal modes (alt screen +
- * SGR mouse) follow assets/22-renderer-decision.md and tear down on exit.
+ * Rendering-layer only. Producers emit `UiEvent`s; this shell folds them via
+ * `reduceUiEvent` and paints with the metallic theme. Terminal modes (alt
+ * screen + SGR mouse) tear down on exit.
  */
 
 import { createRequire } from "node:module";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, useApp, useInput, useStdout } from "ink";
 import type { DOMElement } from "ink";
 import type { UiBus, UiEvent } from "./events.js";
 import { createUiBus } from "./events.js";
@@ -16,6 +17,7 @@ import {
   initialUiState,
   reduceUiEvent,
   type ActivityItem,
+  type ApprovalItem,
   type PlanItem,
   type RenderBlock,
   type RunContext,
@@ -23,14 +25,21 @@ import {
 } from "./state.js";
 import {
   Activity,
-  FooterBar,
+  ApprovalsPane,
+  BrandIntro,
+  BRAND_INTRO_INTERVAL_MS,
+  BRAND_INTRO_TOTAL_TICKS,
+  ContextStrip,
   HintLine,
+  LifecycleLine,
+  PlanPane,
   PromptBox,
   SIDEBAR_WIDTH,
-  Sidebar,
-  SplashFooter,
+  ScrollCue,
+  StatsPanel,
   Wordmark,
-  WorkingLine,
+  deriveLifecycle,
+  shouldPlayBrandIntro,
   type FooterHint,
 } from "./components.js";
 import {
@@ -41,10 +50,9 @@ import {
   scrubMouseJunk,
   type HitRegistry,
 } from "./mouse.js";
-import { glyphs, resolve } from "./theme.js";
+import { glyphs } from "./theme.js";
 
 const SIDEBAR_MIN_WIDTH = 120;
-const SPLASH_PROMPT_WIDTH = 44;
 const ESC_CONFIRM_MS = 5000;
 const PLACEHOLDER_EXAMPLES = [
   "fix the failing edit tool test",
@@ -64,6 +72,7 @@ function readPackageVersion(): string {
 }
 
 const CLAI_VERSION = readPackageVersion();
+void CLAI_VERSION;
 
 function titleCaseAgent(agent?: string): string {
   if (!agent) return "Build";
@@ -108,8 +117,12 @@ function blockHeight(block: RenderBlock): number {
       return 4;
     case "verify":
       return item.logPath ? 3 : 2;
-    case "assistant":
-      return 2 + Math.ceil(item.text.length / 70);
+    case "assistant": {
+      // Streaming view tails the last ~18 lines so the live edge stays on screen.
+      const lines = item.text.split(/\r?\n/);
+      const shown = item.done ? lines.length : Math.min(18, lines.length);
+      return 3 + Math.max(1, shown);
+    }
     case "user":
       return 2 + Math.ceil(item.text.length / 70);
     default:
@@ -121,31 +134,61 @@ function windowBlocks(
   blocks: RenderBlock[],
   budget: number,
   scrollFromBottom: number,
-): { visible: RenderBlock[]; atBottom: boolean; canScrollUp: boolean } {
+): {
+  visible: RenderBlock[];
+  atBottom: boolean;
+  canScrollUp: boolean;
+  hiddenBelow: number;
+  hiddenAbove: number;
+  maxScroll: number;
+} {
   if (blocks.length === 0) {
-    return { visible: [], atBottom: true, canScrollUp: false };
+    return {
+      visible: [],
+      atBottom: true,
+      canScrollUp: false,
+      hiddenBelow: 0,
+      hiddenAbove: 0,
+      maxScroll: 0,
+    };
   }
-  const fromBottom: RenderBlock[] = [];
+
+  const heights = blocks.map(blockHeight);
+
+  // Fit as many trailing blocks as the budget allows (follow / live edge).
   let used = 0;
+  let fitCount = 0;
   for (let i = blocks.length - 1; i >= 0; i -= 1) {
-    used += blockHeight(blocks[i]!);
-    if (used > budget && fromBottom.length > 0) break;
-    fromBottom.unshift(blocks[i]!);
+    const h = heights[i]!;
+    if (used + h > budget && fitCount > 0) break;
+    used += h;
+    fitCount += 1;
   }
-  const start = Math.max(0, blocks.length - fromBottom.length - scrollFromBottom);
-  const end = Math.max(fromBottom.length, blocks.length - scrollFromBottom);
-  const slice = blocks.slice(start, end);
+
+  const maxScroll = Math.max(0, blocks.length - fitCount);
+  // Grok-style follow: scrollFromBottom === 0 pins to the live edge.
+  const scroll = Math.max(0, Math.min(scrollFromBottom, maxScroll));
+  const end = blocks.length - scroll;
+
+  const visibleIdx: number[] = [];
   let u = 0;
-  const fitted: RenderBlock[] = [];
-  for (let i = slice.length - 1; i >= 0; i -= 1) {
-    u += blockHeight(slice[i]!);
-    if (u > budget && fitted.length > 0) break;
-    fitted.unshift(slice[i]!);
+  for (let i = end - 1; i >= 0; i -= 1) {
+    const h = heights[i]!;
+    if (u + h > budget && visibleIdx.length > 0) break;
+    visibleIdx.unshift(i);
+    u += h;
   }
+
+  const first = visibleIdx[0] ?? 0;
+  const last = visibleIdx[visibleIdx.length - 1] ?? -1;
+
   return {
-    visible: fitted,
-    atBottom: scrollFromBottom <= 0,
-    canScrollUp: start > 0 || scrollFromBottom > 0,
+    visible: visibleIdx.map((i) => blocks[i]!),
+    atBottom: scroll <= 0,
+    canScrollUp: first > 0 || scroll > 0,
+    hiddenBelow: Math.max(0, blocks.length - 1 - last),
+    hiddenAbove: first,
+    maxScroll,
   };
 }
 
@@ -154,12 +197,26 @@ function latestTodo(items: ActivityItem[]): PlanItem | null {
     const item = items[i]!;
     if (item.kind === "plan" && item.variant === "todo") return item;
   }
-  // Fall back to the most recent plan so the sidebar has something to show.
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i]!;
     if (item.kind === "plan") return item;
   }
   return null;
+}
+
+function pendingApprovals(items: ActivityItem[]): ApprovalItem[] {
+  return items.filter(
+    (item): item is ApprovalItem =>
+      item.kind === "approval" && item.decision == null,
+  );
+}
+
+/** Activity stream without the latest plan/todo (shown in the plan pane). */
+function activityBlocks(items: ActivityItem[], todo: PlanItem | null): RenderBlock[] {
+  const filtered = todo
+    ? items.filter((item) => !(item.kind === "plan" && item.id === todo.id))
+    : items;
+  return groupItems(filtered);
 }
 
 function placeholderFor(tick: number): string {
@@ -200,6 +257,26 @@ export function ClaiApp(props: ClaiAppProps) {
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [introTick, setIntroTick] = useState(0);
+  const [introDone, setIntroDone] = useState(
+    () =>
+      !shouldPlayBrandIntro({
+        interactive: props.interactive,
+        stdout,
+      }),
+  );
+  /** Extra activity rows unlocked by clicking "more below". */
+  const [expandBoost, setExpandBoost] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  /** Forces StatsPanel to refresh even when Ink batches quietly. */
+  const [statsEpoch, setStatsEpoch] = useState(0);
+  const liveStatsRef = useRef({
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: undefined as number | undefined,
+    toolCalls: 0,
+  });
+  const taskStartedAt = useRef<number | null>(null);
   const interrupt = useRef(props.onInterrupt);
   interrupt.current = props.onInterrupt;
   const onSubmit = useRef(props.onSubmit);
@@ -218,8 +295,21 @@ export function ClaiApp(props: ClaiAppProps) {
     });
   }, []);
 
-  // Alt screen + mouse — only on the real process TTY. Custom streams
-  // (render-check PassThroughs) skip terminal modes entirely.
+  // Brand intro — letter reveal + metallic shimmer on real interactive TTY.
+  useEffect(() => {
+    if (introDone) return;
+    const timer = setInterval(() => {
+      setIntroTick((n) => {
+        if (n + 1 >= BRAND_INTRO_TOTAL_TICKS) {
+          setIntroDone(true);
+          return n + 1;
+        }
+        return n + 1;
+      });
+    }, BRAND_INTRO_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [introDone]);
+
   useEffect(() => {
     if (!stdout?.isTTY || stdout !== process.stdout) return;
     const disposeAlt = enterAltScreen(stdout);
@@ -232,10 +322,15 @@ export function ClaiApp(props: ClaiAppProps) {
         stdout,
         handlers: {
           onWheel: (direction) => {
-            // direction -1 = wheel up → older content; +1 = toward bottom.
-            setScrollFromBottom((n) =>
-              direction < 0 ? n + 3 : Math.max(0, n - 3),
-            );
+            // direction -1 = wheel up → older; +1 = toward live edge (follow).
+            if (direction < 0) {
+              setScrollFromBottom((n) => n + 3);
+            } else {
+              setScrollFromBottom((n) => {
+                const next = Math.max(0, n - 3);
+                return next <= 1 ? 0 : next;
+              });
+            }
           },
           onClick: (x, y) => {
             const action = hits.hitTest(x, y);
@@ -254,12 +349,42 @@ export function ClaiApp(props: ClaiAppProps) {
   useEffect(() => {
     const unsubscribe = props.bus.subscribe((event) => {
       setState((prev) => reduceUiEvent(prev, event));
+
+      const bumpStats = () => setStatsEpoch((n) => n + 1);
+
       if (event.type === "status") {
-        if (event.done) setBusy(false);
-        else if (event.label && !event.sticky) setBusy(true);
+        if (
+          event.done &&
+          (event.label === "processed" ||
+            event.label === "interrupted" ||
+            event.label === "error")
+        ) {
+          setBusy(false);
+        } else if (event.label && !event.done) {
+          setBusy(true);
+        }
       }
+
       if (event.type === "user") {
         setScrollFromBottom(0);
+        setExpandBoost(0);
+        setBusy(true);
+        taskStartedAt.current = Date.now();
+        setElapsedMs(0);
+        bumpStats();
+      }
+
+      if (event.type === "metrics") {
+        const cur = liveStatsRef.current;
+        if (event.tokensIn != null) cur.tokensIn = event.tokensIn;
+        if (event.tokensOut != null) cur.tokensOut = event.tokensOut;
+        if (event.costUsd != null) cur.costUsd = event.costUsd;
+        bumpStats();
+      }
+
+      if (event.type === "tool_call") {
+        liveStatsRef.current.toolCalls += 1;
+        bumpStats();
       }
     });
     props.onReady?.({
@@ -270,9 +395,15 @@ export function ClaiApp(props: ClaiAppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sticky-bottom: when pinned, stay pinned; when scrolled up, keep the same
-  // anchor by advancing scrollFromBottom as new blocks append.
-  const blocks = useMemo(() => groupItems(state.items), [state.items]);
+  const todo = latestTodo(state.items);
+  const approvals = pendingApprovals(state.items);
+  const blocks = useMemo(
+    () => activityBlocks(state.items, todo),
+    [state.items, todo],
+  );
+
+  // Grok-style sticky follow: when pinned to bottom, new blocks stay in view.
+  // When the user has scrolled up, keep their anchor by advancing the offset.
   useEffect(() => {
     const prev = blockCountRef.current;
     const next = blocks.length;
@@ -283,7 +414,49 @@ export function ClaiApp(props: ClaiAppProps) {
     }
   }, [blocks.length]);
 
-  const spinning = state.status != null && exitCode == null;
+  const pendingTools = state.items.some(
+    (item) => item.kind === "tool" && item.status === "pending",
+  );
+  const assistantStreaming = state.items.some(
+    (item) => item.kind === "assistant" && !item.done,
+  );
+
+  const lifecycle = useMemo(() => {
+    if (exitCode != null) return null;
+    const derived = deriveLifecycle({
+      status: state.status,
+      items: state.items,
+    });
+    if (derived) return derived;
+    // Keep the Working / Verify animation alive for the whole turn even when
+    // transient status events clear (e.g. intake ready).
+    if (assistantStreaming) {
+      return { state: "verify" as const, detail: "streaming reply" };
+    }
+    if (pendingTools) {
+      return { state: "working" as const, detail: "tool calls" };
+    }
+    if (busy) {
+      return {
+        state: "working" as const,
+        detail: state.status?.label,
+      };
+    }
+    return null;
+  }, [
+    exitCode,
+    state.status,
+    state.items,
+    assistantStreaming,
+    pendingTools,
+    busy,
+  ]);
+
+  const spinning =
+    lifecycle != null &&
+    (lifecycle.state === "working" ||
+      lifecycle.state === "verify" ||
+      lifecycle.state === "repair");
   useEffect(() => {
     if (!spinning) return;
     const timer = setInterval(
@@ -292,6 +465,24 @@ export function ClaiApp(props: ClaiAppProps) {
     );
     return () => clearInterval(timer);
   }, [spinning]);
+
+  // Always tick the clock while a turn is in flight so the stats panel moves.
+  const taskActive = busy || pendingTools || assistantStreaming || state.status != null;
+  useEffect(() => {
+    if (taskActive && taskStartedAt.current == null) {
+      taskStartedAt.current = Date.now();
+    }
+    if (!taskActive) return;
+    const tick = () => {
+      if (taskStartedAt.current != null) {
+        setElapsedMs(Date.now() - taskStartedAt.current);
+        setStatsEpoch((n) => n + 1);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 200);
+    return () => clearInterval(timer);
+  }, [taskActive]);
 
   useEffect(() => {
     const timer = setInterval(() => setPlaceholderTick((n) => n + 1), 8000);
@@ -328,14 +519,32 @@ export function ClaiApp(props: ClaiAppProps) {
   }, [escArmedUntil]);
 
   const scrollUp = useCallback(() => {
-    setScrollFromBottom((n) => n + 5);
+    setScrollFromBottom((n) => n + 3);
   }, []);
-  const scrollDown = useCallback(() => {
-    setScrollFromBottom((n) => Math.max(0, n - 5));
+  /** Resume follow mode (Grok: jump to live edge). */
+  const followLive = useCallback(() => {
+    setScrollFromBottom(0);
+    setExpandBoost(0);
+  }, []);
+  /** Reveal newer content; snap to live edge when close enough. */
+  const expandBelow = useCallback(() => {
+    setScrollFromBottom((n) => {
+      const next = Math.max(0, n - 5);
+      return next <= 2 ? 0 : next;
+    });
+    setExpandBoost((b) => Math.min(48, b + 8));
+  }, []);
+  const expandAbove = useCallback(() => {
+    setScrollFromBottom((n) => n + 5);
+    setExpandBoost((b) => Math.min(48, b + 8));
   }, []);
 
   useInput(
     (ch, key) => {
+      if (!introDone) {
+        setIntroDone(true);
+        return;
+      }
       if (key.escape) {
         if (props.onInterrupt && (busy || state.status != null)) {
           requestInterrupt();
@@ -347,7 +556,7 @@ export function ClaiApp(props: ClaiAppProps) {
         return;
       }
       if (key.pageDown || (key.ctrl && ch === "d")) {
-        scrollDown();
+        expandBelow();
         return;
       }
       if (!props.interactive || busy || exitCode != null) return;
@@ -364,7 +573,6 @@ export function ClaiApp(props: ClaiAppProps) {
         setInput((v) => scrubMouseJunk(v.slice(0, -1)));
         return;
       }
-      // Mouse CSI that slips past the stdin filter must never enter the prompt.
       if (ch && (ch === "\x1b" || /\[<\d*;?\d*;?\d*[Mm]?/.test(ch))) {
         setInput((v) => scrubMouseJunk(v));
         return;
@@ -376,35 +584,59 @@ export function ClaiApp(props: ClaiAppProps) {
     { isActive: true },
   );
 
-  const showSidebar = columns >= SIDEBAR_MIN_WIDTH;
+  // Readable column width on large terminals (don't stretch prose edge-to-edge).
+  const STATS_W = columns >= 140 ? 34 : columns >= 100 ? 28 : 24;
+  const CONTENT_MAX =
+    columns >= 180 ? 112 : columns >= 140 ? 100 : columns >= 110 ? 92 : 88;
+  const showStats = columns >= 72;
+  const showSidebar = columns >= SIDEBAR_MIN_WIDTH && columns < 160;
+  const chromePad =
+    columns >= 140
+      ? Math.max(
+          2,
+          Math.floor(
+            (columns - CONTENT_MAX - (showStats ? STATS_W + 4 : 0)) / 2,
+          ),
+        )
+      : 1;
   const conversationWidth = Math.max(
     24,
-    showSidebar ? columns - SIDEBAR_WIDTH - 1 : columns,
+    Math.min(
+      CONTENT_MAX + 2,
+      showSidebar ? columns - SIDEBAR_WIDTH - chromePad : columns - chromePad * 2,
+    ),
   );
-  // Spec: 1 col left pad, 2 cols right pad inside the conversation column.
-  const contentWidth = Math.max(16, conversationWidth - 3);
+  const contentWidth = Math.max(16, Math.min(CONTENT_MAX, conversationWidth - 2));
 
-  const budget = Math.max(4, rows - 12);
-  const { visible, atBottom, canScrollUp } = useMemo(
+  const budget = Math.max(6, rows - (columns >= 140 ? 14 : 12) + expandBoost);
+  const { visible, atBottom, canScrollUp, hiddenBelow, hiddenAbove } = useMemo(
     () => windowBlocks(blocks, budget, scrollFromBottom),
     [blocks, budget, scrollFromBottom],
   );
 
-  const isSplash =
-    props.interactive === true &&
-    state.items.length === 0 &&
-    exitCode == null &&
-    !busy;
-
   const agentLabel = titleCaseAgent(state.context.agent);
   const { model, provider } = splitModel(state.context.model);
-  const todo = latestTodo(state.items);
-  const progressFraction =
-    state.metrics.contextPct != null
-      ? Math.min(1, Math.max(0, state.metrics.contextPct / 100))
-      : busy || state.status
-        ? 0.35
-        : 0;
+
+  // Prefer the live ref (updated on every bus event) over lagged reducer state.
+  const live = liveStatsRef.current;
+  const toolCalls = Math.max(
+    live.toolCalls,
+    state.items.filter((item) => item.kind === "tool").length,
+  );
+  const tokensIn = Math.max(live.tokensIn, state.metrics.tokensIn);
+  const tokensOut = Math.max(live.tokensOut, state.metrics.tokensOut);
+  const liveCost = live.costUsd ?? state.metrics.costUsd;
+
+  const sessionStats = {
+    elapsedMs,
+    tokensIn,
+    tokensOut,
+    costUsd: liveCost,
+    toolCalls,
+    live: busy || pendingTools || assistantStreaming,
+  };
+  // Keep statsEpoch in the render dependency path.
+  void statsEpoch;
 
   const interruptMode: "armed" | "confirm" | null =
     props.onInterrupt && (busy || state.status != null)
@@ -415,21 +647,34 @@ export function ClaiApp(props: ClaiAppProps) {
 
   const footerHints: FooterHint[] = [
     ...(interruptMode
-      ? [{ id: "interrupt", key: "esc", label: interruptMode === "confirm" ? "again to interrupt" : "interrupt" }]
+      ? [
+          {
+            id: "interrupt",
+            key: "esc",
+            label:
+              interruptMode === "confirm" ? "again to interrupt" : "interrupt",
+          },
+        ]
       : []),
     { id: "scroll", key: "pgup/dn", label: "scroll" },
   ];
 
   hintActions.current.set("interrupt", () => requestInterrupt());
   hintActions.current.set("scroll", () => scrollUp());
+  hintActions.current.set("more-below", () => expandBelow());
+  hintActions.current.set("more-above", () => expandAbove());
+  hintActions.current.set("follow", () => followLive());
 
-  const registerRow = useCallback((id: string, node: DOMElement | null) => {
-    if (!node) {
-      hitRegistry.current.unregister(`tool:${id}`);
-      return;
-    }
-    hitRegistry.current.register(`tool:${id}`, node, () => toggleExpand(id));
-  }, [toggleExpand]);
+  const registerRow = useCallback(
+    (id: string, node: DOMElement | null) => {
+      if (!node) {
+        hitRegistry.current.unregister(`tool:${id}`);
+        return;
+      }
+      hitRegistry.current.register(`tool:${id}`, node, () => toggleExpand(id));
+    },
+    [toggleExpand],
+  );
 
   const registerHint = useCallback((id: string, node: DOMElement | null) => {
     if (!node) {
@@ -441,56 +686,74 @@ export function ClaiApp(props: ClaiAppProps) {
     });
   }, []);
 
+  const registerScrollCue = useCallback(
+    (id: "more-below" | "more-above", node: DOMElement | null) => {
+      registerHint(id, node);
+    },
+    [registerHint],
+  );
+
   const promptHints = [
     { key: "tab", label: "switch agent" },
     { key: "ctrl+p", label: "commands" },
   ];
 
-  if (isSplash) {
+  const showPlanInline = !showSidebar;
+
+  if (!introDone) {
     return (
-      <Box flexDirection="column" width={columns} height={rows}>
-        <Box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center">
-          <Wordmark />
-          <Box marginTop={1}>
-            <PromptBox
-              width={SPLASH_PROMPT_WIDTH}
-              value={input}
-              placeholder={placeholderFor(placeholderTick)}
-              focused={!busy}
-              agent={agentLabel}
-              model={model}
-              provider={provider}
-              showCaret={!busy && input.length > 0}
-            />
-          </Box>
-          <Box width={SPLASH_PROMPT_WIDTH} marginTop={0}>
-            <HintLine width={SPLASH_PROMPT_WIDTH} hints={promptHints} />
-          </Box>
-        </Box>
-        <SplashFooter
-          width={columns}
-          cwd={state.context.cwd}
-          mcpCount={state.context.mcp.length}
-          version={CLAI_VERSION}
-        />
+      <Box
+        flexDirection="column"
+        width={columns}
+        height={rows}
+        alignItems="center"
+        justifyContent="center"
+      >
+        <BrandIntro tick={introTick} width={columns} />
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" width={columns} height={rows}>
-      <Box flexDirection="row" flexGrow={1}>
+    <Box flexDirection="column" width={columns} height={rows} paddingX={chromePad > 1 ? 0 : 0}>
+      <Box
+        flexDirection="row"
+        justifyContent="space-between"
+        paddingLeft={chromePad}
+        paddingRight={chromePad}
+        marginBottom={1}
+        width={columns}
+      >
+        <Box flexDirection="column">
+          <Wordmark />
+        </Box>
+        {showStats ? (
+          <StatsPanel
+            key={`stats-${statsEpoch}-${tokensOut}-${toolCalls}-${elapsedMs}`}
+            stats={sessionStats}
+            width={STATS_W}
+          />
+        ) : null}
+      </Box>
+
+      <Box flexDirection="row" flexGrow={1} paddingLeft={chromePad} paddingRight={chromePad}>
         <Box
           flexDirection="column"
           width={conversationWidth}
-          paddingLeft={1}
-          paddingRight={2}
+          paddingRight={1}
         >
           {canScrollUp ? (
-            <Text color={resolve("clai.textFaint")}>
-              {`↑ scroll (${scrollFromBottom} from bottom)`}
-            </Text>
+            <ScrollCue
+              direction="up"
+              label={
+                hiddenAbove > 0
+                  ? `${hiddenAbove} more above`
+                  : `scroll (${scrollFromBottom} from bottom)`
+              }
+              register={(node) => registerScrollCue("more-above", node)}
+            />
           ) : null}
+
           <Box flexGrow={1} flexDirection="column">
             <Activity
               blocks={visible}
@@ -500,27 +763,37 @@ export function ClaiApp(props: ClaiAppProps) {
               registerRow={registerRow}
             />
             {!atBottom ? (
-              <Text color={resolve("clai.textFaint")}>↓ more below</Text>
+              <ScrollCue
+                direction="down"
+                label={
+                  hiddenBelow > 0
+                    ? `${hiddenBelow} more below · click to follow`
+                    : "follow live"
+                }
+                register={(node) => registerScrollCue("more-below", node)}
+              />
             ) : null}
             <Box marginTop={1}>
-              <WorkingLine
-                status={exitCode == null ? state.status : null}
-                agent={agentLabel}
-                model={model}
+              <LifecycleLine
+                phase={lifecycle}
                 frame={frame}
                 width={contentWidth}
               />
             </Box>
           </Box>
+
+          {showPlanInline ? (
+            <PlanPane todo={todo} width={contentWidth} />
+          ) : null}
+          <ApprovalsPane items={approvals} width={contentWidth} />
+
           {props.interactive ? (
             <Box flexDirection="column" marginTop={1}>
               <PromptBox
                 width={contentWidth}
                 value={input}
                 placeholder={
-                  busy
-                    ? "working…"
-                    : placeholderFor(placeholderTick)
+                  busy ? "working…" : placeholderFor(placeholderTick)
                 }
                 focused={!busy}
                 agent={agentLabel}
@@ -530,29 +803,32 @@ export function ClaiApp(props: ClaiAppProps) {
               />
               <HintLine width={contentWidth} hints={promptHints} />
             </Box>
-          ) : state.context.tracePath ? (
-            <Box marginTop={1}>
-              <Text color={resolve("clai.textMuted")}>
-                {`trace ${state.context.tracePath}`}
-              </Text>
-            </Box>
           ) : null}
         </Box>
+
         {showSidebar ? (
-          <Sidebar
-            context={state.context}
-            metrics={state.metrics}
-            todo={todo}
-            height={Math.max(8, rows - 1)}
-            version={CLAI_VERSION}
-          />
+          <Box
+            flexDirection="column"
+            width={SIDEBAR_WIDTH}
+            paddingLeft={1}
+          >
+            <PlanPane todo={todo} width={SIDEBAR_WIDTH - 2} />
+          </Box>
         ) : null}
       </Box>
-      <FooterBar
+
+      <ContextStrip
         width={columns}
-        progress={progressFraction}
-        interrupt={interruptMode}
+        context={state.context}
+        metrics={{
+          tokensIn,
+          tokensOut,
+          costUsd: liveCost,
+          contextPct: state.metrics.contextPct,
+        }}
+        lifecycle={lifecycle}
         hints={footerHints}
+        interrupt={interruptMode}
         registerHint={registerHint}
       />
     </Box>
@@ -580,7 +856,7 @@ export async function renderShell(
   const bus = opts.bus ?? createUiBus();
 
   let waitUntilExit: () => Promise<void> = async () => {};
-  const ready = new Promise<ShellApi>((resolve) => {
+  const ready = new Promise<ShellApi>((resolveReady) => {
     const instance = render(
       <ClaiApp
         bus={bus}
@@ -588,7 +864,7 @@ export async function renderShell(
         interactive={opts.interactive}
         onSubmit={opts.onSubmit}
         onInterrupt={opts.onInterrupt}
-        onReady={resolve}
+        onReady={resolveReady}
         exitWhenDone={opts.exitWhenDone}
       />,
     );

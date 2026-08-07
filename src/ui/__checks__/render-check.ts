@@ -1,9 +1,9 @@
 /**
- * ui/__checks__/render-check — offline verification of the TUI rebuild.
+ * ui/__checks__/render-check — offline verification of the TUI redesign.
  *
- * Renders splash + working screens into a fake 140×40 TTY (PassThrough),
- * asserts wordmark / sidebar / density / mouse parser / theme tokens, and
- * exits non-zero on any failure. Safe to run without a real terminal.
+ * Renders interactive + working screens into a fake 140×40 TTY (PassThrough),
+ * asserts wordmark / lifecycle / strip / density / mouse parser / theme tokens,
+ * and exits non-zero on any failure. Safe to run without a real terminal.
  *
  *   pnpm exec tsx src/ui/__checks__/render-check.ts
  */
@@ -18,18 +18,25 @@ import {
   isMouseEnabled,
 } from "../mouse.js";
 import {
+  CREDIT,
+  WORDMARK,
+  WORDMARK_LARGE,
   detectColorLevel,
-  expandWordmarkRow,
   resolve,
   setColorLevel,
   setGlyphs,
   detectGlyphs,
-  WORDMARK_LEFT,
-  WORDMARK_RIGHT,
-  glyph,
+  LIFECYCLE,
+  lifecycleIcon,
 } from "../theme.js";
 import { formatHeadlessEvent } from "../headless.js";
 import { groupItems, initialUiState, reduceUiEvent } from "../state.js";
+import {
+  brandIntroLetterColor,
+  deriveLifecycle,
+  extractCodeFragment,
+  shouldPlayBrandIntro,
+} from "../components.js";
 
 type Check = { name: string; ok: boolean; detail?: string };
 const checks: Check[] = [];
@@ -63,7 +70,6 @@ function makeStdout(columns: number, rows: number): {
   stream.on("data", (chunk: Buffer | string) => {
     buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
   });
-  // Ink writes via stream.write; also capture that path.
   const originalWrite = stream.write.bind(stream);
   stream.write = ((
     chunk: string | Uint8Array,
@@ -94,8 +100,6 @@ function makeStdin(): NodeJS.ReadStream {
     ref: () => void;
     unref: () => void;
   };
-  // Ink's useInput requires isTTY + setRawMode; keep CLAI_MOUSE=0 so we
-  // never arm the real mouse layer against this fake stream.
   stdin.isTTY = true;
   stdin.isRaw = false;
   stdin.setRawMode = () => stdin as unknown as NodeJS.ReadStream;
@@ -130,6 +134,7 @@ async function renderFrame(
         cwd: "P:/Projects/clai",
         mcp: ["context7"],
         lsp: ["typescript"],
+        sandboxMode: "workspace",
       },
       exitWhenDone: false,
       onInterrupt: () => {},
@@ -141,7 +146,7 @@ async function renderFrame(
     },
   );
 
-  await settle(150);
+  await settle(280);
   const out = getOutput();
   instance.unmount();
   await settle(40);
@@ -157,8 +162,10 @@ async function main(): Promise<void> {
   setGlyphs(detectGlyphs({ ...process.env, WT_SESSION: undefined, CLAI_ASCII: undefined }));
 
   // ── theme ──────────────────────────────────────────────────────────────────
-  assert("accent is #5c9cf5", resolve("clai.accent") === "#5c9cf5");
-  assert("text is #eeeeee", resolve("clai.text") === "#eeeeee");
+  assert("brand.wordmark is #E8E8ED", resolve("brand.wordmark") === "#E8E8ED");
+  assert("text.primary is #C0C0C8", resolve("text.primary") === "#C0C0C8");
+  assert("state.pass is #5FD98A", resolve("state.pass") === "#5FD98A");
+  assert("state.fail is #E85555", resolve("state.fail") === "#E85555");
   assert(
     "NO_COLOR wins",
     detectColorLevel({ NO_COLOR: "1", FORCE_COLOR: "3" }, true) === "none",
@@ -170,29 +177,102 @@ async function main(): Promise<void> {
 
   setColorLevel("16");
   assert("16-level drops panel bg", resolve("clai.backgroundPanel") === undefined);
-  assert("16-level accent is blueBright", resolve("clai.accent") === "blueBright");
+  assert("16-level working is yellow", resolve("state.working") === "yellow");
+  assert("16-level verify is cyan", resolve("state.verify") === "cyan");
   setColorLevel("truecolor");
 
-  // ── wordmark ───────────────────────────────────────────────────────────────
-  const leftRow2 = expandWordmarkRow(WORDMARK_LEFT[2]!);
-  const rightRow2 = expandWordmarkRow(WORDMARK_RIGHT[2]!);
+  setColorLevel("none");
+  assert("NO_COLOR chrome collapses", resolve("brand.wordmark") === undefined);
+  assert("NO_COLOR state also undefined (shape only)", resolve("state.pass") === undefined);
+  setColorLevel("truecolor");
+
+  // ── lifecycle icons ────────────────────────────────────────────────────────
+  assert("working icon", LIFECYCLE.working.icon === "●");
+  assert("verify icon", LIFECYCLE.verify.icon === "◐");
+  assert("pass icon", lifecycleIcon("pass") === "✓");
+  assert("fail icon", lifecycleIcon("fail") === "✗");
+  assert("repair icon", lifecycleIcon("repair") === "↻");
+  assert("blocked icon", lifecycleIcon("blocked") === "⊘");
+
+  const workingPhase = deriveLifecycle({
+    status: { label: "planning next step", level: "info" },
+    items: [],
+  });
+  assert("derive working", workingPhase?.state === "working");
+
+  const verifyPhase = deriveLifecycle({
+    status: { label: "verify checks", level: "info" },
+    items: [],
+  });
+  assert("derive verify", verifyPhase?.state === "verify");
+
+  // ── brand intro unit ───────────────────────────────────────────────────────
   assert(
-    "wordmark left row has shadowed spaces",
-    leftRow2.some((c) => c.paint === "shadowBg" && c.char === " "),
+    "intro skips fake stdout",
+    shouldPlayBrandIntro({
+      interactive: true,
+      stdout: { isTTY: true },
+      env: {},
+    }) === false,
   );
   assert(
-    "wordmark right row has shadowed ▀ from ^",
-    rightRow2.some((c) => c.paint === "shadowBg" && c.char === glyph("blockUpper")),
+    "intro skips CLAI_NO_INTRO",
+    shouldPlayBrandIntro({
+      interactive: true,
+      stdout: process.stdout,
+      env: { CLAI_NO_INTRO: "1" },
+    }) === false,
   );
-  assert("wordmark left is 9 cols", WORDMARK_LEFT.every((r) => r.length === 9));
-  assert("wordmark right is 6 cols", WORDMARK_RIGHT.every((r) => r.length === 6));
+  assert(
+    "intro letter 0 bright on first reveal",
+    brandIntroLetterColor(0, 1) === resolve("brand.wordmark"),
+  );
+  assert(
+    "intro letter 1 hidden before reveal",
+    brandIntroLetterColor(1, 1) === undefined,
+  );
+  assert(
+    "large wordmark has 4 rows",
+    WORDMARK_LARGE.length === 4,
+  );
+  assert(
+    "extract code fence fragment",
+    extractCodeFragment("here\n```ts\nconst x = 1\nconst y = 2\n```")?.includes("const y") === true,
+  );
+
+  // streaming reduce: deltas append, done seals
+  let streamState = initialUiState();
+  streamState = reduceUiEvent(streamState, {
+    type: "assistant",
+    id: "s1",
+    text: "Hel",
+    done: false,
+  });
+  streamState = reduceUiEvent(streamState, {
+    type: "assistant",
+    id: "s1",
+    text: "lo",
+    done: false,
+  });
+  streamState = reduceUiEvent(streamState, {
+    type: "assistant",
+    id: "s1",
+    text: "",
+    done: true,
+  });
+  const streamed = streamState.items.find((i) => i.kind === "assistant");
+  assert(
+    "streaming appends deltas",
+    streamed?.kind === "assistant" &&
+      streamed.text === "Hello" &&
+      streamed.done === true,
+  );
 
   // ── mouse parser ───────────────────────────────────────────────────────────
   const events: Array<{ kind: string; x: number; y: number }> = [];
   const parser = createSgrMouseParser((e) =>
     events.push({ kind: e.kind, x: e.x, y: e.y }),
   );
-  // Fragmented: press, release, wheel-up, wheel-down — chopped mid-sequence.
   const wire =
     "\x1b[<0;13;4M" +
     "\x1b[<0;13;4m" +
@@ -211,7 +291,7 @@ async function main(): Promise<void> {
   assert("CLAI_MOUSE=0 disables", isMouseEnabled({ CLAI_MOUSE: "0" }) === false);
   assert("mouse default-on", isMouseEnabled({}) === true);
 
-  // ── headless byte-compat smoke ─────────────────────────────────────────────
+  // ── headless byte-compat smoke (must stay plain / uncolored) ───────────────
   const toolCall = formatHeadlessEvent({
     type: "tool_call",
     id: "t1",
@@ -236,6 +316,10 @@ async function main(): Promise<void> {
     toolResult === "[ok] read  hello.txt  12ms",
     toolResult ?? "null",
   );
+  assert(
+    "headless has no brand",
+    !String(toolCall).includes(WORDMARK) && !String(toolCall).includes(CREDIT),
+  );
 
   // ── density: consecutive tools group with zero internal gap ────────────────
   let state = initialUiState();
@@ -259,35 +343,27 @@ async function main(): Promise<void> {
     grouped.length === 1 && grouped[0]?.kind === "toolGroup",
   );
 
-  // ── splash render ──────────────────────────────────────────────────────────
-  const splash = await renderFrame(120, 30, () => {}, true);
+  // ── interactive idle (no splash art) ───────────────────────────────────────
+  const idle = await renderFrame(120, 30, () => {}, true);
+  assert("idle has CLAI wordmark", idle.includes(WORDMARK), idle.slice(0, 200));
+  assert("idle has credit", idle.includes(CREDIT));
   assert(
-    "splash has block wordmark glyphs",
-    /[▀▄█]/.test(splash) || splash.includes("#"),
-    splash.slice(0, 200),
+    "idle has no block-art splash",
+    !/[▀▄█]{3,}/.test(idle),
+    "block glyphs still present",
   );
   assert(
-    "splash placeholder",
-    splash.includes("Ask anything"),
+    "idle placeholder",
+    idle.includes("Ask anything"),
     "missing Ask anything",
   );
+  assert("idle agent Build", /\bBuild\b/.test(idle), "missing Build");
   assert(
-    "splash agent Build",
-    /\bBuild\b/.test(splash),
-    "missing Build",
+    "idle keybind hints",
+    idle.includes("switch agent") && idle.includes("commands"),
   );
-  assert(
-    "splash keybind hints",
-    splash.includes("switch agent") && splash.includes("commands"),
-  );
-  assert(
-    "splash has no Context sidebar",
-    !splash.includes("Context") || splash.indexOf("Ask anything") < splash.indexOf("Context"),
-  );
-  assert("splash shows /status", splash.includes("/status"));
-  assert("splash shows clai version", /clai\s+\d/.test(splash));
 
-  // ── working screen render (≥120 → sidebar docked) ──────────────────────────
+  // ── working screen render (≥120 → plan side column) ────────────────────────
   const working = await renderFrame(140, 40, (bus) => {
     bus.emit({ type: "user", text: "add age verification to signup" });
     bus.emit({
@@ -346,31 +422,31 @@ async function main(): Promise<void> {
     });
   });
 
-  assert("working has sidebar Context", working.includes("Context"));
-  assert("working has token count", working.includes("tokens"));
-  assert("working has cost", working.includes("$0.24 spent"));
-  assert("working has MCP section", working.includes("MCP"));
-  assert("working has LSP section", working.includes("LSP"));
-  assert("working has Todo section", working.includes("Todo"));
+  assert("working has CLAI wordmark", working.includes(WORDMARK), working.slice(0, 120));
+  assert("working has credit", working.includes(CREDIT), working.slice(0, 120));
+  assert(
+    "working has Working lifecycle",
+    working.includes("Working"),
+    `len=${working.length} snippet=${JSON.stringify(working.replace(/\s+/g, " ").slice(0, 240))}`,
+  );
+  assert(
+    "working has stats panel",
+    working.includes("tokens") && working.includes("tools") && working.includes("cost"),
+    "missing stats panel fields",
+  );
+  assert("working has plan pane", working.includes("plan") || working.includes("Todo") || working.includes("sandbox approval"));
+  assert("working has token strip", /\btok\b|tokens|28,221|28221/.test(working));
+  assert("working has cost on strip", working.includes("$0.24"));
   assert(
     "working tool verb Read",
     working.includes("Read") && working.includes("edit.ts"),
   );
-  assert(
-    "working tool verb Grep",
-    working.includes("Grep"),
-  );
+  assert("working tool verb Grep", working.includes("Grep"));
   assert("working explore group", working.includes("explore"));
-  assert(
-    "working interrupt hint",
-    working.includes("interrupt"),
-  );
-  assert(
-    "working narrow hide: sidebar absent under 120",
-    true, // checked separately below
-  );
+  assert("working interrupt hint", working.includes("interrupt"));
+  assert("working has no Context sidebar heading", !/\bContext\b/.test(working));
 
-  const narrow = await renderFrame(100, 30, (bus) => {
+  const narrow = await renderFrame(90, 30, (bus) => {
     bus.emit({ type: "user", text: "hi" });
     bus.emit({
       type: "metrics",
@@ -379,13 +455,17 @@ async function main(): Promise<void> {
       contextPct: 1,
       costUsd: 0,
     });
+    bus.emit({
+      type: "verify",
+      label: "unit",
+      ok: true,
+    });
   });
-  // Under 120 the sidebar is hidden — session title still may appear in footer/context,
-  // but the Context heading lives only in the sidebar.
+  assert("narrow has credit", narrow.includes(CREDIT));
   assert(
-    "narrow hides sidebar Context heading",
-    !narrow.includes("\nContext\n") && !narrow.includes("Context\n"),
-    "Context still visible at width 100",
+    "narrow collapses strip essentials",
+    narrow.includes(WORDMARK) && (narrow.includes("PASS") || narrow.includes("gpt-oss")),
+    narrow.slice(0, 300),
   );
 
   // ── report ─────────────────────────────────────────────────────────────────
@@ -399,7 +479,6 @@ async function main(): Promise<void> {
     `\n${checks.length - failed.length}/${checks.length} passed` +
       (failed.length ? ` (${failed.length} failed)` : ""),
   );
-  // Ink can leave handles open on fake streams; force a clean exit.
   process.exit(failed.length ? 1 : 0);
 }
 

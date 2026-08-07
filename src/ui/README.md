@@ -1,0 +1,131 @@
+# CLAI TUI — visual language
+
+Rendering-layer guide for `src/ui/`. Producers emit `UiEvent`s onto a `UiBus`;
+Ink components (and the headless printer) subscribe. **Do not** put colour,
+icons, or brand chrome into `headless.ts` — that path stays plain and parseable.
+
+## Brand
+
+| Element | Rule |
+|---------|------|
+| Wordmark | Render **`CLAI`** once, top of the active pane — `brand.wordmark`, bold. |
+| Launch intro | Large half-block `WORDMARK_LARGE` + letter shimmer (~2.2s). Skip with any key; `CLAI_NO_INTRO=1` disables. Never headless. |
+| Stats panel | Top-right: time · tokens · cost · tools (session-derived, render-only). |
+| Credit | **`by team knull`** — `text.muted`, far right of the context strip. |
+| Forbidden | Neon splash screens, emoji. |
+
+Constants live in `theme.ts` as `WORDMARK` / `WORDMARK_LARGE` / `CREDIT`. Intro: `BrandIntro`.
+
+## Colour — metallic silver / matte black
+
+Single module: **`theme.ts`**. No inline hex/ANSI anywhere else.
+
+| Token | Truecolor | 16-colour fallback |
+|-------|-----------|--------------------|
+| `brand.wordmark` | `#E8E8ED` | bold white |
+| `text.primary` | `#C0C0C8` | white |
+| `text.muted` | `#6B6E76` | gray |
+| `border` | `#3A3C42` | gray |
+| `state.working` | `#D4A24C` | yellow |
+| `state.verify` | `#8FD3E8` | cyan |
+| `state.pass` | `#5FD98A` | green |
+| `state.repair` | `#E08A3C` | yellow |
+| `state.fail` | `#E85555` | red |
+| `state.blocked` | `#6B6E76` | gray |
+
+Depth follows **chalk.level** (`truecolor` → `256` → `16` → `none`), with
+`NO_COLOR` / `CLAI_COLOR` / `FORCE_COLOR` overrides. Under `NO_COLOR`, chrome
+tokens collapse to the default foreground; **state icons still print** — shape
+carries meaning.
+
+**Saturated colour is reserved for lifecycle states.** Brand and body text stay
+brushed steel.
+
+Legacy `clai.*` tokens still resolve (mapped onto this palette) so `log.ts` and
+callers outside the Ink tree keep compiling without non-ui changes.
+
+## Lifecycle — state-machine-first
+
+Persistent single-line widget (`LifecycleLine`), not a log entry. Exactly one
+icon + one colour per state — reuse this pairing in activity, plan/todo, verify,
+and run summaries:
+
+| State | Icon | Colour token |
+|-------|------|--------------|
+| Working | `●` | `state.working` |
+| Verify | `◐` | `state.verify` |
+| PASS | `✓` | `state.pass` |
+| Repair | `↻` | `state.repair` |
+| FAIL | `✗` | `state.fail` |
+| BLOCKED | `⊘` | `state.blocked` |
+
+Canonical table: `LIFECYCLE` / `lifecycleIcon()` in `theme.ts`.
+
+## Icons
+
+Allowed set only:
+
+```
+✓  ✗  ⚠  ●  ◐  ↻  ⊘
+```
+
+No emoji. Adding an icon means updating `theme.ts` **and** this README.
+
+Braille spinner frames (`⠋⠙…`) are motion, not icons — shown only during
+Working / Verify, in the matching state colour. One spinner at a time.
+
+## Event visual priority
+
+| Priority | Events | Treatment |
+|----------|--------|-----------|
+| Strong | `verify`, `plan` / `todo`, `tool_call` / `tool_result`, `approval` | Icon + colour + slight weight / indent |
+| Demoted | `status`, `metrics`, `context` | Slim bottom strip only |
+
+### Context strip
+
+One muted line, right-aligned credit:
+
+```
+model · provider · sandbox · tokens/cost · trace     by team knull
+```
+
+When terminal width **&lt; 100** cols, collapse to:
+
+```
+model · PASS|FAIL     by team knull
+```
+
+## Layout
+
+Panes: **activity · plan · approvals · strip**.
+
+- Activity pane: single unicode box-drawing border in `border` colour — not every sub-element.
+- Plan / approvals: quiet secondary regions (side column ≥ 120 cols for plan).
+- Primary demo target: **120** cols.
+- More whitespace between event blocks; drop labels Ink already implies by position.
+
+## Motion
+
+- Exactly one spinner, Working / Verify only.
+- Tool call → result is append-only; no re-render flash of prior lines.
+- No animated counters, easing, or progress-bar fills.
+
+## Streaming & logging
+
+- Live assistant tokens arrive as `assistant` events with `done: false` (deltas), sealed with `done: true`.
+- While streaming, the activity pane shows a **streaming** badge and tails the last ~18 lines so the caret stays visible (Grok-style follow).
+- When complete, the badge flips to **processed**.
+- Interactive TUI writes every `UiEvent` to `<traceDir>/session.jsonl` via `attachSessionLog` (stdout stays clean for Ink).
+- Headless / `clai chat` keep using `attachHeadless` / `attachLogPrinter` on stdout — unchanged parseable lines.
+
+## Scroll (follow mode)
+
+Pinned to the live edge by default (`scrollFromBottom === 0`). Scroll up to leave follow; wheel down / **↓ more below** resumes follow when near the bottom.
+
+## Adding a `UiEvent` type
+
+1. Extend the bus contract in `events.ts` + reducer in `state.ts` (separate change).
+2. Map the new kind onto an existing lifecycle state **or** document a new icon
+   in this README and `theme.ts`.
+3. Strong events → activity treatment; demoted facts → context strip only.
+4. Never teach the headless printer metallic chrome.

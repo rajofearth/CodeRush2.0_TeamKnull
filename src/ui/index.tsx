@@ -39,6 +39,9 @@ export {
   isTuiEnabled,
 } from "./headless.js";
 
+export type { SessionLogHandle } from "./session-log.js";
+export { attachSessionLog } from "./session-log.js";
+
 export type { LogPrinterOptions } from "./log.js";
 export {
   attachLogPrinter,
@@ -50,43 +53,72 @@ export {
 export {
   Activity,
   ApprovalPrompt,
+  ApprovalsPane,
+  BrandIntro,
+  BRAND_INTRO_INTERVAL_MS,
+  BRAND_INTRO_TOTAL_TICKS,
+  CodeWriteFragment,
+  ContextStrip,
+  Credit,
   FooterBar,
   HintLine,
+  LifecycleLine,
   PlanBlock,
+  PlanPane,
   ProgressBar,
   PromptBox,
   SIDEBAR_WIDTH,
+  ScrollCue,
   Sidebar,
   SplashFooter,
+  StatsPanel,
   ToolRowLine,
   VerifyResult,
   Wordmark,
   WorkingLine,
+  brandIntroLetterColor,
+  deriveLifecycle,
+  extractCodeFragment,
   formatCost,
   formatCostPrecise,
   formatDuration,
   formatTokens,
+  shouldPlayBrandIntro,
   toolSigil,
 } from "./components.js";
 
-export type { FooterHint, Segment } from "./components.js";
+export type { FooterHint, LifecyclePhase, Segment } from "./components.js";
 
 export {
+  CREDIT,
+  LIFECYCLE,
+  WORDMARK,
+  WORDMARK_LEFT,
+  WORDMARK_RIGHT,
+  WORDMARK_LARGE,
+  chalkLevelToColorLevel,
   colorLevel,
   detectColorLevel,
   detectGlyphs,
   expandWordmarkRow,
   glyph,
   glyphs,
+  lifecycleIcon,
+  paintText,
   resolve,
   setColorLevel,
   setGlyphs,
   tintHex,
-  WORDMARK_LEFT,
-  WORDMARK_RIGHT,
 } from "./theme.js";
 
-export type { ColorLevel, GlyphName, GlyphSet, ThemeToken, WordmarkCell } from "./theme.js";
+export type {
+  ColorLevel,
+  GlyphName,
+  GlyphSet,
+  LifecycleState,
+  ThemeToken,
+  WordmarkCell,
+} from "./theme.js";
 
 export {
   armMouse,

@@ -306,6 +306,10 @@ if (wantsHelp) {
     let interrupted = false;
     let intakeSeed = "";
     let lastTurnFailed = false;
+    let sessionLog: Awaited<ReturnType<typeof ui.attachSessionLog>> | null =
+      null;
+    let sessionTokensIn = 0;
+    let sessionTokensOut = 0;
 
     const model = await resolveModel();
 
@@ -336,6 +340,11 @@ if (wantsHelp) {
       running = true;
       interrupted = false;
       lastTurnFailed = false;
+      turn += 1;
+      const assistantId = `turn-${turn}`;
+      let sawDelta = false;
+      let turnTokensIn = 0;
+      let turnTokensOut = 0;
       bus.emit({ type: "user", text: prompt });
       bus.emit({ type: "context", title: prompt.slice(0, 80) });
       bus.emit({ type: "status", label: "thinking" });
@@ -360,31 +369,63 @@ if (wantsHelp) {
               done: status.done,
               sticky: status.sticky,
             }),
-          onText: (text) => {
-            turn += 1;
+          onTextDelta: (delta) => {
             bus.emit({
               type: "assistant",
-              id: `turn-${turn}`,
-              text,
-              done: true,
+              id: assistantId,
+              text: delta,
+              done: false,
             });
+            sawDelta = true;
           },
-          onUsage: (usage) =>
+          onText: (text) => {
+            if (sawDelta) {
+              bus.emit({
+                type: "assistant",
+                id: assistantId,
+                text: "",
+                done: true,
+              });
+            } else if (text.trim()) {
+              bus.emit({
+                type: "assistant",
+                id: assistantId,
+                text,
+                done: true,
+              });
+            }
+          },
+          onUsage: (usage) => {
+            const deltaIn = usage.promptTokens - turnTokensIn;
+            const deltaOut = usage.completionTokens - turnTokensOut;
+            turnTokensIn = usage.promptTokens;
+            turnTokensOut = usage.completionTokens;
+            sessionTokensIn += deltaIn;
+            sessionTokensOut += deltaOut;
             bus.emit({
               type: "metrics",
-              tokensIn: usage.promptTokens,
-              tokensOut: usage.completionTokens,
+              tokensIn: sessionTokensIn,
+              tokensOut: sessionTokensOut,
               costUsd: estimateUsdBench(
                 model.provider,
-                usage.promptTokens,
-                usage.completionTokens,
+                sessionTokensIn,
+                sessionTokensOut,
               ),
-            }),
+            });
+          },
         });
         history = result.messages;
+        if (sawDelta) {
+          bus.emit({
+            type: "assistant",
+            id: assistantId,
+            text: "",
+            done: true,
+          });
+        }
         bus.emit({
           type: "status",
-          label: interrupted ? "interrupted" : "ready",
+          label: interrupted ? "interrupted" : "processed",
           detail: `${result.finishReason} · ${result.steps} steps`,
           sticky: true,
           done: true,
@@ -407,6 +448,10 @@ if (wantsHelp) {
     }
 
     if (ui.isTuiEnabled()) {
+      sessionLog = await ui.attachSessionLog(
+        bus,
+        path.join(path.dirname(trace.path), "session.jsonl"),
+      );
       const shell = await ui.renderShell({
         bus,
         interactive: true,
@@ -447,7 +492,7 @@ if (wantsHelp) {
       bus.emit({
         type: "status",
         label: "ready",
-        detail: "type a message · pgup/pgdn scroll · ctrl+c quit",
+        detail: `type a message · pgup/pgdn scroll · log ${sessionLog.path}`,
         sticky: true,
         done: true,
       });
@@ -457,6 +502,7 @@ if (wantsHelp) {
       }
 
       await shell.waitUntilExit();
+      await sessionLog.close();
       shellJobs.dispose();
       await trace.close("ok");
       await sandbox.dispose();
