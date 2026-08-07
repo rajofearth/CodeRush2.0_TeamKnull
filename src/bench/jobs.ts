@@ -24,7 +24,11 @@ export type JobManager = {
   start: (req: {
     kind: JobKind;
     parallel?: number;
+    /** Compare only: workers per harness (overrides half-of-parallel default). */
+    sideParallel?: number;
     tasks?: string[];
+    /** Take the first N catalog tasks (after optional tasks filter). */
+    limit?: number;
     freshClai?: boolean;
   }) => { ok: true } | { ok: false; status: number; error: string };
   stop: () => { ok: true } | { ok: false; error: string };
@@ -79,23 +83,31 @@ export function createJobManager(opts: {
   const run = async (req: {
     kind: JobKind;
     parallel?: number;
+    sideParallel?: number;
     tasks?: string[];
+    limit?: number;
     freshClai?: boolean;
   }) => {
     await loadEnvFiles();
     const fixturesRoot = resolveBenchFixturesRoot();
-    const tasks = await loadBenchTasks(fixturesRoot, req.tasks);
+    let tasks = await loadBenchTasks(fixturesRoot, req.tasks);
+    if (req.limit != null && Number.isFinite(req.limit) && req.limit > 0) {
+      tasks = tasks.slice(0, Math.floor(req.limit));
+    }
     if (!tasks.length) {
       throw new Error("No bench tasks to run.");
     }
+    const taskIds = tasks.map((t) => t.id);
+    const signal = abort?.signal;
 
     if (req.kind === "compare") {
       await runComparePi({
         workspaceRoot: opts.workspaceRoot,
-        taskIds: req.tasks,
-        parallel: req.parallel ?? 8,
+        taskIds,
+        parallel: req.parallel ?? 4,
+        sideParallel: req.sideParallel,
         freshClai: req.freshClai ?? true,
-        signal: abort?.signal,
+        signal,
         onProgress: (p) => {
           if (p.live) opts.live.update(p.live);
           if (p.compare) publishCompare(p.compare);
@@ -111,6 +123,7 @@ export function createJobManager(opts: {
       tasks,
       parallel,
       offline,
+      signal,
       onUpdate: (snap) => opts.live.update(snap),
     });
     await opts.store.appendRun(record);
@@ -164,7 +177,10 @@ export function createJobManager(opts: {
         startedAt: new Date().toISOString(),
       });
       void run(req)
-        .then(() => finish())
+        .then(() => {
+          const stopped = abort?.signal.aborted;
+          finish(stopped ? "stopped by user" : undefined);
+        })
         .catch((err) => {
           void (async () => {
             // Failed before a finished scorecard — don't leave SSE on empty seed.
@@ -187,16 +203,26 @@ export function createJobManager(opts: {
                 }
               }
             }
-            finish(err instanceof Error ? err.message : String(err));
+            const msg = err instanceof Error ? err.message : String(err);
+            const stopped =
+              abort?.signal.aborted ||
+              (err instanceof Error && err.name === "AbortError") ||
+              /aborted/i.test(msg);
+            finish(stopped ? "stopped by user" : msg);
           })();
         });
       return { ok: true as const };
     },
     stop: () => {
-      if (current.status !== "running" || !abort) {
+      if (
+        !abort ||
+        (current.status !== "running" && current.status !== "stopping")
+      ) {
         return { ok: false as const, error: "no running job" };
       }
-      setStatus({ ...current, status: "stopping" });
+      if (current.status === "running") {
+        setStatus({ ...current, status: "stopping" });
+      }
       abort.abort();
       return { ok: true as const };
     },

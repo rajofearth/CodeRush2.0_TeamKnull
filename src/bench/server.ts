@@ -7,8 +7,9 @@
  *   GET /api/runs       run summaries from history.jsonl (oldest first)
  *   GET /api/runs/:id   full BenchRunRecord for one run
  *   GET /api/compare    CLAI vs pi harness scorecard (compare-pi.json)
+ *   GET /api/tasks      catalog ids + count
  *   GET /api/jobs/current
- *   POST /api/jobs      start clai | offline | compare
+ *   POST /api/jobs      start clai | offline | compare ({ limit?, parallel?, sideParallel?, … })
  *   POST /api/jobs/stop
  */
 
@@ -195,11 +196,24 @@ export async function startBenchServer(
         sendJson(res, 200, { ok: true, job: jobs.status() });
         return;
       }
+      if (url.pathname === "/api/tasks" && method === "GET") {
+        const { loadBenchTasks, resolveBenchFixturesRoot } = await import(
+          "./index.js"
+        );
+        const catalog = await loadBenchTasks(resolveBenchFixturesRoot());
+        sendJson(res, 200, {
+          count: catalog.length,
+          ids: catalog.map((t) => t.id),
+        });
+        return;
+      }
       if (url.pathname === "/api/jobs" && method === "POST") {
         const body = (await readJsonBody(req)) as {
           kind?: string;
           parallel?: number;
+          sideParallel?: number;
           tasks?: string[];
+          limit?: number;
           freshClai?: boolean;
         };
         const kind = body.kind;
@@ -209,10 +223,24 @@ export async function startBenchServer(
           });
           return;
         }
+        const limit =
+          body.limit != null && Number.isFinite(Number(body.limit))
+            ? Math.max(1, Math.floor(Number(body.limit)))
+            : undefined;
+        const sideParallel =
+          body.sideParallel != null && Number.isFinite(Number(body.sideParallel))
+            ? Math.max(1, Math.floor(Number(body.sideParallel)))
+            : undefined;
+        const parallel =
+          body.parallel != null && Number.isFinite(Number(body.parallel))
+            ? Math.max(1, Math.floor(Number(body.parallel)))
+            : undefined;
         const result = jobs.start({
           kind,
-          parallel: body.parallel,
+          parallel,
+          sideParallel,
           tasks: body.tasks,
+          limit,
           freshClai: body.freshClai,
         });
         broadcast({ type: "job", job: jobs.status() });

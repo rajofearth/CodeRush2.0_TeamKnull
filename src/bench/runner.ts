@@ -34,6 +34,8 @@ export type BenchRunnerOptions = {
   tasks: BenchTaskSpec[];
   parallel?: number;
   offline?: boolean;
+  /** Stop workers, cancel retries, and abort in-flight model calls. */
+  signal?: AbortSignal;
   /** Called with a fresh snapshot after every state change (for SSE / TUI). */
   onUpdate?: (snapshot: LiveSnapshot) => void;
 };
@@ -127,6 +129,7 @@ export async function runBench(
   let next = 0;
   const worker = async () => {
     while (next < opts.tasks.length) {
+      if (opts.signal?.aborted) break;
       const index = next++;
       const task = opts.tasks[index]!;
       const liveTask = live[index]!;
@@ -139,6 +142,7 @@ export async function runBench(
         offline,
         model,
         provider,
+        signal: opts.signal,
         onProgress: (partial) => {
           if (partial.tokensIn != null) {
             liveTask.tokensIn = Number(partial.tokensIn) || 0;
@@ -179,6 +183,29 @@ export async function runBench(
     Array.from({ length: Math.min(parallel, opts.tasks.length) }, worker),
   );
 
+  // Mark tasks never started (or still queued) after Stop / abort.
+  for (let i = 0; i < opts.tasks.length; i++) {
+    if (results[i]) continue;
+    const task = opts.tasks[i]!;
+    const liveTask = live[i]!;
+    const aborted: TaskResult = {
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      status: "error",
+      wallMs: 0,
+      steps: 0,
+      toolCalls: {},
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+      error: "aborted",
+    };
+    results[i] = aborted;
+    liveTask.status = "error";
+    liveTask.error = "aborted";
+  }
+
   done = true;
   rateLimit = null;
   publish();
@@ -203,6 +230,7 @@ type TaskRunContext = {
   offline: boolean;
   model?: ResolvedModel;
   provider: string;
+  signal?: AbortSignal;
   onProgress: (partial: Partial<LiveTask>) => void;
   onRateLimit?: (info: {
     label: string;
@@ -240,25 +268,42 @@ async function runOneTask(
       await agentSolve(task, workdir, ctx, base);
     }
 
-    const check = await runCheck(workdir);
-    base.checkExitCode = check.exitCode;
-    base.checkOutput = check.output.slice(-2000);
-    if (base.status !== "timeout" && base.status !== "error") {
-      base.status = check.exitCode === 0 ? "pass" : "fail";
-    } else if (check.exitCode === 0) {
-      // Agent timed out / crashed but had already fixed the code — count it.
-      base.status = "pass";
-    }
-    if (base.status === "pass") {
-      // Don't leave a recovered 429 note hanging on a green task.
-      base.error = undefined;
+    // Stop must be snappy — skip check.mjs after abort (can take up to 30s).
+    const aborted =
+      ctx.signal?.aborted ||
+      base.error === "aborted" ||
+      base.status === "error" && /aborted/i.test(base.error ?? "");
+    if (aborted) {
+      base.status = "error";
+      base.error = "aborted";
+    } else {
+      const check = await runCheck(workdir);
+      base.checkExitCode = check.exitCode;
+      base.checkOutput = check.output.slice(-2000);
+      if (base.status !== "timeout" && base.status !== "error") {
+        base.status = check.exitCode === 0 ? "pass" : "fail";
+      } else if (check.exitCode === 0) {
+        // Agent timed out / crashed but had already fixed the code — count it.
+        base.status = "pass";
+      }
+      if (base.status === "pass") {
+        // Don't leave a recovered 429 note hanging on a green task.
+        base.error = undefined;
+      }
     }
     base.tokensIn = Number(base.tokensIn) || 0;
     base.tokensOut = Number(base.tokensOut) || 0;
     base.cost = Number.isFinite(Number(base.cost)) ? Number(base.cost) : 0;
   } catch (err) {
+    const aborted =
+      ctx.signal?.aborted ||
+      (err instanceof Error && (err.name === "AbortError" || /aborted/i.test(err.message)));
     base.status = "error";
-    base.error = err instanceof Error ? err.message : String(err);
+    base.error = aborted
+      ? "aborted"
+      : err instanceof Error
+        ? err.message
+        : String(err);
   } finally {
     if (workdir) {
       await rm(workdir, { recursive: true, force: true, maxRetries: 3 }).catch(
@@ -357,6 +402,7 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
       model: ctx.model,
       system: BENCH_SYSTEM,
       trace,
+      signal: ctx.signal,
       onStatus: (status) => {
         const m = /waiting (\d+)s/.exec(status.label);
         ctx.onRateLimit?.({
@@ -382,16 +428,32 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
         });
       },
     });
+    const aborted = Symbol("abort");
     const raced = await Promise.race([
       loop,
       new Promise<typeof timedOut>((resolve) => {
         timer = setTimeout(() => resolve(timedOut), task.timeoutMs);
+      }),
+      new Promise<typeof aborted>((resolve) => {
+        if (ctx.signal?.aborted) {
+          resolve(aborted);
+          return;
+        }
+        ctx.signal?.addEventListener(
+          "abort",
+          () => resolve(aborted),
+          { once: true },
+        );
       }),
     ]);
     if (raced === timedOut) {
       out.status = "timeout";
       out.error = `agent exceeded ${task.timeoutMs}ms`;
       await trace.close("timeout");
+    } else if (raced === aborted) {
+      out.status = "error";
+      out.error = "aborted";
+      await trace.close("error", { message: "aborted" });
     } else {
       out.steps = raced.steps;
       out.status = "fail"; // provisional; check decides
@@ -399,8 +461,15 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
       await trace.close("ok", { finishReason: raced.finishReason });
     }
   } catch (err) {
+    const isAbort =
+      ctx.signal?.aborted ||
+      (err instanceof Error && (err.name === "AbortError" || /aborted/i.test(err.message)));
     out.status = "error";
-    out.error = err instanceof Error ? err.message : String(err);
+    out.error = isAbort
+      ? "aborted"
+      : err instanceof Error
+        ? err.message
+        : String(err);
     await trace.close("error", { message: out.error }).catch(() => {});
   } finally {
     if (timer) clearTimeout(timer);
