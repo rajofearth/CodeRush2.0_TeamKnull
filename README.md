@@ -228,6 +228,7 @@ with C++*, or a platform with prebuilds).
 
 | Doc | What's inside |
 |-----|---------------|
+| [`docs/ABOUT.md`](docs/ABOUT.md) | What CLAI is: identity, design philosophy, capabilities, agent loop, architecture at a glance |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System + sequence diagrams, module seams, run lifecycle, memory/context design, OpenCode comparison |
 | [`AGENTS.md`](AGENTS.md) | Agent guide: commit conventions, quick start, provider table, platform notes |
 | [`src/ui/README.md`](src/ui/README.md) | TUI visual language, theme tokens, lifecycle state machine |

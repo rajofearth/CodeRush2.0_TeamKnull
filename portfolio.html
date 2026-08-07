@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Preetam — Web Developer Portfolio</title>
+<meta name="description" content="Portfolio of Preetam — web developer crafting modern, responsive websites and web apps." />
+<style>
+  :root {
+    --bg: #0a0d16;
+    --bg-2: #0f1424;
+    --panel: rgba(255, 255, 255, 0.04);
+    --border: rgba(255, 255, 255, 0.1);
+    --text: #eef2ff;
+    --text-dim: #a5b0cf;
+    --text-faint: #66719a;
+    --accent: #6d5df6;
+    --accent-2: #22d3ee;
+    --pink: #f472b6;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --radius: 18px;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  ::selection { background: rgba(109, 93, 246, 0.5); color: #fff; }
+
+  /* ---------- animated backdrop ---------- */
+  .bg-fx { position: fixed; inset: 0; z-index: -2; overflow: hidden; }
+  .bg-fx::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, #000 35%, transparent 100%);
+  }
+  .blob { position: absolute; border-radius: 50%; filter: blur(120px); opacity: 0.45; will-change: transform; }
+  .blob-a { width: 560px; height: 560px; top: -200px; left: -120px; background: radial-gradient(circle, #6d5df6, transparent 65%); animation: drift 24s ease-in-out infinite alternate; }
+  .blob-b { width: 500px; height: 500px; top: 12%; right: -180px; background: radial-gradient(circle, #0e7490, transparent 65%); animation: drift 28s ease-in-out infinite alternate-reverse; }
+  .blob-c { width: 460px; height: 460px; bottom: -160px; left: 28%; background: radial-gradient(circle, #be185d, transparent 65%); animation: drift 32s ease-in-out infinite alternate; }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(60px, 40px) scale(1.12); }
+  }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(10, 13, 22, 0.75);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 68px; }
+  .logo { font-weight: 800; font-size: 1.15rem; letter-spacing: 0.02em; }
+  .logo span { color: var(--accent-2); }
+  .nav-links { display: flex; gap: 28px; list-style: none; }
+  .nav-links a {
+    color: var(--text-dim); text-decoration: none; font-size: 0.95rem;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--text); }
+
+  section { padding: 96px 0; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    margin-bottom: 14px;
+  }
+  h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
+  h2 { font-size: clamp(1.9rem, 4vw, 2.6rem); margin-bottom: 16px; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 130px 0 110px; }
+  .hero h1 {
+    font-size: clamp(2.6rem, 7vw, 4.6rem);
+    font-weight: 800;
+    margin: 10px 0 18px;
+  }
+  .grad {
+    background: linear-gradient(92deg, var(--accent) 0%, var(--accent-2) 55%, var(--pink) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p.lead {
+    max-width: 620px;
+    font-size: 1.15rem;
+    color: var(--text-dim);
+    margin-bottom: 34px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 0.8rem;
+    color: var(--green);
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: rgba(52, 211, 153, 0.08);
+    padding: 7px 14px; border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 14px; }
+  .btn {
+    display: inline-block;
+    padding: 13px 26px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: transform 0.18s, box-shadow 0.18s, background 0.18s;
+  }
+  .btn-primary {
+    color: #fff;
+    background: linear-gradient(92deg, var(--accent), var(--accent-2));
+    box-shadow: 0 8px 28px rgba(109, 93, 246, 0.35);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(34, 211, 238, 0.35); }
+  .btn-ghost {
+    color: var(--text);
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .btn-ghost:hover { transform: translateY(-2px); background: rgba(255,255,255,0.09); }
+
+  .hero-stats {
+    display: flex; flex-wrap: wrap; gap: 40px;
+    margin-top: 60px;
+    padding-top: 34px;
+    border-top: 1px solid var(--border);
+  }
+  .stat .num { font-size: 1.9rem; font-weight: 800; color: var(--text); }
+  .stat .num sup { color: var(--accent-2); }
+  .stat .lbl { font-size: 0.85rem; color: var(--text-faint); }
+
+  /* ---------- about ---------- */
+  .about-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 48px; align-items: start; }
+  .about-grid p { color: var(--text-dim); margin-bottom: 16px; }
+  .about-grid p strong { color: var(--text); }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+  }
+  .card h3 { font-size: 1.1rem; margin-bottom: 16px; }
+  .quick-list { list-style: none; display: grid; gap: 12px; }
+  .quick-list li { display: flex; gap: 12px; align-items: flex-start; font-size: 0.95rem; color: var(--text-dim); }
+  .quick-list .ico { color: var(--accent-2); font-family: var(--mono); }
+
+  /* ---------- skills ---------- */
+  .skills-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
+  .skill {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    transition: transform 0.18s, border-color 0.18s;
+  }
+  .skill:hover { transform: translateY(-4px); border-color: rgba(109, 93, 246, 0.5); }
+  .skill h3 { font-size: 1rem; margin-bottom: 10px; }
+  .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .skill .pct { float: right; font-family: var(--mono); font-size: 0.75rem; color: var(--text-faint); }
+
+  /* ---------- projects ---------- */
+  .projects-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 22px; }
+  .project {
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 26px;
+    transition: transform 0.18s, border-color 0.18s;
+  }
+  .project:hover { transform: translateY(-5px); border-color: rgba(34, 211, 238, 0.45); }
+  .project .tag-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tag {
+    font-family: var(--mono); font-size: 0.72rem;
+    padding: 4px 10px; border-radius: 999px;
+    color: var(--accent-2);
+    background: rgba(34, 211, 238, 0.1);
+    border: 1px solid rgba(34, 211, 238, 0.25);
+  }
+  .project h3 { font-size: 1.15rem; margin-bottom: 10px; }
+  .project p { font-size: 0.94rem; color: var(--text-dim); flex: 1; }
+  .project .link-row { margin-top: 18px; }
+  .project .link-row a { color: var(--accent-2); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+  .project .link-row a:hover { text-decoration: underline; }
+
+  /* ---------- contact ---------- */
+  .contact-card {
+    text-align: center;
+    background: linear-gradient(160deg, rgba(109,93,246,0.12), rgba(34,211,238,0.08));
+    border: 1px solid rgba(109, 93, 246, 0.35);
+    border-radius: 22px;
+    padding: 56px 32px;
+  }
+  .contact-card h2 { margin-bottom: 12px; }
+  .contact-card p { color: var(--text-dim); max-width: 480px; margin: 0 auto 30px; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 34px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 0.88rem;
+  }
+  footer .heart { color: var(--pink); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 760px) {
+    section { padding: 72px 0; }
+    .hero { padding: 90px 0 80px; }
+    .nav-links { gap: 16px; }
+    .about-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .nav-links { display: none; }
+    .hero-stats { gap: 24px; }
+  }
+
+  /* ---------- reveal on scroll ---------- */
+  .reveal { opacity: 0; transform: translateY(26px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.visible { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+
+<div class="bg-fx">
+  <div class="blob blob-a"></div>
+  <div class="blob blob-b"></div>
+  <div class="blob blob-c"></div>
+</div>
+
+<!-- NAV -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="logo" href="#top">Preetam<span>.</span></a>
+    <ul class="nav-links">
+      <li><a href="#about">About</a></li>
+      <li><a href="#skills">Skills</a></li>
+      <li><a href="#projects">Projects</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span> Open to work &amp; collaborations</span>
+    <h1>Hi, I'm <span class="grad">Preetam</span>.<br />I build things for the web.</h1>
+    <p class="lead">
+      A passionate web developer who turns ideas into fast, accessible, and
+      beautiful websites and web apps — from clean landing pages to full-stack products.
+    </p>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="#projects">View my work</a>
+      <a class="btn btn-ghost" href="#contact">Get in touch</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><div class="num">10<sup>+</sup></div><div class="lbl">Projects built</div></div>
+      <div class="stat"><div class="num">3<sup>+</sup></div><div class="lbl">Years learning</div></div>
+      <div class="stat"><div class="num">100<sup>%</sup></div><div class="lbl">Passion for code</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="wrap">
+    <div class="about-grid">
+      <div class="reveal">
+        <div class="eyebrow">About me</div>
+        <h2>A developer who loves clean code &amp; great design</h2>
+        <p>
+          Hello! I'm <strong>Preetam</strong>, a web developer focused on creating
+          modern, responsive, and user-friendly experiences. I enjoy the whole journey —
+          from sketching an idea, to writing clean HTML/CSS/JavaScript, to shipping it live.
+        </p>
+        <p>
+          When I'm not coding, you'll find me exploring new technologies, contributing to
+          open source, or learning the next best framework.
+        </p>
+      </div>
+      <div class="card reveal">
+        <h3>Quick facts</h3>
+        <ul class="quick-list">
+          <li><span class="ico">▸</span> Frontend &amp; full-stack web development</li>
+          <li><span class="ico">▸</span> Focus on responsive, accessible design</li>
+          <li><span class="ico">▸</span> Always learning &amp; shipping</li>
+          <li><span class="ico">▸</span> Based anywhere — remote friendly</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SKILLS -->
+<section id="skills">
+  <div class="wrap">
+    <div class="eyebrow reveal">Skills</div>
+    <h2 class="reveal">Technologies I work with</h2>
+    <div class="skills-grid">
+      <div class="skill reveal"><h3>HTML &amp; CSS <span class="pct">95%</span></h3><div class="bar"><div style="width:95%"></div></div></div>
+      <div class="skill reveal"><h3>JavaScript <span class="pct">85%</span></h3><div class="bar"><div style="width:85%"></div></div></div>
+      <div class="skill reveal"><h3>React <span class="pct">75%</span></h3><div class="bar"><div style="width:75%"></div></div></div>
+      <div class="skill reveal"><h3>Node.js <span class="pct">70%</span></h3><div class="bar"><div style="width:70%"></div></div></div>
+      <div class="skill reveal"><h3>UI / UX Design <span class="pct">80%</span></h3><div class="bar"><div style="width:80%"></div></div></div>
+      <div class="skill reveal"><h3>Git &amp; GitHub <span class="pct">90%</span></h3><div class="bar"><div style="width:90%"></div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- PROJECTS -->
+<section id="projects">
+  <div class="wrap">
+    <div class="eyebrow reveal">Portfolio</div>
+    <h2 class="reveal">Featured projects</h2>
+    <div class="projects-grid">
+      <article class="project reveal">
+        <div class="tag-row"><span class="tag">HTML</span><span class="tag">CSS</span><span class="tag">JS</span></div>
+        <h3>Project One — Landing Page</h3>
+        <p>A responsive, animated landing page built with pure HTML, CSS, and a bit of JavaScript. Mobile-first and fast.</p>
+        <div class="link-row"><a href="#top">View project →</a></div>
+      </article>
+      <article class="project reveal">
+        <div class="tag-row"><span class="tag">React</span><span class="tag">API</span></div>
+        <h3>Project Two — Weather App</h3>
+        <p>Real-time weather dashboard pulling live data from a public API, with a clean card UI and search support.</p>
+        <div class="link-row"><a href="#top">View project →</a></div>
+      </article>
+      <article class="project reveal">
+        <div class="tag-row"><span class="tag">Node</span><span class="tag">MongoDB</span></div>
+        <h3>Project Three — Task Manager</h3>
+        <p>A full-stack to-do app with authentication, CRUD operations, and a REST API — my take on productivity tools.</p>
+        <div class="link-row"><a href="#top">View project →</a></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact">
+  <div class="wrap">
+    <div class="contact-card reveal">
+      <div class="eyebrow">Contact</div>
+      <h2>Let's build something together</h2>
+      <p>
+        Have a project in mind, a question, or just want to say hi?
+        My inbox is always open — I'll get back to you as soon as I can.
+      </p>
+      <div class="btn-row" style="justify-content:center;">
+        <a class="btn btn-primary" href="mailto:preetam@example.com">Email me</a>
+        <a class="btn btn-ghost" href="https://github.com/preetam" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn-ghost" href="https://linkedin.com/in/preetam" target="_blank" rel="noopener">LinkedIn</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    © <span id="year"></span> Preetam — crafted with <span class="heart">♥</span> and lots of coffee.
+  </div>
+</footer>
+
+<script>
+  // Auto-update year
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  // Reveal on scroll
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+
+  document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+</script>
+
+</body>
+</html>

@@ -19,6 +19,7 @@ export const SUBCOMMANDS = [
   "intake",
   "memory",
   "bench",
+  "glass",
   "help",
 ] as const;
 

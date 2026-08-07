@@ -173,6 +173,7 @@ flowchart TD
 | `clai demo` | No | Offline edit+bash on `fixtures/tiny-edit` |
 | `clai demo lsp` | No | Offline intake + LSP diagnostics on `fixtures/lsp-ts` |
 | `clai demo injection` | No | Red-team memory/context assembly demo |
+| `clai glass [--run] [--follow-latest]` | No | Live glass-box view of context assembly (second terminal) |
 | `clai intake` | No | Print repository intake map JSON |
 | `clai memory list\|get\|set\|delete\|export` | No | Harness memory store CLI |
 | `clai bench run\|serve\|list` | Optional | 81-task benchmark suite + live dashboard |
@@ -231,7 +232,7 @@ sequenceDiagram
 | Stage | Status | Notes |
 |-------|--------|-------|
 | Intake summary seed | **Wired** | First turn runs `repo_intake`; product one-liner appended to system context |
-| `ContextManager.assemble()` | **Built, not wired in main loop** | Used by `demo injection`; full memory injection is the upgrade path |
+| `ContextManager.assemble()` | **Wired for glass observability** | Emits `context_stage` into the run trace each turn; prompt injection remains opt-in (`injectAssembledContext`) |
 | `compactHistory()` | **Wired** | Triggers at ~45k estimated tokens; keeps original task + last N messages |
 | `task` subagent | **Wired** | Parent delegates broad read-only exploration |
 | Provider retry | **Wired** | 429/5xx backoff with jitter; quota waits ~60s |
@@ -244,7 +245,7 @@ sequenceDiagram
 
 ```
 src/
-├── cli.tsx              # Entry: launch, run, demo, intake, memory, bench
+├── cli.tsx              # Entry: launch, run, demo, intake, memory, bench, glass
 ├── workspace.ts         # Workspace root resolution + argv parsing
 ├── adapter/
 │   ├── index.ts         # runAgentLoop(), resolveModel(), system policy
@@ -260,7 +261,9 @@ src/
 │   ├── lsp.ts           # TS Language Service + Python pyright
 │   └── intake.ts        # Repository map scanner
 ├── context/
-│   ├── index.ts         # ContextManager.assemble() + ablation gates
+│   ├── index.ts         # ContextManager.assemble() + ablation gates + stage emit
+│   ├── synthesize.ts    # stage 0: raw input → ContextRequest (prompt_synthesis)
+│   ├── stages.ts        # context_stage types + flag heuristics
 │   └── compact.ts       # Deterministic history compaction
 ├── memory/
 │   ├── index.ts         # SQLite / JSON tiered store
@@ -270,7 +273,13 @@ src/
 ├── verify/
 │   └── index.ts         # Completion contract (scaffold)
 ├── trace/
-│   └── index.ts         # Append-only JSONL per run
+│   ├── index.ts         # Append-only JSONL per run
+│   └── tail.ts          # Reusable read-only events.jsonl tailer
+├── glass/
+│   └── cli.ts           # `clai glass` entry
+├── ui-glass/
+│   ├── app.tsx          # Ink glass pane (reuses ui/theme.ts)
+│   └── model.ts         # Stage row reducer
 ├── ui/
 │   ├── events.ts        # UiBus + typed UiEvent union
 │   ├── state.ts         # reduceUiEvent → UiState
@@ -496,8 +505,34 @@ Append-only JSONL at `.clai/traces/<runId>/events.jsonl`.
 | `approval` | gate decisions |
 | `error` | failures, recovery flags |
 | `info` | compaction, provider_retry, subagent scope |
+| `context_stage` | ContextManager.assemble() stage start/complete (glass pane) |
 
 Every run gets an 8-char UUID prefix as `runId`. Bench tasks write separate traces per task under temp workspaces.
+
+### Glass pane (`clai glass`)
+
+Parallel observability surface — a **second terminal process** that tails the active (or pinned) run's `events.jsonl` and renders the Context Manager pipeline stage-by-stage. Read-only consumer of the existing append-only trace format; does not modify UiBus or the main Ink ADE.
+
+| Flag | Behaviour |
+|------|-----------|
+| `--follow-latest` (default when no `--run`) | Tail the most recently modified run under `.clai/traces/`; auto-switch when a new run starts |
+| `--run <runId>` | Pin to a run and replay from the start (safe demo without a live LLM call) |
+
+Stages (in order): `prompt_synthesis` → `query_planner` → `structural_retrieval` → `memory_retrieval` → `relevance_scoring` → `stale_check` → `injection_scan` → `token_budget` → `summarizer`.
+
+| Stage | Detail payload (complete) |
+|-------|---------------------------|
+| `prompt_synthesis` (stage 0) | `{ rawInput, synthesizedQuery: { taskId, agentRole, targetFragments, freeTextQuery, tokenBudget }, extractionNotes }` — minted `requestId` is the correlation origin for the rest of the pipeline |
+| `query_planner` | `{ tiers, targetFragments, agentRole }` |
+| `structural_retrieval` | `{ fragmentsFound, edgesExpanded }` |
+| `memory_retrieval` | `{ tiersQueried, itemsFound, excludedInvalidated }` |
+| `relevance_scoring` | `{ candidateCount, topScored }` |
+| `stale_check` | `{ checked, staleFound, reindexed, memoryInvalidated }` |
+| `injection_scan` | `{ scanned, untrustedFlagged }` |
+| `token_budget` | `{ budget, included, summarized, excluded, tokensUsed }` |
+| `summarizer` | `{ demoted }` |
+
+Stage 0 is emitted by `synthesizeContextRequest()` ahead of `ContextManager.assemble()`; stages 1–8 emit from assemble(). Reusable tailer: `src/trace/tail.ts`. Ink entry: `src/ui-glass/` (reuses `src/ui/theme.ts`). The glass pane renders `prompt_synthesis` as a two-line panel (raw › synthesized tags) above the remaining pipeline rows.
 
 ---
 
@@ -708,6 +743,7 @@ Bench history: `.clai/bench/history.jsonl`
 ## References
 
 - User-facing docs / quick start: [`README.md`](../README.md)
+- The agent itself: [`CLAI-AGENT.md`](CLAI-AGENT.md)
 - Repo agent guide: [`AGENTS.md`](../AGENTS.md)
 - Memory & context spec: [`.scratch/wayfinder-bodies/memory-context-architecture.md`](../.scratch/wayfinder-bodies/memory-context-architecture.md)
 - OpenCode peer verification note: [`.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md`](../.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md)
