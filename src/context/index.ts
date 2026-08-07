@@ -11,13 +11,27 @@ import {
 
 export {
   compactHistory,
+  compactParallelTaskResults,
   compactionConfigFromEnv,
   estimateMessagesTokens,
   estimateTokens,
   formatTokens,
   type CompactionConfig,
+  type CompactionMode,
   type CompactionResult,
 } from "./compact.js";
+
+export {
+  cleanUserPrompt,
+  promptCleanEnabled,
+  type PromptCleanResult,
+} from "./prompt-clean.js";
+
+export {
+  isContextOverflowError,
+  resolveContextWindow,
+  type ContextWindowInfo,
+} from "./windows.js";
 
 export {
   CONTEXT_STAGES,

@@ -269,15 +269,20 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
             tokensIn: sessionTokensIn,
             tokensOut: sessionTokensOut,
             costUsd: sessionCostUsd,
+            contextPct: usage.contextPct,
           });
         },
       });
       history = result.messages;
       sealAssistant();
+      const ctxDetail =
+        result.contextPct != null
+          ? ` · ctx ${result.contextPct}%`
+          : "";
       opts.bus.emit({
         type: "status",
         label: "processed",
-        detail: `${result.finishReason} · ${result.steps} steps`,
+        detail: `${result.finishReason} · ${result.steps} steps${ctxDetail}`,
         sticky: true,
         done: true,
       });
@@ -304,6 +309,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
         ),
         steps: result.steps,
         finishReason: result.finishReason,
+        contextPct: result.contextPct,
       }));
       return result;
     } catch (err) {
@@ -337,6 +343,9 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   console.log("");
   console.log(
     "  chat ready — type a message, /exit to quit, /clear to reset history",
+  );
+  console.log(
+    "  smart context: prompt clean · mid-turn compact · task-result fold · overflow retry",
   );
   console.log("");
 

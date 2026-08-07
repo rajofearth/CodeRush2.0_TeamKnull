@@ -97,6 +97,8 @@ When terminal width **&lt; 100** cols, collapse meta to:
 model · ~/cwd · PASS|FAIL     by team knull
 ```
 
+When known, strip/stats show **`ctx N%`** (model context-window fill). Sticky activity lines call out prompt clean, compaction, and task-result folding.
+
 Trace path only when there is room (`truncatePath`).
 
 ## Layout

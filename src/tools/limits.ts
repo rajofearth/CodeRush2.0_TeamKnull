@@ -235,6 +235,35 @@ function capGenericResult(result: ToolResult): CapOutcome {
 }
 
 /**
+ * Task summaries are the only child→parent payload. Prefer a structured
+ * head+tail digest over a hard cut so findings at both ends survive.
+ */
+function capTaskResult(result: ToolResult): CapOutcome {
+  const summary = typeof result.summary === "string" ? result.summary : "";
+  if (!summary) {
+    return { result, truncated: Boolean(result.truncated) };
+  }
+  if (byteLength(summary) <= MODEL_OUTPUT_CAPS.taskSummaryMaxBytes) {
+    return { result, truncated: Boolean(result.truncated) };
+  }
+  const clipped = headTailClip(
+    summary,
+    Math.floor(MODEL_OUTPUT_CAPS.taskSummaryMaxBytes * 0.75),
+    Math.floor(MODEL_OUTPUT_CAPS.taskSummaryMaxBytes * 0.2),
+    "full subagent summary in trace",
+  );
+  return {
+    truncated: true,
+    result: {
+      ...result,
+      summary: clipped.text,
+      truncated: true,
+      truncatedForContext: true,
+    },
+  };
+}
+
+/**
  * The single truncation layer applied where tool results enter the message
  * history. Full outputs are the caller's responsibility to trace.
  */
@@ -262,8 +291,7 @@ export function capToolResultForModel(
       outcome = capLspResult(result);
       break;
     case "task":
-      // Summary already bounded in agents/task; still run generic as a belt.
-      outcome = { result, truncated: Boolean(result.truncated) };
+      outcome = capTaskResult(result);
       break;
     default:
       outcome = { result, truncated: false };

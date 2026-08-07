@@ -57,6 +57,10 @@ Registry: `src/adapter/providers.ts`. Default **groq**. Add/remove providers the
 
 `CLAI_MODEL` overrides the model id (Groq default `openai/gpt-oss-20b`; Gemini default `gemini-3.5-flash-lite`). Example: `CLAI_PROVIDER=deepseek` with optional `CLAI_MODEL=deepseek-v4-flash`. Never commit `.env`.
 
+### Smart context
+
+Always on in chat / run / TUI: prompt clean, mid-turn history compact, parallel task-result fold, overflow compact+retry. Status lines show `prompt cleaned` / `compacted context` / `folded task results`; metrics show `ctx N%`. Tune with `CLAI_COMPACT_*`, `CLAI_CONTEXT_WINDOW`, `CLAI_PROMPT_CLEAN=0`.
+
 Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-imported so `--help` stays light.
 
 ## Seams

@@ -448,13 +448,18 @@ CLAI has **two complementary context mechanisms**:
 
 ### 1. History compaction (`context/compact.ts`) — wired in main loop
 
-When estimated message tokens exceed ~45k (`CLAI_COMPACT_THRESHOLD_TOKENS`), older turns collapse into a deterministic digest:
+Smart, deterministic compaction (no extra model call):
 
-- Keeps the original user task and the last N messages verbatim (`CLAI_COMPACT_KEEP_TURNS`, default 10)
-- Tool call/result pairs → one-line outcomes
-- Superseded reads of the same path dropped
-- Files touched by edit/write listed
-- No extra model call
+| Trigger | Behavior |
+|---------|----------|
+| Soft (~70% of model window, capped by `CLAI_COMPACT_THRESHOLD_TOKENS`) | Digest older turns between original task and last N messages |
+| Hard (~90% of window) / overflow error | Aggressive mode — keep fewer turns, tighter digests, one retry |
+| Parallel `task` results | Fold long summaries in-place; digest merges findings into one "Subagent findings" block |
+| Between tool rounds | Loop runs `maxSteps: 1` so compaction can run mid-turn |
+
+Digest contents: tool outcomes (one-line), superseded reads dropped, files touched, subagent findings, recent notes. Full payloads remain in the JSONL trace.
+
+**Prompt cleaning** (`context/prompt-clean.ts`): strips vague filler / hedges / emoji spam from the user turn while protecting fenced code and keeping every concrete ask (paths, constraints). Opt out with `CLAI_PROMPT_CLEAN=0`.
 
 ### 2. Memory assembly (`context/index.ts`) — built, demo-wired
 
@@ -710,8 +715,12 @@ Offline demos emit JSON summary on headless stdout: `{ ok, runId, sandboxMode, t
 | `CLAI_AUTO_APPROVE` | unset | Auto-approve sandbox gates (dev only) |
 | `CLAI_DATA_DIR` | `<root>/.clai` | Override harness data directory |
 | `CLAI_MEMORY_BACKEND` | sqlite with json fallback | Force `json` backend |
-| `CLAI_COMPACT_THRESHOLD_TOKENS` | 45000 | History compaction trigger |
+| `CLAI_COMPACT_THRESHOLD_TOKENS` | 45000 | Soft compaction ceiling (also min with window×soft ratio) |
 | `CLAI_COMPACT_KEEP_TURNS` | 10 | Verbatim trailing messages after compaction |
+| `CLAI_COMPACT_SOFT_RATIO` | 0.7 | Soft compact at this fraction of model window |
+| `CLAI_COMPACT_HARD_RATIO` | 0.9 | Aggressive compact / overflow pressure |
+| `CLAI_CONTEXT_WINDOW` | per-model | Override assumed context window (tokens) |
+| `CLAI_PROMPT_CLEAN` | on | Set `0` to disable user-prompt filler stripping |
 | `CLAI_TASK_MAX_STEPS` | 10 | Subagent step budget |
 | `CLAI_LSP_PY` | auto-detect | Python language-server binary |
 | `CLAI_INVOCATION_CWD` | — | Set by `bin/clai.js` for workspace resolution |

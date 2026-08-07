@@ -319,6 +319,8 @@ export type SessionStats = {
   tokensOut: number;
   costUsd?: number;
   toolCalls: number;
+  /** Context-window fill 0–100 when known. */
+  contextPct?: number;
   /** True while a turn is still in flight. */
   live?: boolean;
 };
@@ -353,6 +355,14 @@ export function StatsPanel({
         <Text bold color={primary}>
           {formatTokens(totalTokens)}
         </Text>
+        {stats.contextPct != null && stats.contextPct > 0 ? (
+          <>
+            <Text color={muted}> · ctx </Text>
+            <Text bold color={primary}>
+              {stats.contextPct}%
+            </Text>
+          </>
+        ) : null}
         <Text color={muted}> · cost </Text>
         <Text bold color={primary}>
           {formatCostPrecise(stats.costUsd)}
@@ -1537,6 +1547,9 @@ export function ContextStrip({
   } else if (metrics.tokensIn > 0 || metrics.tokensOut > 0) {
     // Compact pi-style once; never re-print full tok/$ when StatsPanel is up.
     parts.push(`↑${formatTokens(metrics.tokensIn)} ↓${formatTokens(metrics.tokensOut)}`);
+    if (metrics.contextPct != null && metrics.contextPct > 0) {
+      parts.push(`ctx ${metrics.contextPct}%`);
+    }
     if (!showStats && metrics.costUsd != null) {
       parts.push(formatCost(metrics.costUsd));
     }

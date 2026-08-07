@@ -107,13 +107,22 @@ function statusMark(level?: string, ok?: boolean): string {
   return paintText("clai.textFaint", "··", { dim: true });
 }
 
-function metricsLine(tokensIn: number, tokensOut: number, costUsd?: number): string {
+function metricsLine(
+  tokensIn: number,
+  tokensOut: number,
+  costUsd?: number,
+  contextPct?: number,
+): string {
   const parts = [
     paintText("clai.textFaint", "tokens", { dim: true }),
     paintText("clai.info", `${formatTokens(tokensIn)} in`),
     paintText("clai.textFaint", "·", { dim: true }),
     paintText("clai.info", `${formatTokens(tokensOut)} out`),
   ];
+  if (contextPct != null && contextPct > 0) {
+    parts.push(paintText("clai.textFaint", "·", { dim: true }));
+    parts.push(paintText("clai.accent", `ctx ${contextPct}%`));
+  }
   if (costUsd != null) {
     parts.push(paintText("clai.textFaint", "·", { dim: true }));
     parts.push(paintText("clai.accent", formatCostPrecise(costUsd)));
@@ -154,6 +163,12 @@ function printBanner(ctx: NonNullable<Extract<UiEvent, { type: "context" }>>): s
       `  ${paintText("clai.textFaint", "lsp", { dim: true })}  ${paintText("clai.textMuted", ctx.lsp.join(", "))}`,
     );
   }
+  lines.push(
+    `  ${paintText("clai.textFaint", "context", { dim: true })}  ${paintText(
+      "clai.textMuted",
+      "prompt clean · mid-turn compact · task fold · overflow retry",
+    )}`,
+  );
   lines.push(hr(), "");
   return lines;
 }
@@ -284,14 +299,22 @@ export function createLogPrinter(
         if (event.tokensIn != null) tokensIn = event.tokensIn;
         if (event.tokensOut != null) tokensOut = event.tokensOut;
         if (event.costUsd != null) costUsd = event.costUsd;
-        print(metricsLine(tokensIn, tokensOut, costUsd));
+        print(
+          metricsLine(tokensIn, tokensOut, costUsd, event.contextPct),
+        );
         return;
       }
 
       case "status": {
         if (event.sticky) {
+          const isContext =
+            /compact|prompt clean|folded task|overflow/i.test(event.label);
           const label = paintText(
-            event.level === "error" ? "clai.error" : "clai.textMuted",
+            event.level === "error"
+              ? "clai.error"
+              : isContext
+                ? "clai.accent"
+                : "clai.textMuted",
             event.label,
           );
           const detail = event.detail
@@ -367,10 +390,16 @@ export function formatTurnSummary(summary: {
   costUsd: number;
   steps?: number;
   finishReason?: string;
+  contextPct?: number;
 }): string {
   const parts = [
     paintText("clai.textFaint", `turn ${summary.turn} complete`, { dim: true }),
-    metricsLine(summary.tokensIn, summary.tokensOut, summary.costUsd),
+    metricsLine(
+      summary.tokensIn,
+      summary.tokensOut,
+      summary.costUsd,
+      summary.contextPct,
+    ),
   ];
   if (summary.steps != null) {
     parts.push(paintText("clai.textFaint", `· ${summary.steps} steps`, { dim: true }));

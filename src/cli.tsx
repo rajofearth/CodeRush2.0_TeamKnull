@@ -39,7 +39,7 @@ Options:
   intake                  Print repository intake map (JSON)
   --fixture <path>        Fixture workspace (default: fixtures/tiny-edit)
   run "<prompt>"          Soft agent loop via AI SDK (needs API key)
-  chat ["<prompt>"]       Verbose log-mode session — tools, I/O, tokens, cost
+  chat ["<prompt>"]       Verbose log-mode session — tools, I/O, tokens, cost, context %
   glass                   Live view of context assembly — memory retrieval, relevance scoring, staleness, and injection checks as they happen, in a parallel terminal.
   bench run               Parallel task subset (use --offline with no API key)
   bench serve             Live metrics dashboard over history (port 4310)
@@ -52,6 +52,12 @@ Workspace root:
   "clai --cwd demo" to open a folder that shares a subcommand name.
   The resolved root governs tool cwd, .clai/traces, .clai memory, and intake.
 
+Smart context (always on in chat / run / TUI):
+  Prompt clean            Strip vague filler from your ask; keep paths & constraints
+  Mid-turn compact        Digest older tool history when near the model window
+  Task-result fold        Parallel subagent summaries trimmed before they bloat context
+  Overflow retry          On context-length errors: aggressive compact once, then retry
+
 Env:
   GROQ_API_KEY                      Default provider (CLAI_PROVIDER=groq)
   OPENROUTER_API_KEY / CEREBRAS_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
@@ -63,6 +69,11 @@ Env:
   CLAI_AUTO_APPROVE=1               Auto-approve gated bash (dev only)
   CLAI_NO_TUI=1                     Headless activity (CI / pipes)
   CLAI_LSP_PY                       Optional Python language-server binary
+  CLAI_COMPACT_THRESHOLD_TOKENS     Soft compact ceiling (default 45000)
+  CLAI_COMPACT_SOFT_RATIO           Soft compact at fraction of window (default 0.7)
+  CLAI_COMPACT_HARD_RATIO           Aggressive compact pressure (default 0.9)
+  CLAI_CONTEXT_WINDOW               Override assumed context window (tokens)
+  CLAI_PROMPT_CLEAN=0               Disable user-prompt filler stripping
 
 Quick start:
   pnpm install
@@ -490,15 +501,18 @@ if (wantsHelp) {
                 sessionTokensIn,
                 sessionTokensOut,
               ),
+              contextPct: usage.contextPct,
             });
           },
         });
         history = result.messages;
         sealAssistant();
+        const ctxDetail =
+          result.contextPct != null ? ` · ctx ${result.contextPct}%` : "";
         bus.emit({
           type: "status",
           label: interrupted ? "interrupted" : "processed",
-          detail: `${result.finishReason} · ${result.steps} steps`,
+          detail: `${result.finishReason} · ${result.steps} steps${ctxDetail}`,
           sticky: true,
           done: true,
         });
@@ -564,7 +578,7 @@ if (wantsHelp) {
       bus.emit({
         type: "status",
         label: "ready",
-        detail: "type a message",
+        detail: "smart context on · type a message",
         sticky: true,
         done: true,
       });

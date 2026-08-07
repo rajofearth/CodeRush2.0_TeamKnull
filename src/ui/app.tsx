@@ -204,6 +204,7 @@ export function ClaiApp(props: ClaiAppProps) {
     tokensIn: 0,
     tokensOut: 0,
     costUsd: undefined as number | undefined,
+    contextPct: undefined as number | undefined,
     toolCalls: 0,
   });
   const taskStartedAt = useRef<number | null>(null);
@@ -312,6 +313,7 @@ export function ClaiApp(props: ClaiAppProps) {
         if (event.tokensIn != null) cur.tokensIn = event.tokensIn;
         if (event.tokensOut != null) cur.tokensOut = event.tokensOut;
         if (event.costUsd != null) cur.costUsd = event.costUsd;
+        if (event.contextPct != null) cur.contextPct = event.contextPct;
         bumpStats();
       }
 
@@ -666,6 +668,7 @@ export function ClaiApp(props: ClaiAppProps) {
   const tokensIn = Math.max(live.tokensIn, state.metrics.tokensIn);
   const tokensOut = Math.max(live.tokensOut, state.metrics.tokensOut);
   const liveCost = live.costUsd ?? state.metrics.costUsd;
+  const contextPct = live.contextPct ?? state.metrics.contextPct;
 
   const sessionStats = {
     elapsedMs,
@@ -673,6 +676,7 @@ export function ClaiApp(props: ClaiAppProps) {
     tokensOut,
     costUsd: liveCost,
     toolCalls,
+    contextPct,
     live: busy || pendingTools || assistantStreaming,
   };
   // Keep statsEpoch in the render dependency path.

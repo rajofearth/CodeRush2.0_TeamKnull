@@ -15,9 +15,17 @@ import type { TraceWriter } from "../trace/index.js";
 import { createTaskTool } from "../agents/index.js";
 import {
   compactHistory,
+  compactParallelTaskResults,
   compactionConfigFromEnv,
+  estimateMessagesTokens,
   formatTokens,
+  type CompactionConfig,
 } from "../context/compact.js";
+import { cleanUserPrompt } from "../context/prompt-clean.js";
+import {
+  isContextOverflowError,
+  resolveContextWindow,
+} from "../context/windows.js";
 import { withProviderRetry, ProviderError, type RetryStatusEvent } from "./retry.js";
 import {
   createProviderHandle,
@@ -113,6 +121,9 @@ export type AgentLoopOptions = {
   onUsage?: (usage: {
     promptTokens: number;
     completionTokens: number;
+    /** Estimated fill of the model context window (0–100). */
+    contextPct?: number;
+    contextWindow?: number;
   }) => void;
   /** Harness status updates (compaction, rate-limit retries). */
   onStatus?: (status: RetryStatusEvent) => void;
@@ -128,6 +139,9 @@ export type AgentLoopResult = {
   modelId?: string;
   /** Full message list after this turn (for the next prompt). */
   messages: CoreMessage[];
+  /** Last known context-window fill for the turn. */
+  contextPct?: number;
+  contextWindow?: number;
 };
 
 const DEFAULT_SYSTEM = `You are CLAI, a coding agent in an interactive ADE session. Use tools to explore and edit the workspace.
@@ -254,36 +268,93 @@ export async function runAgentLoop(
       : { ...aiTools, task: createTaskTool(opts.ctx, resolved) };
   const maxSteps = opts.maxSteps ?? 12;
 
+  // Strip vague filler from the user prompt before it enters history —
+  // keeps the concrete ask intact so the agent is not misled by hedges.
+  const promptClean = cleanUserPrompt(opts.prompt);
+  const userPrompt = promptClean.cleaned;
+  if (promptClean.changed) {
+    const detail = promptClean.removed.join(", ") || "filler stripped";
+    opts.onStatus?.({
+      label: "prompt cleaned",
+      detail,
+      sticky: true,
+    });
+    await opts.trace?.append("info", {
+      message: "prompt_cleaned",
+      removed: promptClean.removed,
+      beforeChars: opts.prompt.length,
+      afterChars: userPrompt.length,
+    });
+  }
+
   await opts.trace?.append("model_step", {
     provider: resolved.provider,
     modelId: resolved.modelId,
     maxSteps,
-    prompt: opts.prompt.slice(0, 500),
+    prompt: userPrompt.slice(0, 500),
   });
 
   let messages: CoreMessage[] = [
     ...(opts.history ?? []),
-    { role: "user", content: opts.prompt },
+    { role: "user", content: userPrompt },
   ];
 
-  // Context compaction: when assembled history approaches the budget, replace
-  // older turns with a deterministic structured digest (system prompt, the
-  // original task, and the last N messages are kept verbatim).
-  const compactCfg = compactionConfigFromEnv();
-  {
-    const compaction = compactHistory(messages, compactCfg);
+  const windowInfo = resolveContextWindow({
+    provider: resolved.provider,
+    modelId: resolved.modelId,
+  });
+
+  const applyCompaction = async (
+    active: CoreMessage[],
+    mode: "normal" | "aggressive",
+    reason: string,
+  ): Promise<CoreMessage[]> => {
+    // Fold parallel task summaries first — cheap win before history digest.
+    const folded = compactParallelTaskResults(active);
+    let next = folded.messages;
+    if (folded.compacted) {
+      opts.onStatus?.({
+        label: "folded task results",
+        detail: "parallel subagent summaries trimmed for context",
+        sticky: true,
+      });
+      await opts.trace?.append("info", {
+        message: "task_results_folded",
+        reason,
+      });
+    }
+    const threshold = windowInfo.softThresholdTokens;
+    const cfg: CompactionConfig = compactionConfigFromEnv({
+      thresholdTokens: mode === "aggressive" ? 0 : threshold,
+      mode,
+      keepRecentMessages: mode === "aggressive" ? 4 : undefined,
+    });
+    // Aggressive always attempts digest; normal only when over soft threshold.
+    if (mode === "normal" && estimateMessagesTokens(next) <= threshold) {
+      return next;
+    }
+    const compaction = compactHistory(next, {
+      ...cfg,
+      thresholdTokens: mode === "aggressive" ? 0 : cfg.thresholdTokens,
+    });
     if (compaction.compacted) {
-      messages = compaction.messages;
-      const label = `compacted context: ${formatTokens(compaction.beforeTokens)} → ${formatTokens(compaction.afterTokens)} tokens`;
+      next = compaction.messages;
+      const label = `compacted context (${reason}): ${formatTokens(compaction.beforeTokens)} → ${formatTokens(compaction.afterTokens)} tokens`;
       opts.onStatus?.({ label, sticky: true });
       await opts.trace?.append("info", {
         message: "context_compacted",
+        reason,
+        mode: compaction.mode,
         beforeTokens: compaction.beforeTokens,
         afterTokens: compaction.afterTokens,
         droppedMessages: compaction.droppedMessages,
+        windowTokens: windowInfo.windowTokens,
+        softThresholdTokens: windowInfo.softThresholdTokens,
+        hardThresholdTokens: windowInfo.hardThresholdTokens,
       });
     }
-  }
+    return next;
+  };
 
   const totals = { promptTokens: 0, completionTokens: 0 };
   let systemExtra = opts.system;
@@ -300,14 +371,14 @@ export async function runAgentLoop(
         opts.memoryStore,
         opts.ctx.workspaceRoot,
       ).assemble({
-        taskId: opts.prompt.slice(0, 80) || "turn",
+        taskId: userPrompt.slice(0, 80) || "turn",
         runId: opts.trace.runId,
         requestId: randomUUID().slice(0, 12),
         tokenBudget: opts.assembleTokenBudget ?? 8000,
         memoryEnabled: process.env.CLAI_MEMORY_ENABLED !== "0",
         structuralCitationsEnabled:
           process.env.CLAI_STRUCTURAL_CITATIONS !== "0",
-        taskInstruction: opts.prompt,
+        taskInstruction: userPrompt,
         agentRole: opts.agentRole ?? "main",
         emitStage: createTraceStageEmitter(opts.trace),
       });
@@ -346,6 +417,26 @@ export async function runAgentLoop(
     };
   };
 
+  let lastContextPct = 0;
+
+  const contextFill = (promptTokens: number): number => {
+    if (windowInfo.windowTokens <= 0) return 0;
+    return Math.min(
+      100,
+      Math.max(0, Math.round((promptTokens / windowInfo.windowTokens) * 100)),
+    );
+  };
+
+  const emitUsage = (promptTokens: number, completionTokens: number, fillFrom?: number) => {
+    lastContextPct = contextFill(fillFrom ?? promptTokens);
+    opts.onUsage?.({
+      promptTokens,
+      completionTokens,
+      contextPct: lastContextPct,
+      contextWindow: windowInfo.windowTokens,
+    });
+  };
+
   const onStepFinish = (
     step: {
       text?: string;
@@ -371,24 +462,35 @@ export async function runAgentLoop(
     const usage = readUsage(step.usage);
     totals.promptTokens += usage.promptTokens;
     totals.completionTokens += usage.completionTokens;
-    opts.onUsage?.({ ...totals });
+    // Window fill uses this step's prompt size (not the summed tally).
+    emitUsage(totals.promptTokens, totals.completionTokens, usage.promptTokens);
   };
 
-  async function once(activeMessages: CoreMessage[]) {
-    // maxRetries: 0 — we own 429/5xx backoff via withProviderRetry so the SDK
-    // does not double-retry underneath us.
+  type StepLoopResult = {
+    text: string;
+    finishReason: string;
+    steps: unknown[];
+    response: { messages: CoreMessage[] };
+    usage: unknown;
+    totalUsage: unknown;
+  };
+
+  /** One LLM round-trip (+ tool executes). Streaming preserved. */
+  async function streamOneStep(
+    activeMessages: CoreMessage[],
+  ): Promise<StepLoopResult> {
     return withProviderRetry(
       async () => {
         const result = streamText({
           model: resolved.model as Parameters<typeof streamText>[0]["model"],
           tools: tools as Parameters<typeof streamText>[0]["tools"],
-          maxSteps,
+          // Own the multi-step loop so we can compact between tool rounds
+          // when history nears the model window (streamText has no prepareStep).
+          maxSteps: 1,
           maxRetries: 0,
           system,
           messages: activeMessages,
           abortSignal: opts.signal,
-          // Stream tool-call args so the TUI can show "preparing write …"
-          // during long argument generation instead of looking hung.
           toolCallStreaming: true,
           experimental_repairToolCall: async ({
             toolCall,
@@ -414,11 +516,6 @@ export async function runAgentLoop(
           onStepFinish,
         });
 
-        // Drain fullStream so multi-step tool loops complete and so we can
-        // forward provider reasoning when present (AI SDK `reasoning` parts).
-        // Falls back to textStream behaviour for plain text-delta parts.
-        // Note: DeepSeek / OpenAI-compat hosts on this SDK version often omit
-        // reasoning stream parts — UI path stays wired; we only emit when present.
         let text = "";
         let streamingToolArgs = "";
         for await (const part of result.fullStream) {
@@ -426,7 +523,6 @@ export async function runAgentLoop(
             text += part.textDelta;
             if (part.textDelta) opts.onTextDelta?.(part.textDelta);
           } else if (part.type === "reasoning") {
-            // Only emit real provider reasoning — never synthesize thoughts.
             if (part.textDelta) opts.onThinkingDelta?.(part.textDelta);
           } else if (part.type === "tool-call-streaming-start") {
             streamingToolArgs = "";
@@ -440,8 +536,6 @@ export async function runAgentLoop(
             opts.onStatus?.({ label: verb });
           } else if (part.type === "tool-call-delta") {
             streamingToolArgs += part.argsTextDelta ?? "";
-            // Try to surface the path early for write/edit so the status line
-            // isn't stuck on a bare "preparing write" for tens of seconds.
             if (
               (part.toolName === "write" || part.toolName === "edit") &&
               streamingToolArgs.length < 800
@@ -474,8 +568,12 @@ export async function runAgentLoop(
         return {
           text,
           finishReason,
-          steps,
-          response,
+          steps: steps ?? [],
+          response: {
+            messages: (response?.messages ?? [
+              { role: "assistant" as const, content: text },
+            ]) as CoreMessage[],
+          },
           usage,
           totalUsage,
         };
@@ -490,9 +588,76 @@ export async function runAgentLoop(
     );
   }
 
-  let result;
+  /**
+   * Multi-step loop with mid-run compaction. Each iteration is one model call;
+   * when finishReason is tool-calls, tool results are already in response.messages
+   * and we compact before the next call if near the window.
+   */
+  async function runStepLoop(
+    initialMessages: CoreMessage[],
+  ): Promise<StepLoopResult & { messages: CoreMessage[] }> {
+    let active = initialMessages;
+    let last: StepLoopResult = {
+      text: "",
+      finishReason: "stop",
+      steps: [],
+      response: { messages: [] },
+      usage: undefined,
+      totalUsage: undefined,
+    };
+    const collectedSteps: unknown[] = [];
+    let overflowRetried = false;
+
+    for (let i = 0; i < maxSteps; i++) {
+      const est = estimateMessagesTokens(active);
+      if (est >= windowInfo.hardThresholdTokens) {
+        active = await applyCompaction(active, "aggressive", "near_hard_limit");
+      } else if (est >= windowInfo.softThresholdTokens || i > 0) {
+        // After tool rounds, always fold parallel task results; history
+        // digest only fires when over soft threshold (applyCompaction).
+        active = await applyCompaction(active, "normal", i === 0 ? "turn_start" : "post_step");
+      }
+
+      try {
+        last = await streamOneStep(active);
+      } catch (err) {
+        if (isContextOverflowError(err) && !overflowRetried) {
+          overflowRetried = true;
+          opts.onStatus?.({
+            label: "context overflow — compacting and retrying",
+            level: "warn",
+            sticky: true,
+          });
+          await opts.trace?.append("info", {
+            message: "context_overflow_retry",
+            error: err instanceof Error ? err.message : String(err),
+          });
+          active = await applyCompaction(active, "aggressive", "overflow_retry");
+          last = await streamOneStep(active);
+        } else {
+          throw err;
+        }
+      }
+
+      collectedSteps.push(...last.steps);
+      active = [...active, ...last.response.messages];
+
+      if (last.finishReason !== "tool-calls") break;
+    }
+
+    return {
+      ...last,
+      steps: collectedSteps,
+      messages: active,
+      response: {
+        messages: active.slice(initialMessages.length),
+      },
+    };
+  }
+
+  let result: Awaited<ReturnType<typeof runStepLoop>>;
   try {
-    result = await once(messages);
+    result = await runStepLoop(messages);
   } catch (err) {
     // Groq may reject invalid tool calls server-side; nudge and retry once.
     if (!isToolValidationError(err)) throw err;
@@ -505,7 +670,7 @@ export async function runAgentLoop(
       role: "user",
       content: `Your previous tool call was invalid (${detail.slice(0, 300)}). Retry with exact schema fields only — e.g. read({path}), glob({pattern:"**/*"}), edit({path,oldString,newString}), bash({command}).`,
     };
-    result = await once([...messages, nudge]);
+    result = await runStepLoop([...messages, nudge]);
   }
 
   // Gemini sometimes returns finishReason "error" without throwing — treat as
@@ -524,31 +689,30 @@ export async function runAgentLoop(
     throw new ProviderError(detail.slice(0, 400));
   }
 
-  const nextMessages: CoreMessage[] = [
-    ...messages,
-    ...(result.response?.messages ?? [
-      { role: "assistant" as const, content: result.text },
-    ]),
-  ];
+  const nextMessages = result.messages;
 
-  const finalUsage = readUsage(
-    (result as { totalUsage?: unknown; usage?: unknown }).totalUsage ??
-      (result as { usage?: unknown }).usage,
-  );
+  const finalUsage = readUsage(result.totalUsage ?? result.usage);
   if (finalUsage.promptTokens > totals.promptTokens) {
     totals.promptTokens = finalUsage.promptTokens;
   }
   if (finalUsage.completionTokens > totals.completionTokens) {
     totals.completionTokens = finalUsage.completionTokens;
   }
-  opts.onUsage?.({ ...totals });
+  // Prefer live message estimate when provider usage is missing/stale.
+  const fillFrom =
+    finalUsage.promptTokens > 0
+      ? finalUsage.promptTokens
+      : estimateMessagesTokens(nextMessages);
+  emitUsage(totals.promptTokens, totals.completionTokens, fillFrom);
 
   return {
     text: result.text,
     finishReason: result.finishReason,
-    steps: result.steps?.length ?? 1,
+    steps: result.steps.length || 1,
     provider: resolved.provider,
     modelId: resolved.modelId,
     messages: nextMessages,
+    contextPct: lastContextPct,
+    contextWindow: windowInfo.windowTokens,
   };
 }

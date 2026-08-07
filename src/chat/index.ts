@@ -45,6 +45,13 @@ export async function runChatCli(
       "·",
       paintText("clai.textMuted", summary.tracePath),
     );
+    console.log(
+      paintText(
+        "clai.textFaint",
+        "  smart context was on — prompt clean · compact · task fold · overflow retry",
+        { dim: true },
+      ),
+    );
     console.log("");
 
     return summary.ok ? 0 : 1;
