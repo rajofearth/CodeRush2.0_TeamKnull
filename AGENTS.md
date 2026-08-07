@@ -49,8 +49,10 @@ Registry: `src/adapter/providers.ts`. Default **cerebras**. Add/remove providers
 | `OPENAI_API_KEY` | `openai` |
 | `ANTHROPIC_API_KEY` | `anthropic` |
 | `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`) | `gemini` |
+| `AI_GATEWAY_API_KEY` (or `VERCEL_AI_GATEWAY_API_KEY`) | `gateway` (default model `google/gemma-4-31b-it`) |
+| `DEEPSEEK_API_KEY` | `deepseek` (default model `deepseek-v4-flash` = DeepSeek-V4-Flash-0731) |
 
-`CLAI_MODEL` overrides the model id (Groq default `openai/gpt-oss-20b`; Gemini default `gemini-3.5-flash-lite`). Example: `CLAI_PROVIDER=gemini` with optional `CLAI_MODEL=gemini-3.5-flash-lite`. Never commit `.env`.
+`CLAI_MODEL` overrides the model id (Groq default `openai/gpt-oss-20b`; Gemini default `gemini-3.5-flash-lite`). Example: `CLAI_PROVIDER=deepseek` with optional `CLAI_MODEL=deepseek-v4-flash`. Never commit `.env`.
 
 Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-imported so `--help` stays light.
 

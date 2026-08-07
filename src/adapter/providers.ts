@@ -13,7 +13,8 @@ export type ProviderId =
   | "openai"
   | "anthropic"
   | "gemini"
-  | "gateway";
+  | "gateway"
+  | "deepseek";
 
 /** Opaque AI SDK language model. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,6 +206,21 @@ const PROVIDERS: Record<ProviderId, ProviderDef> = {
       openaiCompatible(apiKey, modelId, {
         baseURL: "https://ai-gateway.vercel.sh/v1",
         name: "vercel-ai-gateway",
+      }),
+  },
+  /**
+   * DeepSeek — OpenAI-compatible Chat Completions.
+   * https://api-docs.deepseek.com/
+   * `deepseek-v4-flash` resolves to DeepSeek-V4-Flash-0731.
+   */
+  deepseek: {
+    id: "deepseek",
+    envKey: "DEEPSEEK_API_KEY",
+    defaultModel: "deepseek-v4-flash",
+    create: (apiKey, modelId) =>
+      openaiCompatible(apiKey, modelId, {
+        baseURL: "https://api.deepseek.com",
+        name: "deepseek",
       }),
   },
 };
