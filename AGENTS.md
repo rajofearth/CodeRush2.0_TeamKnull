@@ -35,12 +35,13 @@ pnpm clai demo          # offline edit+bash on fixtures/tiny-edit (no API key)
 pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts
 pnpm clai intake        # print repository intake map JSON
 pnpm clai bench run --offline --serve  # 81-task suite + live dashboard
+pnpm bench:compare-pi                   # CLAI vs pi scorecard (needs DEEPSEEK_API_KEY + pi)
 pnpm clai run "…"       # soft agent loop (needs a provider key)
 ```
 
 ## Providers (Vercel AI SDK)
 
-Registry: `src/adapter/providers.ts`. Default **cerebras**. Add/remove providers there without touching the loop.
+Registry: `src/adapter/providers.ts`. Default **groq**. Add/remove providers there without touching the loop.
 
 | Env | `CLAI_PROVIDER` |
 |-----|-----------------|
@@ -61,14 +62,15 @@ Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-impor
 
 | Path | Role |
 |------|------|
-| `src/adapter/` | Vercel AI SDK loop; pluggable providers (Cerebras default); multi-tool-call parallelism |
-| `src/tools/` | grep/glob/read/edit/write/bash, `parallel`, `bash_bg`/`bash_jobs`/`bash_output`/`bash_kill`, LSP, intake |
-| `src/agents/` | `task` subagents (`explore` read-only, `general` +bash); parallel via multiple tool calls |
-| `src/shell/` | Session-scoped background shell job manager |
+| `src/adapter/` | Vercel AI SDK loop; pluggable providers (Groq default); multi-tool-call parallelism |
+| `src/tools/` | grep/glob/read/edit/write/bash, `parallel` (≤6 grep/glob/read), `bash_bg`/`bash_jobs`/`bash_output`/`bash_kill`, LSP, intake |
+| `src/agents/` | `task` subagents (`explore` read-only, `general` +bash); parallel via multiple `task` calls in one step |
+| `src/shell/` | Session-scoped background shell job manager (`ShellJobManager`) |
 | `src/sandbox/` | `@anthropic-ai/sandbox-runtime` wrap + stub fallback; env scrub; approval hooks |
 | `src/memory/` | SQLite/JSON memory + CLI |
 | `src/context/` | Budgeted assemble + ablation gates |
 | `src/trace/` | Append-only JSONL under `.clai/traces/<runId>/events.jsonl` |
+| `src/bench/` | 81-task suite; SSE dashboard (task limit 10/+10/max); CLAI vs pi compare (partial scorecards, total wall, `sideParallel`) |
 | `src/ui/` | Ink ADE shell — header, activity column, context strip, footer; `UiBus` event API + headless printer (`CLAI_NO_TUI=1` / non-TTY) |
 
 ## Platform notes

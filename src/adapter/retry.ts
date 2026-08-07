@@ -25,7 +25,27 @@ export type RetryOptions = {
   onTrace?: (payload: Record<string, unknown>) => Promise<void> | void;
   /** Injectable sleep for tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** Cancel backoff waits (and skip further retries) when aborted. */
+  signal?: AbortSignal;
 };
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((r) => setTimeout(r, ms));
+  if (signal.aborted) {
+    return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 const DEFAULT_MAX_RETRIES = 4;
 /** Short base for transient 5xx; quota/429 uses QUOTA_BASE_DELAY_MS instead. */
@@ -106,14 +126,26 @@ export async function withProviderRetry<T>(
   opts: RetryOptions = {},
 ): Promise<T> {
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sleep =
+    opts.sleep ?? ((ms: number) => sleepAbortable(ms, opts.signal));
 
   let attempt = 0;
   // attempts: 1 initial + maxRetries retries
   for (;;) {
+    if (opts.signal?.aborted) {
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    }
     try {
       return await fn();
     } catch (err) {
+      if (
+        opts.signal?.aborted ||
+        (err instanceof Error && err.name === "AbortError")
+      ) {
+        throw err instanceof Error
+          ? err
+          : Object.assign(new Error("aborted"), { name: "AbortError" });
+      }
       const classified = classifyProviderError(err);
       if (classified.kind === "fatal") {
         // Preserve structured SDK / programming errors (tool-schema validation,

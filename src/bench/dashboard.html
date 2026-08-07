@@ -26,29 +26,45 @@
   html, body {
     margin: 0; padding: 0;
     background: var(--bg); color: var(--text);
-    font: 13px/1.45 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    font: 14px/1.5 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
     min-height: 100%;
   }
-  body { padding: 20px 24px 48px; max-width: 1200px; margin: 0 auto; }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 4px; letter-spacing: 0.02em; }
+  body { padding: 20px 24px 56px; max-width: 1120px; margin: 0 auto; }
+  @media (prefers-reduced-motion: no-preference) {
+    body > * {
+      animation: rise-in 0.35s ease both;
+    }
+    body > *:nth-child(1) { animation-delay: 0s; }
+    body > *:nth-child(2) { animation-delay: 0.03s; }
+    body > *:nth-child(3) { animation-delay: 0.06s; }
+    body > *:nth-child(4) { animation-delay: 0.09s; }
+    body > *:nth-child(5) { animation-delay: 0.12s; }
+    body > *:nth-child(6) { animation-delay: 0.15s; }
+    body > *:nth-child(7) { animation-delay: 0.18s; }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: 0.02em; }
   h1 span.brand { color: var(--accent); }
   h2 {
-    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--text); margin: 0 0 12px;
   }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
   .sub a { color: var(--accent); text-decoration: none; }
   .sub a:hover { color: var(--accent-hover); }
   .panel {
     background: var(--panel);
     border-left: 3px solid var(--border);
-    padding: 14px 16px;
-    margin-bottom: 16px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
   }
   .panel.live { border-left-color: var(--accent); }
   .meta {
     display: flex; flex-wrap: wrap; gap: 12px 20px;
-    color: var(--muted); font-size: 12px; margin-bottom: 12px;
+    color: var(--muted); font-size: 13px; margin-bottom: 12px;
   }
   .meta strong { color: var(--text); font-weight: 600; }
   .progress {
@@ -64,31 +80,9 @@
   .progress .p-run { background: var(--accent); }
   .progress .p-queue { background: var(--faint); }
   .progress .p-err { background: var(--warning); }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 10px;
-  }
-  .card {
-    background: var(--element);
-    padding: 10px 12px;
-    border-left: 3px solid var(--border-subtle);
-    min-height: 72px;
-  }
-  .card.queued { border-left-color: var(--faint); }
-  .card.running { border-left-color: var(--accent); }
-  .card.pass { border-left-color: var(--success); }
-  .card.fail { border-left-color: var(--error); }
-  .card.timeout, .card.error { border-left-color: var(--warning); }
-  .card .id { color: var(--text); font-weight: 600; font-size: 12px; }
-  .card .title { color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .card .row {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-top: 8px; font-size: 11px; color: var(--muted);
-  }
   .status {
     font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-    font-size: 10px;
+    font-size: 11px;
   }
   .status.queued { color: var(--faint); }
   .status.running { color: var(--accent); }
@@ -107,23 +101,91 @@
   .chart-box {
     background: var(--panel);
     border-left: 3px solid var(--border-subtle);
-    padding: 12px 14px;
+    padding: 14px 16px;
+    transition: border-color 0.2s ease;
   }
+  .chart-box:hover { border-left-color: var(--accent); }
   .chart-box h3 {
-    margin: 0 0 10px; font-size: 11px; font-weight: 700;
+    margin: 0 0 10px; font-size: 12px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
   }
-  svg.chart { width: 100%; height: auto; display: block; }
+  svg.chart { width: 100%; height: auto; display: block; max-height: 180px; }
+  .charts-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 720px) {
+    .charts-summary { grid-template-columns: 1fr; }
+  }
+  .metrics-panel { margin-bottom: 16px; padding: 0; border-left: none; background: transparent; }
+  .metrics-panel .metric-empty {
+    color: var(--muted); padding: 12px 0; font-size: 13px;
+  }
+  .metrics-panel table { table-layout: fixed; }
+  .metrics-panel th:first-child,
+  .metrics-panel td:first-child {
+    width: 26%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .task-focus {
+    display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  }
+  .task-focus-more {
+    color: var(--muted); font-size: 12px; padding: 4px 2px 0;
+  }
+  .task-focus-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1.2fr) 90px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    background: var(--element);
+    border-left: 3px solid var(--border-subtle);
+    font-size: 13px;
+  }
+  .task-focus-row.running { border-left-color: var(--accent); }
+  .task-focus-row.fail,
+  .task-focus-row.error,
+  .task-focus-row.timeout { border-left-color: var(--error); }
+  .task-focus-row .id { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-focus-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  details.fold {
+    margin-top: 12px;
+    border: 1px solid var(--border-subtle);
+    background: var(--element);
+  }
+  details.fold > summary {
+    cursor: pointer;
+    padding: 10px 12px;
+    color: var(--muted);
+    font-size: 13px;
+    list-style: none;
+    user-select: none;
+  }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary::before {
+    content: "▸ ";
+    color: var(--faint);
+  }
+  details.fold[open] > summary::before { content: "▾ "; }
+  details.fold .fold-body { padding: 0 8px 8px; }
+  details.fold table { font-size: 12px; }
+  .hidden { display: none !important; }
   table {
-    width: 100%; border-collapse: collapse; font-size: 12px;
+    width: 100%; border-collapse: collapse; font-size: 13px;
   }
   th {
     text-align: left; color: var(--muted); font-weight: 600;
-    padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 8px 10px; border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
   }
   td {
-    padding: 8px; border-bottom: 1px solid var(--border-subtle);
+    padding: 9px 10px; border-bottom: 1px solid var(--border-subtle);
     color: var(--text); vertical-align: middle;
   }
   tr.hist:hover td { background: var(--hover); cursor: pointer; }
@@ -139,14 +201,14 @@
   .detail.open { display: block; }
   .detail pre {
     margin: 8px 0 0; white-space: pre-wrap; word-break: break-word;
-    color: var(--muted); font-size: 11px; max-height: 280px; overflow: auto;
+    color: var(--muted); font-size: 12px; max-height: 280px; overflow: auto;
   }
   .pill {
-    display: inline-block; padding: 1px 6px;
-    background: var(--element); color: var(--muted); font-size: 10px;
+    display: inline-block; padding: 2px 7px;
+    background: var(--element); color: var(--muted); font-size: 11px;
     margin-left: 6px;
   }
-  .conn { float: right; font-size: 11px; color: var(--muted); }
+  .conn { float: right; font-size: 12px; color: var(--muted); }
   .conn.on { color: var(--success); }
   .conn.off { color: var(--error); }
   .banner {
@@ -187,85 +249,99 @@
     font-size: 12px;
   }
   .winner-callout.tie { border-left-color: var(--muted); }
-  .compare-bars { margin-top: 12px; }
-  .compare-bar-row {
-    display: grid;
-    grid-template-columns: 120px 1fr 1fr;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 6px;
-    font-size: 11px;
-  }
-  .compare-bar-row .task-id { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .compare-bar-track {
-    height: 10px; background: var(--element); position: relative;
-  }
-  .compare-bar-fill {
-    height: 100%; transition: width 0.25s ease;
-  }
-  .compare-bar-fill.clai { background: var(--accent); }
-  .compare-bar-fill.pi { background: var(--info); }
-  .compare-bar-label {
-    position: absolute; right: 4px; top: -14px;
-    font-size: 9px; color: var(--faint);
-  }
-  .compare-note { color: var(--faint); font-size: 11px; margin-top: 10px; }
+  .compare-note { color: var(--faint); font-size: 12px; margin-top: 10px; }
   .compare-note code { color: var(--muted); }
   .status-cell.pass { color: var(--success); }
   .status-cell.fail { color: var(--error); }
   .status-cell.error { color: var(--warning); }
   .controls {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    margin: 0 0 16px; padding: 12px 14px;
+    display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+    margin: 0 0 14px; padding: 10px 12px;
     background: var(--panel); border-left: 3px solid var(--accent);
+    position: sticky; top: 0; z-index: 20;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   }
   .controls button {
     font: inherit; cursor: pointer;
     background: var(--element); color: var(--text);
-    border: 1px solid var(--border-subtle); padding: 6px 12px;
+    border: 1px solid var(--border-subtle); padding: 6px 10px;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   }
-  .controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .controls button:hover:not(:disabled) {
+    border-color: var(--accent); color: var(--accent); background: var(--hover);
+  }
   .controls button.primary { border-color: var(--accent); color: var(--accent); }
   .controls button.danger { border-color: var(--error); color: var(--error); }
   .controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .controls button.active {
+    border-color: var(--accent); color: var(--accent); background: var(--hover);
+  }
   .controls .job-meta { color: var(--muted); font-size: 12px; margin-left: auto; }
   .controls .job-meta strong { color: var(--text); }
-  .controls .job-err { color: var(--error); font-size: 11px; width: 100%; margin-top: 4px; }
+  .controls .job-err { color: var(--error); font-size: 12px; width: 100%; margin-top: 2px; }
+  .ctrl-group {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    padding-left: 10px;
+    border-left: 1px solid var(--border-subtle);
+  }
+  .ctrl-group .tc-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .ctrl-group .tc-value {
+    color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums;
+    min-width: 3.2em; font-size: 12px;
+  }
+  .ctrl-group input[type="number"] {
+    width: 3.2em; font: inherit; font-size: 12px;
+    background: var(--element); color: var(--text);
+    border: 1px solid var(--border-subtle); padding: 4px 6px;
+  }
+  .banner .banner-actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .banner .banner-actions button {
+    font: inherit; cursor: pointer; font-size: 12px;
+    background: var(--element); color: var(--warning);
+    border: 1px solid var(--warning); padding: 4px 10px;
+  }
+  .banner .banner-actions button:hover { background: var(--hover); }
   .chart-box.hidden { display: none; }
   .scoreboard {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
     margin: 12px 0;
   }
   .score-card {
     background: var(--element);
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-left: 3px solid var(--border-subtle);
+    transition: border-color 0.25s ease, transform 0.2s ease;
   }
-  .score-card.winner { border-left-color: var(--success); }
+  .score-card.winner {
+    border-left-color: var(--success);
+    transform: translateY(-1px);
+  }
   .score-card .name {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--muted); margin-bottom: 6px;
   }
   .score-card .big {
-    font-size: 28px; font-weight: 700; color: var(--text); line-height: 1.1;
+    font-size: 32px; font-weight: 700; color: var(--text); line-height: 1.1;
+    font-variant-numeric: tabular-nums;
   }
   .score-card .avg {
-    margin-top: 8px; font-size: 11px; color: var(--muted);
+    margin-top: 10px; font-size: 13px; color: var(--muted);
   }
-  .score-card .avg div { margin-top: 2px; }
+  .score-card .avg div { margin-top: 3px; }
   .score-card .avg strong { color: var(--text); font-weight: 600; }
   .score-formula {
-    font-size: 11px; color: var(--faint); margin: 0 0 10px;
+    font-size: 12px; color: var(--faint); margin: 0 0 10px;
   }
-  .charts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-  .chart-box svg.chart { min-height: 160px; }
+  .chart-box svg.chart { min-height: 140px; }
+  .pill { font-size: 11px; padding: 2px 7px; }
+  .winner-callout { font-size: 13px; }
+  .compare-score .label { font-size: 11px; }
+  .compare-score .value { font-size: 20px; }
 </style>
 </head>
 <body>
@@ -274,20 +350,52 @@
   <p class="sub">control center · live · harness compare · history &nbsp;·&nbsp; <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a></p>
 
   <div class="controls" id="controls">
-    <button type="button" class="primary" id="btn-clai" data-kind="clai">Run CLAI</button>
-    <button type="button" id="btn-offline" data-kind="offline">Run offline</button>
-    <button type="button" class="primary" id="btn-compare" data-kind="compare">Compare CLAI vs pi</button>
+    <button type="button" class="primary" id="btn-clai" data-kind="clai">CLAI</button>
+    <button type="button" id="btn-offline" data-kind="offline">offline</button>
+    <button type="button" class="primary" id="btn-compare" data-kind="compare">compare</button>
     <button type="button" class="danger" id="btn-stop" disabled>Stop</button>
+    <div class="ctrl-group" id="task-count" title="How many catalog tasks to run">
+      <span class="tc-label">tasks</span>
+      <input type="number" id="task-limit-input" min="1" max="999" value="10" />
+      <button type="button" id="btn-tasks-10">10</button>
+      <button type="button" id="btn-tasks-plus">+10</button>
+      <button type="button" id="btn-tasks-max">max</button>
+      <span class="tc-value" id="task-count-label">10/—</span>
+    </div>
+    <div class="ctrl-group" id="parallel-count" title="Workers (compare = each harness)">
+      <span class="tc-label">parallel</span>
+      <input type="number" id="parallel-input" min="1" max="16" value="1" />
+      <button type="button" data-parallel="1">1</button>
+      <button type="button" data-parallel="2">2</button>
+      <button type="button" data-parallel="4">4</button>
+      <span class="tc-value" id="parallel-label">1 each</span>
+    </div>
     <span class="job-meta" id="job-meta">idle</span>
     <div class="job-err" id="job-err"></div>
   </div>
 
   <section class="panel live" id="live-panel">
-    <h2>Live run</h2>
+    <h2 id="live-heading">Live run</h2>
     <div class="banner" id="rate-banner" role="status"></div>
     <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
     <div class="progress" id="live-progress" aria-hidden="true"></div>
-    <div class="grid" id="task-grid"></div>
+    <div class="task-focus" id="task-focus"></div>
+    <details class="fold" id="live-fold">
+      <summary id="live-fold-summary">All tasks</summary>
+      <div class="fold-body">
+        <table>
+          <thead>
+            <tr>
+              <th>task</th>
+              <th>status</th>
+              <th>time</th>
+              <th>detail</th>
+            </tr>
+          </thead>
+          <tbody id="task-grid"></tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
   <section class="panel compare" id="compare-panel" style="display:none">
@@ -297,50 +405,53 @@
     <div class="compare-scores" id="compare-scores"></div>
     <div id="scoreboard" class="scoreboard"></div>
     <p class="score-formula" id="score-formula"></p>
-    <table>
-      <thead>
-        <tr>
-          <th>task</th>
-          <th>clai</th>
-          <th>pi</th>
-          <th>notes</th>
-        </tr>
-      </thead>
-      <tbody id="compare-body"></tbody>
-    </table>
-    <div class="compare-bars" id="compare-bars"></div>
+    <details class="fold" id="compare-fold">
+      <summary id="compare-fold-summary">Task results</summary>
+      <div class="fold-body">
+        <table>
+          <thead>
+            <tr>
+              <th>task</th>
+              <th>clai</th>
+              <th>pi</th>
+              <th>notes</th>
+            </tr>
+          </thead>
+          <tbody id="compare-body"></tbody>
+        </table>
+      </div>
+    </details>
     <p class="compare-note">source: <code>.clai/bench/compare-pi.json</code> · start from the control bar or <code>pnpm bench:compare-pi</code></p>
   </section>
 
   <section>
     <h2>Charts</h2>
-    <div class="charts">
+    <div class="charts-summary">
       <div class="chart-box">
         <h3 id="chart-pass-title">Pass rate</h3>
         <svg class="chart" id="chart-pass" viewBox="0 0 320 150" role="img"></svg>
-      </div>
-      <div class="chart-box">
-        <h3 id="chart-dur-title">Duration by task (ms)</h3>
-        <svg class="chart" id="chart-dur" viewBox="0 0 320 200" role="img"></svg>
-      </div>
-      <div class="chart-box" id="chart-tok-box">
-        <h3 id="chart-tok-title">Tokens by task</h3>
-        <svg class="chart" id="chart-tok" viewBox="0 0 320 200" role="img"></svg>
-      </div>
-      <div class="chart-box" id="chart-cost-box">
-        <h3 id="chart-cost-title">Cost by task (USD)</h3>
-        <svg class="chart" id="chart-cost" viewBox="0 0 320 200" role="img"></svg>
       </div>
       <div class="chart-box" id="chart-avg-box">
         <h3>Averages (per task)</h3>
         <svg class="chart" id="chart-avg" viewBox="0 0 320 150" role="img"></svg>
       </div>
     </div>
+    <div class="metrics-panel">
+      <details class="fold" id="metrics-fold">
+        <summary id="chart-dur-title">Per-task metrics</summary>
+        <div class="fold-body" id="chart-dur"></div>
+      </details>
+      <!-- Compat stubs — filled/hidden by render paths -->
+      <div id="chart-tok-box" class="hidden"><div id="chart-tok"></div></div>
+      <div id="chart-cost-box" class="hidden"><div id="chart-cost"></div></div>
+      <span id="chart-tok-title" class="hidden"></span>
+      <span id="chart-cost-title" class="hidden"></span>
+    </div>
   </section>
 
   <section class="panel">
     <h2>History</h2>
-    <div id="spark-wrap" style="margin-bottom:10px;color:var(--muted);font-size:11px;"></div>
+    <div id="spark-wrap" style="margin-bottom:10px;color:var(--muted);font-size:13px;"></div>
     <table>
       <thead>
         <tr>
@@ -369,25 +480,28 @@
   let tickTimer = null;
   let job = { status: "idle" };
   let historyDetailTasks = null;
-  /** True only after an explicit history-row click; prefer that run in Charts. */
+  /** True only after an explicit history-row click; prefer that run in Charts + Live. */
   let historyChartsPinned = false;
+  /** Live panel is showing a history run (ignore SSE overwrites until a new job). */
+  let viewingHistory = false;
+  let taskLimit = 10;
+  let catalogCount = 0;
+  /** Workers for CLAI/offline; for compare = workers per harness. Default 1 (DeepSeek-safe). */
+  let parallelWorkers = 1;
+  let lastQuotaHit = false;
+  let rateCountdownTimer = null;
   const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
-
-  /** Axis max: optional minMax floor + pad for tiny series (cost); else Math.max(1, dataMax). */
-  function metricScaleMax(values, opts) {
-    const dataMax = Math.max(0, ...values);
-    if (opts && opts.minMax != null) {
-      const pad = opts.pad != null ? opts.pad : 1.05;
-      const max = dataMax < opts.minMax ? opts.minMax : dataMax * pad;
-      return max > 0 ? max : opts.minMax;
-    }
-    return Math.max(1, dataMax);
-  }
 
   function fmtMs(ms) {
     if (ms == null || Number.isNaN(ms)) return "—";
     if (ms < 1000) return ms + "ms";
-    return (ms / 1000).toFixed(1) + "s";
+    if (ms < 60_000) return (ms / 1000).toFixed(1) + "s";
+    return fmtMinutes(ms);
+  }
+  /** Aggregate wall totals — always minutes (e.g. 0.3 min, 12.4 min). */
+  function fmtMinutes(ms) {
+    if (ms == null || Number.isNaN(ms)) return "—";
+    return (Number(ms) / 60_000).toFixed(1) + " min";
   }
   function fmtCost(c) {
     return "$" + (Number(c) || 0).toFixed(4);
@@ -415,10 +529,14 @@
   function renderLive() {
     const meta = $("live-meta");
     const grid = $("task-grid");
+    const focus = $("task-focus");
+    const foldSum = $("live-fold-summary");
     const prog = $("live-progress");
     if (!snapshot) {
       meta.innerHTML = '<span class="empty">waiting for a run…</span>';
       grid.innerHTML = "";
+      if (focus) focus.innerHTML = "";
+      if (foldSum) foldSum.textContent = "All tasks";
       prog.innerHTML = "";
       const ban0 = $("rate-banner");
       if (ban0) { ban0.className = "banner"; ban0.innerHTML = ""; }
@@ -426,29 +544,78 @@
     }
     const banner = $("rate-banner");
     if (banner) {
+      clearInterval(rateCountdownTimer);
+      rateCountdownTimer = null;
       const rl = snapshot.rateLimit;
-      const quotaTask = (snapshot.tasks || []).find(
-        (t) => t.error && /quota|rate.?limit|429/i.test(t.error)
+      const quotaTasks = (snapshot.tasks || []).filter(
+        (t) => t.error && /quota|rate.?limit|429/i.test(t.error),
       );
+      const stallTasks = (snapshot.tasks || []).filter(
+        (t) => t.error && /stall|hung|rate-limited/i.test(t.error),
+      );
+      const actions =
+        '<div class="banner-actions">' +
+        '<button type="button" id="btn-quota-p1">Set parallel 1</button>' +
+        (job.status === "running" || job.status === "stopping"
+          ? '<button type="button" id="btn-quota-stop">Stop run</button>'
+          : "") +
+        "</div>";
+      const bindBannerActions = () => {
+        const p1 = $("btn-quota-p1");
+        if (p1) {
+          p1.addEventListener("click", () => {
+            setParallelWorkers(1);
+            $("job-err").textContent = "parallel set to 1 — re-run when ready";
+          });
+        }
+        const st = $("btn-quota-stop");
+        if (st) st.addEventListener("click", () => stopJob());
+      };
       if (rl && rl.label) {
+        lastQuotaHit = true;
         banner.className = "banner show";
+        let countdown = rl.retryInSec;
         banner.innerHTML =
           "<strong>" + esc(rl.label) + "</strong>" +
           (rl.detail ? '<div class="detail">' + esc(rl.detail) + "</div>" : "") +
-          (rl.taskId ? '<div class="detail">task: ' + esc(rl.taskId) + "</div>" : "");
-      } else if (quotaTask && !snapshot.done) {
+          (rl.taskId ? '<div class="detail">task: ' + esc(rl.taskId) + "</div>" : "") +
+          (countdown != null
+            ? '<div class="detail" id="rate-countdown">retry in ~' + countdown + "s · Stop cancels the wait</div>"
+            : '<div class="detail">Stop cancels the wait</div>') +
+          actions;
+        bindBannerActions();
+        if (countdown != null && countdown > 0) {
+          rateCountdownTimer = setInterval(() => {
+            countdown -= 1;
+            const el = $("rate-countdown");
+            if (!el || countdown < 0) {
+              clearInterval(rateCountdownTimer);
+              rateCountdownTimer = null;
+              return;
+            }
+            el.textContent = "retry in ~" + countdown + "s · Stop cancels the wait";
+          }, 1000);
+        }
+      } else if (quotaTasks.length && !snapshot.done) {
+        lastQuotaHit = true;
         banner.className = "banner show";
         banner.innerHTML =
           "<strong>Provider quota / rate limit</strong>" +
-          '<div class="detail">' + esc((quotaTask.error || "").slice(0, 280)) + "</div>" +
-          '<div class="detail">CLAI waits ~60s between retries so we do not thrash the limit.</div>';
-      } else if (quotaTask && snapshot.done) {
+          '<div class="detail">' + esc((quotaTasks[0].error || "").slice(0, 280)) + "</div>" +
+          '<div class="detail">Waiting ~60s between retries. Lower parallel or Stop to avoid thrashing.</div>' +
+          actions;
+        bindBannerActions();
+      } else if ((quotaTasks.length || stallTasks.length) && snapshot.done) {
+        lastQuotaHit = true;
         banner.className = "banner show";
         banner.innerHTML =
-          "<strong>Run hit provider quota (429)</strong>" +
+          "<strong>Run hit provider pressure (429 / stall)</strong>" +
           '<div class="detail">' +
-          esc(String((snapshot.tasks || []).filter((t) => t.status === "error").length)) +
-          " task(s) errored on rate limit — not harness logic bugs. Re-run with --parallel 1 after quota resets, or use --offline / another provider.</div>";
+          quotaTasks.length + " rate-limit error(s)" +
+          (stallTasks.length ? " · " + stallTasks.length + " stall(s)" : "") +
+          " — usually DeepSeek contention, not harness bugs. Use parallel 1, wait for quota, or --offline.</div>" +
+          actions;
+        bindBannerActions();
       } else {
         banner.className = "banner";
         banner.innerHTML = "";
@@ -491,24 +658,67 @@
       seg("pass", "p-pass") + seg("fail", "p-fail") + seg("error", "p-err") +
       seg("timeout", "p-err") + seg("running", "p-run") + seg("queued", "p-queue");
 
+    // Focus strip: running + a few problems only (full list stays folded).
+    const running = tasks.filter((t) => t.status === "running");
+    const bad = tasks.filter((t) =>
+      t.status === "fail" || t.status === "error" || t.status === "timeout",
+    );
+    const FOCUS_BAD_CAP = 6;
+    const shownBad = bad.slice(0, FOCUS_BAD_CAP);
+    const hot = running.concat(shownBad);
+    if (focus) {
+      if (!hot.length) {
+        focus.innerHTML =
+          '<div class="task-focus-empty">' +
+          (done
+            ? "No failures — expand All tasks for the full list."
+            : (counts.queued
+              ? counts.queued + " queued · expand All tasks for the roster"
+              : "Waiting for activity…")) +
+          "</div>";
+      } else {
+        const rows = hot.map((t) => {
+          const spin = t.status === "running" ? '<span class="spin"></span>' : "";
+          const wall = t.wallMs != null ? fmtMs(t.wallMs) : "—";
+          const detail = t.error
+            ? esc(t.error.length > 80 ? t.error.slice(0, 79) + "…" : t.error)
+            : (t.steps != null ? t.steps + " steps" : "");
+          return (
+            '<div class="task-focus-row ' + esc(t.status) + '">' +
+              '<span class="id" title="' + esc(t.title || t.id) + '">' + esc(t.id) + "</span>" +
+              '<span class="status ' + esc(t.status) + '">' + spin + esc(t.status) + "</span>" +
+              '<span class="num">' + wall + (detail ? " · " + detail : "") + "</span>" +
+            "</div>"
+          );
+        });
+        if (bad.length > FOCUS_BAD_CAP) {
+          rows.push(
+            '<div class="task-focus-more">+' +
+            (bad.length - FOCUS_BAD_CAP) +
+            " more failures in All tasks</div>",
+          );
+        }
+        focus.innerHTML = rows.join("");
+      }
+    }
+    if (foldSum) {
+      foldSum.textContent =
+        "All tasks (" + tasks.length + ") — " + counts.pass + " pass · " +
+        ((counts.fail || 0) + (counts.error || 0) + (counts.timeout || 0)) + " fail · " +
+        (counts.running || 0) + " running · " + (counts.queued || 0) + " queued";
+    }
     grid.innerHTML = tasks.map((t) => {
-      const spin = t.status === "running" ? '<span class="spin"></span>' : "";
       const wall = t.wallMs != null ? fmtMs(t.wallMs) : "—";
-      const steps = t.steps != null ? t.steps + " steps" : "";
-      const err = t.error
-        ? '<div class="title" style="margin-top:6px;color:var(--muted);font-size:10px">' +
-          esc(t.error.length > 140 ? t.error.slice(0, 139) + "…" : t.error) + "</div>"
-        : "";
+      const detail = t.error
+        ? esc(t.error.length > 120 ? t.error.slice(0, 119) + "…" : t.error)
+        : (t.steps != null ? t.steps + " steps" : "—");
       return (
-        '<div class="card ' + esc(t.status) + '">' +
-          '<div class="id">' + esc(t.id) + '</div>' +
-          '<div class="title">' + esc(t.title) + ' · ' + esc(t.category) + '</div>' +
-          '<div class="row">' +
-            '<span class="status ' + esc(t.status) + '">' + spin + esc(t.status) + '</span>' +
-            '<span>' + wall + (steps ? " · " + steps : "") + '</span>' +
-          '</div>' +
-          err +
-        '</div>'
+        "<tr>" +
+          "<td title=\"" + esc(t.title || "") + "\">" + esc(t.id) + "</td>" +
+          "<td><span class=\"status " + esc(t.status) + "\">" + esc(t.status) + "</span></td>" +
+          "<td class=\"num\">" + wall + "</td>" +
+          "<td style=\"color:var(--muted)\">" + detail + "</td>" +
+        "</tr>"
       );
     }).join("");
 
@@ -521,8 +731,7 @@
       !(historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length) &&
       !compareLive
     ) {
-      renderCharts(tasks);
-      refreshChartTitles("live");
+      renderCharts(tasks, "live");
     }
     if (!done) {
       clearInterval(tickTimer);
@@ -535,30 +744,22 @@
     }
   }
 
-  function refreshChartTitles(mode, runId) {
+  function refreshChartTitles(mode, runId, taskCount) {
     const passT = $("chart-pass-title");
     const durT = $("chart-dur-title");
-    const tokT = $("chart-tok-title");
-    const costT = $("chart-cost-title");
     const avgBox = $("chart-avg-box");
+    const n = taskCount != null ? " (" + taskCount + ")" : "";
     if (mode === "compare") {
       passT.textContent = "Pass rate — both harness pies";
-      durT.textContent = "Wall time CLAI vs pi (shared scale)";
-      tokT.textContent = "Tokens by task (shared scale · CLAI + pi)";
-      if (costT) costT.textContent = "Cost by task USD (shared scale · CLAI + pi)";
+      if (durT) durT.textContent = "Per-task metrics — CLAI vs pi" + n;
       if (avgBox) avgBox.classList.remove("hidden");
     } else if (mode === "history" && runId) {
-      const tag = " — " + runId;
-      passT.textContent = "Pass rate" + tag;
-      durT.textContent = "Duration by task (ms)" + tag;
-      tokT.textContent = "Tokens by task" + tag;
-      if (costT) costT.textContent = "Cost by task (USD)" + tag;
+      passT.textContent = "Pass rate — " + runId;
+      if (durT) durT.textContent = "Per-task metrics — " + runId + n;
       if (avgBox) avgBox.classList.add("hidden");
     } else {
       passT.textContent = "Pass rate";
-      durT.textContent = "Duration by task (ms)";
-      tokT.textContent = "Tokens by task";
-      if (costT) costT.textContent = "Cost by task (USD)";
+      if (durT) durT.textContent = "Per-task metrics" + n;
       if (avgBox) avgBox.classList.add("hidden");
     }
   }
@@ -567,7 +768,8 @@
     const list = rows || [];
     const n = Math.max(list.length, 1);
     const pass = list.filter((r) => r.status === "pass").length;
-    const avgWall = list.reduce((a, r) => a + (r.wallMs || 0), 0) / n;
+    const totalWallMs = list.reduce((a, r) => a + (r.wallMs || 0), 0);
+    const avgWall = totalWallMs / n;
     const toks = list.map((r) => (r.tokensIn || 0) + (r.tokensOut || 0));
     const costs = list.map((r) => Number(r.cost) || 0);
     const hasTok = toks.some((v) => v > 0);
@@ -576,6 +778,7 @@
       n: list.length,
       pass,
       passRate: list.length ? pass / list.length : 0,
+      totalWallMs,
       avgWallMs: avgWall,
       avgTokens: hasTok ? toks.reduce((a, b) => a + b, 0) / n : null,
       avgCost: hasCost ? costs.reduce((a, b) => a + b, 0) / n : null,
@@ -628,38 +831,57 @@
       draw(240, piM.passRate, "#56b6c2", "pi", piM.pass + "/" + piM.n);
   }
 
-  function dualMetricBars(ids, getClai, getPi, w, h, fmt, colors, opts) {
-    const padL = 96, padR = 56, padT = 18, padB = 8;
-    const max = metricScaleMax(
-      ids.flatMap((id) => [getClai(id) || 0, getPi(id) || 0]),
-      opts,
-    );
-    const rowH = (h - padT - padB) / Math.max(ids.length, 1);
-    const barH = Math.min(7, rowH / 2 - 2);
-    let out =
-      '<text x="' + padL + '" y="12" fill="' + colors.clai + '" font-size="9">CLAI</text>' +
-      '<text x="' + (padL + 40) + '" y="12" fill="' + colors.pi + '" font-size="9">pi</text>' +
-      '<text x="' + (w - 4) + '" y="12" text-anchor="end" fill="#606060" font-size="9">max ' +
-      esc(fmt(max)) + "</text>";
-    ids.forEach((id, i) => {
-      const y = padT + i * rowH;
-      const cv = getClai(id) || 0;
-      const pv = getPi(id) || 0;
-      const cBw = ((w - padL - padR) * cv) / max;
-      const pBw = ((w - padL - padR) * pv) / max;
-      out +=
-        '<text x="0" y="' + (y + barH + 5) + '" fill="#808080" font-size="9">' +
-        esc(id.length > 15 ? id.slice(0, 14) + "…" : id) + "</text>" +
-        '<rect x="' + padL + '" y="' + y + '" width="' + Math.max(cBw, cv ? 1 : 0) +
-        '" height="' + barH + '" fill="' + colors.clai + '" />' +
-        '<text x="' + (padL + cBw + 3) + '" y="' + (y + barH - 1) +
-        '" fill="#808080" font-size="8">' + (cv ? esc(fmt(cv)) : "—") + "</text>" +
-        '<rect x="' + padL + '" y="' + (y + barH + 2) + '" width="' + Math.max(pBw, pv ? 1 : 0) +
-        '" height="' + barH + '" fill="' + colors.pi + '" />' +
-        '<text x="' + (padL + pBw + 3) + '" y="' + (y + 2 * barH + 1) +
-        '" fill="#808080" font-size="8">' + (pv ? esc(fmt(pv)) : "—") + "</text>";
+  /** One full-width dual metrics table — page scrolls; no nested scroll boxes. */
+  function dualMetricsUnified(ids, claiMap, piMap) {
+    if (!ids.length) return '<div class="metric-empty">no data</div>';
+    let rows = "";
+    ids.forEach((id) => {
+      const c = claiMap[id];
+      const p = piMap[id];
+      const cTok = c ? (c.tokensIn || 0) + (c.tokensOut || 0) : 0;
+      const pTok = p ? (p.tokensIn || 0) + (p.tokensOut || 0) : 0;
+      const cCost = c ? Number(c.cost) || 0 : 0;
+      const pCost = p ? Number(p.cost) || 0 : 0;
+      rows +=
+        "<tr>" +
+        "<td title=\"" + esc(id) + "\">" + esc(id) + "</td>" +
+        "<td class=\"num\">" + (c ? esc(c.status) + " " + fmtMs(c.wallMs) : "—") + "</td>" +
+        "<td class=\"num\">" + (p ? esc(p.status) + " " + fmtMs(p.wallMs) : "—") + "</td>" +
+        "<td class=\"num\">" + (cTok || pTok
+          ? cTok.toLocaleString() + " / " + pTok.toLocaleString()
+          : "—") + "</td>" +
+        "<td class=\"num\">" + (cCost || pCost
+          ? fmtCost(cCost) + " / " + fmtCost(pCost)
+          : "—") + "</td>" +
+        "</tr>";
     });
-    return out;
+    return (
+      "<table><thead><tr>" +
+      "<th>task</th><th>CLAI</th><th>pi</th><th>tokens (c/p)</th><th>cost (c/p)</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table>"
+    );
+  }
+
+  /** One full-width single-harness metrics table. */
+  function singleMetricsUnified(tasks) {
+    if (!tasks.length) return '<div class="metric-empty">no data</div>';
+    let rows = "";
+    tasks.forEach((t) => {
+      const tok = (t.tokensIn || 0) + (t.tokensOut || 0);
+      rows +=
+        "<tr>" +
+        "<td title=\"" + esc(t.id) + "\">" + esc(t.id) + "</td>" +
+        "<td><span class=\"status " + esc(t.status) + "\">" + esc(t.status) + "</span></td>" +
+        "<td class=\"num\">" + fmtMs(t.wallMs || 0) + "</td>" +
+        "<td class=\"num\">" + (tok ? tok.toLocaleString() : "—") + "</td>" +
+        "<td class=\"num\">" + (Number(t.cost) > 0 ? fmtCost(t.cost) : "—") + "</td>" +
+        "</tr>";
+    });
+    return (
+      "<table><thead><tr>" +
+      "<th>task</th><th>status</th><th>time</th><th>tokens</th><th>cost</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table>"
+    );
   }
 
   function avgGroupedSvg(claiM, piM) {
@@ -668,19 +890,19 @@
       { label: "avg tokens", c: claiM.avgTokens, p: piM.avgTokens, fmt: (v) => (v == null ? "n/a" : Math.round(v).toLocaleString()) },
       { label: "avg cost", c: claiM.avgCost, p: piM.avgCost, fmt: (v) => (v == null ? "n/a" : "$" + v.toFixed(4)) },
     ];
-    let out = '<text x="20" y="14" fill="#5c9cf5" font-size="9">CLAI</text><text x="60" y="14" fill="#56b6c2" font-size="9">pi</text>';
+    let out = '<text x="20" y="16" fill="#5c9cf5" font-size="12">CLAI</text><text x="70" y="16" fill="#56b6c2" font-size="12">pi</text>';
     groups.forEach((g, i) => {
-      const y = 28 + i * 38;
+      const y = 30 + i * 38;
       const vals = [g.c, g.p].filter((v) => v != null && v > 0);
       const max = Math.max(1e-9, ...vals, 1e-9);
       const cBw = g.c != null && g.c > 0 ? (180 * g.c) / max : 0;
       const pBw = g.p != null && g.p > 0 ? (180 * g.p) / max : 0;
       out +=
-        '<text x="0" y="' + (y + 10) + '" fill="#808080" font-size="10">' + esc(g.label) + "</text>" +
-        '<rect x="90" y="' + y + '" width="' + cBw + '" height="10" fill="#5c9cf5" />' +
-        '<text x="' + (94 + cBw) + '" y="' + (y + 9) + '" fill="#808080" font-size="9">' + esc(g.fmt(g.c)) + "</text>" +
-        '<rect x="90" y="' + (y + 14) + '" width="' + pBw + '" height="10" fill="#56b6c2" />' +
-        '<text x="' + (94 + pBw) + '" y="' + (y + 23) + '" fill="#808080" font-size="9">' + esc(g.fmt(g.p)) + "</text>";
+        '<text x="0" y="' + (y + 11) + '" fill="#808080" font-size="12">' + esc(g.label) + "</text>" +
+        '<rect x="90" y="' + y + '" width="' + cBw + '" height="11" fill="#5c9cf5" />' +
+        '<text x="' + (94 + cBw) + '" y="' + (y + 10) + '" fill="#808080" font-size="11">' + esc(g.fmt(g.c)) + "</text>" +
+        '<rect x="90" y="' + (y + 14) + '" width="' + pBw + '" height="11" fill="#56b6c2" />' +
+        '<text x="' + (94 + pBw) + '" y="' + (y + 24) + '" fill="#808080" font-size="11">' + esc(g.fmt(g.p)) + "</text>";
     });
     return out;
   }
@@ -697,6 +919,7 @@
         '<div class="big">' + claiScore.total.toFixed(1) + "</div>" +
         '<div class="avg">' +
           "<div>pass <strong>" + claiM.pass + "/" + claiM.n + "</strong> (" + fmtPct(claiM.passRate) + ")</div>" +
+          "<div>total time <strong>" + fmtMinutes(claiM.totalWallMs) + "</strong></div>" +
           "<div>avg time <strong>" + fmtMs(claiM.avgWallMs) + "</strong></div>" +
           "<div>avg tokens <strong>" + (claiM.avgTokens == null ? "n/a" : Math.round(claiM.avgTokens).toLocaleString()) + "</strong></div>" +
           "<div>avg cost <strong>" + (claiM.avgCost == null ? "n/a" : fmtCost(claiM.avgCost)) + "</strong></div>" +
@@ -706,6 +929,7 @@
         '<div class="big">' + piScore.total.toFixed(1) + "</div>" +
         '<div class="avg">' +
           "<div>pass <strong>" + piM.pass + "/" + piM.n + "</strong> (" + fmtPct(piM.passRate) + ")</div>" +
+          "<div>total time <strong>" + fmtMinutes(piM.totalWallMs) + "</strong></div>" +
           "<div>avg time <strong>" + fmtMs(piM.avgWallMs) + "</strong></div>" +
           "<div>avg tokens <strong>" + (piM.avgTokens == null ? "n/a" : Math.round(piM.avgTokens).toLocaleString()) + "</strong></div>" +
           "<div>avg cost <strong>" + (piM.avgCost == null ? "n/a" : fmtCost(piM.avgCost)) + "</strong></div>" +
@@ -728,10 +952,8 @@
     const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
     const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
     const ids = [...new Set(piRows.map((r) => r.id).concat(claiRows.map((r) => r.id)))];
-    const h = Math.max(200, ids.length * 24 + 24);
-    const colors = { clai: "#5c9cf5", pi: "#56b6c2" };
 
-    refreshChartTitles("compare");
+    refreshChartTitles("compare", undefined, ids.length);
     $("chart-pass").setAttribute("viewBox", "0 0 320 150");
     if (scoringReady) {
       const weights = sharedScoreWeights(claiM, piM);
@@ -751,47 +973,31 @@
       $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
     } else {
       $("scoreboard").innerHTML =
-        '<div class="scoreboard-pending" style="color:var(--faint);font-size:12px;padding:8px 0">scoreboard when both finish</div>';
+        '<div class="scoreboard-pending" style="color:var(--faint);font-size:13px;padding:8px 0">scoreboard when both finish</div>';
       const formula = $("score-formula");
       if (formula) formula.textContent = "Composite pending until both harnesses finish";
       $("chart-pass").innerHTML =
-        '<text x="160" y="70" text-anchor="middle" fill="#808080" font-size="12">pass pies when both finish</text>';
+        '<text x="160" y="70" text-anchor="middle" fill="#808080" font-size="13">pass pies when both finish</text>';
     }
-    $("chart-dur").setAttribute("viewBox", "0 0 320 " + h);
-    $("chart-dur").innerHTML = dualMetricBars(
-      ids, (id) => claiMap[id]?.wallMs || 0, (id) => piMap[id]?.wallMs || 0,
-      320, h, (v) => fmtMs(v), colors,
-    );
-    $("chart-tok-box").classList.remove("hidden");
-    $("chart-tok").setAttribute("viewBox", "0 0 320 " + h);
-    $("chart-tok").innerHTML = dualMetricBars(
-      ids,
-      (id) => (claiMap[id]?.tokensIn || 0) + (claiMap[id]?.tokensOut || 0),
-      (id) => (piMap[id]?.tokensIn || 0) + (piMap[id]?.tokensOut || 0),
-      320, h, (v) => Math.round(v).toLocaleString(), colors,
-    );
-    const costBox = $("chart-cost-box");
-    if (costBox) {
-      costBox.classList.remove("hidden");
-      $("chart-cost").setAttribute("viewBox", "0 0 320 " + h);
-      $("chart-cost").innerHTML = dualMetricBars(
-        ids,
-        (id) => Number(claiMap[id]?.cost) || 0,
-        (id) => Number(piMap[id]?.cost) || 0,
-        320, h, (v) => "$" + Number(v).toFixed(4), colors,
-        { minMax: 0.05, pad: 1.05 },
-      );
-    }
+    $("chart-dur").innerHTML = dualMetricsUnified(ids, claiMap, piMap);
+    $("chart-tok-box").classList.add("hidden");
+    $("chart-cost-box").classList.add("hidden");
     const avgSvg = $("chart-avg");
-    if (avgSvg) avgSvg.innerHTML = avgGroupedSvg(claiM, piM);
+    const avgBox = $("chart-avg-box");
+    if (avgBox) avgBox.classList.remove("hidden");
+    if (avgSvg) {
+      avgSvg.setAttribute("viewBox", "0 0 320 150");
+      avgSvg.innerHTML = avgGroupedSvg(claiM, piM);
+    }
     return true;
   }
 
   function refreshChartsFromBestSource() {
     // Explicit history-row selection wins over compare/live dual charts.
-    if (historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length) {
-      renderCharts(historyDetailTasks);
-      refreshChartTitles("history", selectedId);
+    if (historyChartsPinned && selectedId) {
+      if (historyDetailTasks && historyDetailTasks.length) {
+        renderCharts(historyDetailTasks, "history", selectedId);
+      }
       return;
     }
     // During/after compare, prefer dual harness charts (not the live pi-only snapshot).
@@ -799,37 +1005,64 @@
       if (renderCompareCharts()) return;
     }
     if (snapshot && snapshot.tasks && snapshot.tasks.length && !String(snapshot.provider || "").startsWith("pi")) {
-      renderCharts(snapshot.tasks);
-      refreshChartTitles("live");
+      renderCharts(snapshot.tasks, "live");
       return;
     }
     if (compare && renderCompareCharts()) return;
     if (historyDetailTasks && historyDetailTasks.length) {
-      renderCharts(historyDetailTasks);
-      refreshChartTitles(selectedId ? "history" : "live", selectedId || undefined);
+      renderCharts(historyDetailTasks, selectedId ? "history" : "live", selectedId || undefined);
       return;
     }
-    if (runs.length) {
+    if (runs.length && !compare) {
       const latest = runs[runs.length - 1];
-      if (latest && !selectedId) {
-        selectRun(latest.runId);
+      if (latest && !selectedId && !historyDetailTasks) {
+        void softLoadLatestRun(latest.runId);
         return;
       }
     }
-    renderCharts([]);
+    renderCharts([], "live");
   }
 
-  function renderCharts(tasks) {
+  async function softLoadLatestRun(id) {
+    try {
+      const res = await fetch("/api/runs/" + encodeURIComponent(id));
+      if (!res.ok) return;
+      const run = await res.json();
+      if (historyChartsPinned || viewingHistory) return;
+      if (!run.tasks) return;
+      historyDetailTasks = run.tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        category: t.category,
+        status: t.status,
+        wallMs: t.wallMs,
+        steps: t.steps,
+        tokensIn: t.tokensIn,
+        tokensOut: t.tokensOut,
+        cost: t.cost,
+        error: t.error,
+      }));
+      selectedId = id;
+      renderHistory();
+      if (!snapshot || snapshot.done) {
+        renderCharts(historyDetailTasks, "history", id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function renderCharts(tasks, mode, runId) {
     const passSvg = $("chart-pass");
-    const durSvg = $("chart-dur");
-    const tokSvg = $("chart-tok");
-    const costSvg = $("chart-cost");
-    const costBox = $("chart-cost-box");
+    const durHost = $("chart-dur");
+    const avgBox = $("chart-avg-box");
+    if (avgBox) avgBox.classList.add("hidden");
+    $("chart-tok-box").classList.add("hidden");
+    $("chart-cost-box").classList.add("hidden");
     if (!tasks || !tasks.length) {
       passSvg.innerHTML = emptySvg(200, 120);
-      durSvg.innerHTML = emptySvg(320, 140);
-      tokSvg.innerHTML = emptySvg(320, 140);
-      if (costSvg) costSvg.innerHTML = emptySvg(320, 140);
+      durHost.innerHTML = '<div class="metric-empty">no data</div>';
+      refreshChartTitles(mode || "live", runId, 0);
       return;
     }
     const passed = tasks.filter((t) => t.status === "pass").length;
@@ -837,42 +1070,8 @@
     const pending = tasks.length - passed - failed;
     passSvg.setAttribute("viewBox", "0 0 320 120");
     passSvg.innerHTML = donutSvg(passed, failed, pending, tasks.length);
-
-    const h = Math.max(160, tasks.length * 18 + 20);
-    const durations = tasks.map((t) => ({
-      id: t.id,
-      v: t.wallMs || 0,
-      status: t.status,
-    }));
-    durSvg.setAttribute("viewBox", "0 0 320 " + h);
-    durSvg.innerHTML = barSvg(durations, 320, h, (v) => fmtMs(v));
-
-    const tokens = tasks.map((t) => ({
-      id: t.id,
-      v: (t.tokensIn || 0) + (t.tokensOut || 0),
-      status: t.status,
-    }));
-    const hasTok = tokens.some((t) => t.v > 0);
-    $("chart-tok-box").classList.toggle("hidden", !hasTok);
-    if (hasTok) {
-      tokSvg.setAttribute("viewBox", "0 0 320 " + h);
-      tokSvg.innerHTML = barSvg(tokens, 320, h, (v) => String(v));
-    }
-
-    const costs = tasks.map((t) => ({
-      id: t.id,
-      v: Number(t.cost) || 0,
-      status: t.status,
-    }));
-    const hasCost = costs.some((t) => t.v > 0);
-    if (costBox) costBox.classList.toggle("hidden", !hasCost);
-    if (hasCost && costSvg) {
-      costSvg.setAttribute("viewBox", "0 0 320 " + h);
-      costSvg.innerHTML = barSvg(
-        costs, 320, h, (v) => "$" + Number(v).toFixed(4),
-        { minMax: 0.05, pad: 1.05 },
-      );
-    }
+    durHost.innerHTML = singleMetricsUnified(tasks);
+    refreshChartTitles(mode || "live", runId, tasks.length);
   }
 
   function emptySvg(w, h) {
@@ -908,35 +1107,6 @@
       '<text x="145" y="40" fill="#7fd88f" font-size="11">pass ' + pass + "</text>" +
       '<text x="145" y="58" fill="#e06c75" font-size="11">fail ' + fail + "</text>" +
       '<text x="145" y="76" fill="#808080" font-size="11">other ' + pending + "</text>";
-  }
-
-  function barSvg(items, w, h, fmt, opts) {
-    const padL = 90, padR = 12, padT = 8, padB = 16;
-    const max = metricScaleMax(items.map((i) => i.v), opts);
-    const barH = Math.min(14, (h - padT - padB) / Math.max(items.length, 1) - 4);
-    let out = "";
-    if (opts && opts.minMax != null) {
-      out +=
-        '<text x="' + (w - 4) + '" y="10" text-anchor="end" fill="#606060" font-size="9">max ' +
-        esc(fmt(max)) + "</text>";
-    }
-    items.forEach((it, i) => {
-      const y = padT + i * ((h - padT - padB) / items.length);
-      const bw = ((w - padL - padR) * it.v) / max;
-      const color =
-        it.status === "pass" ? "#7fd88f" :
-        it.status === "running" ? "#5c9cf5" :
-        it.status === "fail" || it.status === "error" || it.status === "timeout" ? "#e06c75" :
-        "#606060";
-      out +=
-        '<text x="0" y="' + (y + barH) + '" fill="#808080" font-size="10">' +
-        esc(it.id.length > 14 ? it.id.slice(0, 13) + "…" : it.id) + "</text>" +
-        '<rect x="' + padL + '" y="' + (y + 2) + '" width="' + Math.max(bw, 0) +
-        '" height="' + barH + '" fill="' + color + '" />' +
-        '<text x="' + (padL + bw + 4) + '" y="' + (y + barH) +
-        '" fill="#808080" font-size="10">' + esc(fmt(it.v)) + "</text>";
-    });
-    return out || emptySvg(w, h);
   }
 
   function sparkline(rates, w, h) {
@@ -975,7 +1145,7 @@
           "<td>" + esc(r.provider) + " / " + esc(r.model) + "</td>" +
           '<td class="' + rateClass(r.passRate) + '">' +
             (r.passed || 0) + "/" + (r.total || 0) + " (" + fmtPct(r.passRate) + ")</td>" +
-          "<td>" + fmtMs(r.totalWallMs) + "</td>" +
+          "<td>" + fmtMinutes(r.totalWallMs) + "</td>" +
           "<td>" + fmtCost(r.totalCost) + "</td>" +
         "</tr>"
       );
@@ -983,18 +1153,46 @@
 
     body.querySelectorAll("tr.hist").forEach((tr) => {
       tr.addEventListener("click", () => {
-        historyChartsPinned = true;
         selectRun(tr.getAttribute("data-id"));
       });
     });
   }
 
+  function snapshotFromHistoryRun(run) {
+    return {
+      runId: run.runId,
+      startedAt: run.startedAt,
+      provider: run.provider,
+      model: run.model,
+      offline: !!run.offline,
+      parallel: run.parallel || 1,
+      tasks: (run.tasks || []).map((t) => ({
+        id: t.id,
+        title: t.title || t.id,
+        category: t.category || "bugfix",
+        status: t.status,
+        wallMs: t.wallMs,
+        steps: t.steps,
+        tokensIn: Number(t.tokensIn) || 0,
+        tokensOut: Number(t.tokensOut) || 0,
+        cost: Number(t.cost) || 0,
+        error: t.error,
+      })),
+      done: true,
+      rateLimit: null,
+    };
+  }
+
   async function selectRun(id) {
     selectedId = id;
+    historyChartsPinned = true;
+    historyDetailTasks = null;
     renderHistory();
     const detail = $("run-detail");
     detail.className = "detail open";
     detail.innerHTML = '<span class="empty">loading ' + esc(id) + "…</span>";
+    const heading = $("live-heading");
+    if (heading) heading.textContent = "History run";
     try {
       const res = await fetch("/api/runs/" + encodeURIComponent(id));
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1021,13 +1219,13 @@
           tokensIn: t.tokensIn,
           tokensOut: t.tokensOut,
           cost: t.cost,
+          error: t.error,
         }));
-        if (historyChartsPinned) {
-          renderCharts(historyDetailTasks);
-          refreshChartTitles("history", selectedId);
-        } else if (!snapshot || snapshot.done) {
-          refreshChartsFromBestSource();
-        }
+        viewingHistory = true;
+        snapshot = snapshotFromHistoryRun(run);
+        renderLive();
+        renderCharts(historyDetailTasks, "history", selectedId);
+        $("live-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } catch (err) {
       detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
@@ -1082,9 +1280,44 @@
   }
 
   /** Both harnesses have the same task ids, all in a terminal status. */
+  function fillMissingCompareRows(c) {
+    if (!c || c.partial === true) return c;
+    if (job.status === "running" || job.status === "stopping") return c;
+    const clai = (c.clai || []).filter(Boolean);
+    let pi = (c.pi || []).slice();
+    // Repair sparse/null pi slots left by a hard kill before finalize.
+    if (pi.some((r) => !r) && clai.length) {
+      pi = clai.map((cr, i) => {
+        const r = pi[i];
+        if (r && r.id) return r;
+        const byId = pi.find((x) => x && x.id === cr.id);
+        if (byId) return byId;
+        return {
+          id: cr.id,
+          harness: "pi",
+          status: "error",
+          wallMs: 0,
+          detail: "aborted",
+          tokensIn: 0,
+          tokensOut: 0,
+          cost: 0,
+        };
+      });
+      c.pi = pi;
+      c.piScore = {
+        pass: pi.filter((r) => r.status === "pass").length,
+        fail: pi.filter((r) => r.status === "fail").length,
+        err: pi.filter((r) => r.status === "error").length,
+        total: pi.length,
+        rate: pi.length ? pi.filter((r) => r.status === "pass").length / pi.length : 0,
+      };
+    }
+    return c;
+  }
+
   function bothHarnessesComplete(c) {
-    const clai = (c && c.clai) || [];
-    const pi = (c && c.pi) || [];
+    const clai = ((c && c.clai) || []).filter(Boolean);
+    const pi = ((c && c.pi) || []).filter(Boolean);
     if (!clai.length || !pi.length || clai.length !== pi.length) return false;
     if (!clai.every((r) => isTerminalCompareStatus(r.status))) return false;
     if (!pi.every((r) => isTerminalCompareStatus(r.status))) return false;
@@ -1120,9 +1353,10 @@
       return;
     }
     panel.style.display = "block";
+    compare = fillMissingCompareRows(compare);
 
-    const claiRows = compare.clai || [];
-    const piRows = compare.pi || [];
+    const claiRows = (compare.clai || []).filter(Boolean);
+    const piRows = (compare.pi || []).filter(Boolean);
     const scoringReady = isCompareScoringReady(compare);
     const compareRunning =
       (job.status === "running" || job.status === "stopping") && job.kind === "compare";
@@ -1139,6 +1373,9 @@
           (compare.compareParallel != null ? " (req " + esc(compare.compareParallel) + ")" : "") +
           "</span>"
         : "") +
+      (compare.stopped
+        ? '<span style="color:var(--warning)">stopped early</span>'
+        : "") +
       (compareRunning
         ? "<span>progress <strong>" + claiRows.length + " clai · " + piRows.length + " pi</strong> rows</span>"
         : "");
@@ -1146,18 +1383,27 @@
     const winEl = $("compare-winner");
     if (!scoringReady) {
       // Freeze winner + composite while either harness is still finishing tasks.
+      // Still show live total wall sums so progress is visible.
+      const liveClai = harnessMetrics(claiRows);
+      const livePi = harnessMetrics(piRows);
       winEl.className = "winner-callout tie";
-      winEl.textContent = "Scoring when both harnesses finish…";
+      winEl.textContent = compare.stopped
+        ? "Stopped — filling remaining tasks as aborted…"
+        : "Scoring when both harnesses finish…";
       $("compare-scores").innerHTML =
         '<div class="compare-score">' +
           '<div class="label">CLAI</div>' +
           '<div class="value" style="color:var(--faint)">—</div>' +
-          '<div style="margin-top:6px;font-size:11px;color:var(--faint)">composite pending</div>' +
+          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+            fmtMinutes(liveClai.totalWallMs) + "</strong></div>" +
+          '<div style="margin-top:4px;font-size:12px;color:var(--faint)">composite pending</div>' +
         "</div>" +
         '<div class="compare-score">' +
           '<div class="label">pi</div>' +
           '<div class="value" style="color:var(--faint)">—</div>' +
-          '<div style="margin-top:6px;font-size:11px;color:var(--faint)">composite pending</div>' +
+          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+            fmtMinutes(livePi.totalWallMs) + "</strong></div>" +
+          '<div style="margin-top:4px;font-size:12px;color:var(--faint)">composite pending</div>' +
         "</div>";
     } else {
       const claiScore = compare.claiScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
@@ -1179,15 +1425,18 @@
       const piComposite = scoreHarness(piM, refs, weights);
       const winner = pickWinner(claiScore, piScore, claiComposite, piComposite);
 
+      const stoppedNote = compare.stopped ? " (stopped early — remaining counted aborted)" : "";
       if (winner.who === "none") {
         winEl.className = "winner-callout tie";
-        winEl.textContent = winner.reason;
+        winEl.textContent = winner.reason + stoppedNote;
       } else if (winner.who === "tie") {
         winEl.className = "winner-callout tie";
-        winEl.textContent = "Tie — " + winner.reason;
+        winEl.textContent = "Tie — " + winner.reason + stoppedNote;
       } else {
         winEl.className = "winner-callout";
-        winEl.innerHTML = "<strong>" + esc(winner.who.toUpperCase()) + " wins</strong> — " + esc(winner.reason);
+        winEl.innerHTML =
+          "<strong>" + esc(winner.who.toUpperCase()) + " wins</strong> — " +
+          esc(winner.reason) + esc(stoppedNote);
       }
 
       const claiWin = winner.who === "clai";
@@ -1198,7 +1447,9 @@
           '<div class="value ' + rateClass(claiScore.rate) + '">' +
             (claiScore.pass || 0) + "/" + (claiScore.total || 0) +
             ' <span style="font-size:12px;font-weight:600">(' + fmtPct(claiScore.rate) + ")</span></div>" +
-          '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+            fmtMinutes(claiM.totalWallMs) + "</strong></div>" +
+          '<div style="margin-top:4px;font-size:12px;color:var(--muted)">composite <strong style="color:var(--text)">' +
             claiComposite.total.toFixed(1) + "</strong>/100</div>" +
         "</div>" +
         '<div class="compare-score' + (piWin ? " winner" : "") + '">' +
@@ -1206,7 +1457,9 @@
           '<div class="value ' + rateClass(piScore.rate) + '">' +
             (piScore.pass || 0) + "/" + (piScore.total || 0) +
             ' <span style="font-size:12px;font-weight:600">(' + fmtPct(piScore.rate) + ")</span></div>" +
-          '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+            fmtMinutes(piM.totalWallMs) + "</strong></div>" +
+          '<div style="margin-top:4px;font-size:12px;color:var(--muted)">composite <strong style="color:var(--text)">' +
             piComposite.total.toFixed(1) + "</strong>/100</div>" +
         "</div>";
     }
@@ -1232,34 +1485,14 @@
       );
     }).join("");
 
-    const maxWall = Math.max(
-      1,
-      ...ids.flatMap((id) => [claiMap[id]?.wallMs || 0, piMap[id]?.wallMs || 0]),
-    );
-    $("compare-bars").innerHTML =
-      '<div class="compare-bar-row" style="margin-bottom:8px">' +
-        '<span></span><span style="color:var(--accent);font-size:10px">CLAI</span>' +
-        '<span style="color:var(--info);font-size:10px">pi</span>' +
-      "</div>" +
-      ids.map((id) => {
-        const cw = claiMap[id]?.wallMs || 0;
-        const pw = piMap[id]?.wallMs || 0;
-        const cPct = (cw / maxWall) * 100;
-        const pPct = (pw / maxWall) * 100;
-        return (
-          '<div class="compare-bar-row">' +
-            '<span class="task-id" title="' + esc(id) + '">' + esc(id) + "</span>" +
-            '<div class="compare-bar-track">' +
-              '<div class="compare-bar-fill clai" style="width:' + cPct + '%"></div>' +
-              '<span class="compare-bar-label">' + fmtMs(cw) + "</span>" +
-            "</div>" +
-            '<div class="compare-bar-track">' +
-              '<div class="compare-bar-fill pi" style="width:' + pPct + '%"></div>' +
-              '<span class="compare-bar-label">' + fmtMs(pw) + "</span>" +
-            "</div>" +
-          "</div>"
-        );
-      }).join("");
+    const foldSum = $("compare-fold-summary");
+    if (foldSum) {
+      const cPass = claiRows.filter((r) => r.status === "pass").length;
+      const pPass = piRows.filter((r) => r.status === "pass").length;
+      foldSum.textContent =
+        "Task results (" + ids.length + ") — CLAI " + cPass + "/" + claiRows.length +
+        " · pi " + pPass + "/" + piRows.length;
+    }
     // Avoid pass-rate pie / composite chart thrash while rows are still streaming.
     if (scoringReady || !compareRunning) {
       refreshChartsFromBestSource();
@@ -1313,41 +1546,121 @@
     }
   }
 
+  function effectiveTaskLimit() {
+    if (!catalogCount) return taskLimit;
+    return Math.min(Math.max(1, taskLimit), catalogCount);
+  }
+
+  function setParallelWorkers(n) {
+    parallelWorkers = Math.max(1, Math.min(16, Math.floor(Number(n) || 1)));
+    const inp = $("parallel-input");
+    if (inp) inp.value = String(parallelWorkers);
+    renderParallel();
+  }
+
+  function renderParallel() {
+    const label = $("parallel-label");
+    if (label) label.textContent = parallelWorkers + " each";
+    document.querySelectorAll("[data-parallel]").forEach((btn) => {
+      btn.classList.toggle(
+        "active",
+        Number(btn.getAttribute("data-parallel")) === parallelWorkers,
+      );
+    });
+    const running = job.status === "running" || job.status === "stopping";
+    const inp = $("parallel-input");
+    if (inp) inp.disabled = running;
+    document.querySelectorAll("[data-parallel]").forEach((btn) => {
+      btn.disabled = running;
+    });
+  }
+
+  function renderTaskCount() {
+    const n = effectiveTaskLimit();
+    const maxLabel = catalogCount ? String(catalogCount) : "—";
+    $("task-count-label").textContent = n + "/" + maxLabel;
+    const inp = $("task-limit-input");
+    if (inp && document.activeElement !== inp) inp.value = String(n);
+    $("btn-tasks-10").classList.toggle("active", n === 10);
+    $("btn-tasks-max").classList.toggle(
+      "active",
+      catalogCount > 0 && n >= catalogCount,
+    );
+    const running = job.status === "running" || job.status === "stopping";
+    ["btn-tasks-10", "btn-tasks-plus", "btn-tasks-max"].forEach((id) => {
+      $(id).disabled = running;
+    });
+    if (inp) inp.disabled = running;
+    renderParallel();
+  }
+
+  async function loadTaskCatalog() {
+    try {
+      const res = await fetch("/api/tasks");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const body = await res.json();
+      catalogCount = Number(body.count) || (body.ids && body.ids.length) || 0;
+      if (taskLimit > catalogCount && catalogCount > 0) taskLimit = catalogCount;
+      renderTaskCount();
+    } catch {
+      catalogCount = 0;
+      renderTaskCount();
+    }
+  }
+
   function renderJob() {
     const running = job.status === "running" || job.status === "stopping";
     $("btn-clai").disabled = running;
     $("btn-offline").disabled = running;
     $("btn-compare").disabled = running;
     $("btn-stop").disabled = !running;
+    $("btn-stop").textContent = job.status === "stopping" ? "Stopping…" : "Stop";
+    renderTaskCount();
     const meta = $("job-meta");
     if (job.status === "idle") {
       meta.innerHTML = job.error
-        ? 'idle · <span style="color:var(--error)">last error</span>'
+        ? 'idle · <span style="color:var(--error)">' + esc(job.error) + "</span>"
         : "idle";
     } else {
-      const elapsed = job.startedAt ? fmtMs(Date.now() - Date.parse(job.startedAt)) : "";
-      const compareHint =
-        job.kind === "compare" ? " · CLAI + pi in parallel" : "";
+      const elapsed = job.startedAt ? fmtMinutes(Date.now() - Date.parse(job.startedAt)) : "";
+      const compareHint = job.kind === "compare" ? " · CLAI+pi" : "";
       meta.innerHTML =
         "<strong>" + esc(job.status) + "</strong> · " + esc(job.kind || "") +
         compareHint +
+        " · " + effectiveTaskLimit() + " tasks · p=" + parallelWorkers +
         (elapsed ? " · " + elapsed : "");
     }
-    $("job-err").textContent = job.error || "";
+    if (job.error && job.status === "idle") {
+      $("job-err").textContent = job.error;
+    } else if (job.status !== "idle") {
+      $("job-err").textContent = "";
+    }
   }
 
   async function startJob(kind) {
     $("job-err").textContent = "";
     historyChartsPinned = false;
+    viewingHistory = false;
+    const heading = $("live-heading");
+    if (heading) heading.textContent = "Live run";
+    const limit = effectiveTaskLimit();
+    const workers = Math.max(1, Math.min(16, parallelWorkers));
+    if (lastQuotaHit && workers > 1) {
+      $("job-err").textContent =
+        "Last run hit rate limits — consider parallel 1. Starting anyway…";
+    }
     try {
+      const payload = {
+        kind,
+        limit,
+        parallel: kind === "compare" ? Math.max(workers * 2, workers) : workers,
+        freshClai: kind === "compare" ? true : undefined,
+      };
+      if (kind === "compare") payload.sideParallel = workers;
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          kind,
-          parallel: kind === "compare" ? 8 : kind === "offline" ? 3 : 1,
-          freshClai: kind === "compare" ? true : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1362,10 +1675,24 @@
   }
 
   async function stopJob() {
+    $("job-err").textContent = "";
+    $("btn-stop").disabled = true;
+    $("btn-stop").textContent = "Stopping…";
     try {
-      await fetch("/api/jobs/stop", { method: "POST" });
+      const res = await fetch("/api/jobs/stop", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        $("job-err").textContent = body.error || ("HTTP " + res.status);
+        renderJob();
+        return;
+      }
+      if (body.job) {
+        job = body.job;
+        renderJob();
+      }
     } catch (err) {
       $("job-err").textContent = err.message || String(err);
+      renderJob();
     }
   }
 
@@ -1377,11 +1704,22 @@
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "snapshot" && msg.snapshot) {
-          const wasDone = snapshot && snapshot.done;
-          snapshot = msg.snapshot;
-          renderLive();
-          refreshChartsFromBestSource();
-          if (snapshot.done && !wasDone) loadRuns();
+          const jobLive = job.status === "running" || job.status === "stopping";
+          if (viewingHistory && !jobLive) {
+            // Keep history selection in the Live panel until a new job runs.
+          } else {
+            if (jobLive) {
+              viewingHistory = false;
+              historyChartsPinned = false;
+              const heading = $("live-heading");
+              if (heading) heading.textContent = "Live run";
+            }
+            const wasDone = snapshot && snapshot.done;
+            snapshot = msg.snapshot;
+            renderLive();
+            refreshChartsFromBestSource();
+            if (snapshot.done && !wasDone) loadRuns();
+          }
         }
         if (msg.type === "compare") {
           if (msg.compare) {
@@ -1401,6 +1739,10 @@
           job = msg.job;
           renderJob();
           if (wasRunning && job.status === "idle") {
+            viewingHistory = false;
+            historyChartsPinned = false;
+            const heading = $("live-heading");
+            if (heading) heading.textContent = "Live run";
             loadRuns();
             loadCompare();
           }
@@ -1413,9 +1755,36 @@
   $("btn-offline").addEventListener("click", () => startJob("offline"));
   $("btn-compare").addEventListener("click", () => startJob("compare"));
   $("btn-stop").addEventListener("click", () => stopJob());
+  $("btn-tasks-10").addEventListener("click", () => {
+    taskLimit = 10;
+    renderTaskCount();
+  });
+  $("btn-tasks-plus").addEventListener("click", () => {
+    const next = effectiveTaskLimit() + 10;
+    taskLimit = catalogCount ? Math.min(next, catalogCount) : next;
+    renderTaskCount();
+  });
+  $("btn-tasks-max").addEventListener("click", () => {
+    taskLimit = catalogCount || taskLimit;
+    renderTaskCount();
+  });
+  $("task-limit-input").addEventListener("change", () => {
+    const v = Math.floor(Number($("task-limit-input").value) || 1);
+    taskLimit = catalogCount ? Math.min(Math.max(1, v), catalogCount) : Math.max(1, v);
+    renderTaskCount();
+  });
+  $("parallel-input").addEventListener("change", () => {
+    setParallelWorkers($("parallel-input").value);
+  });
+  document.querySelectorAll("[data-parallel]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setParallelWorkers(btn.getAttribute("data-parallel"));
+    });
+  });
 
   renderLive();
   renderJob();
+  loadTaskCatalog();
   loadRuns().then(() => refreshChartsFromBestSource());
   loadCompare();
   connectSse();

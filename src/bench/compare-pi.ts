@@ -71,6 +71,8 @@ export type CompareResult = {
    * live but freezes winner/composite until this is false (phase "done").
    */
   partial?: boolean;
+  /** True when the job was stopped (user abort / circuit breaker). */
+  stopped?: boolean;
 };
 
 export type CompareProgress = {
@@ -89,22 +91,54 @@ export type RunComparePiOptions = {
   taskIds?: string[];
   freshClai?: boolean;
   parallel?: number;
+  /** Workers per harness when racing; defaults to ceil(parallel/2). */
+  sideParallel?: number;
   signal?: AbortSignal;
   onProgress?: (progress: CompareProgress) => void;
 };
 
-const PI_TIMEOUT_PAD_MS = 15_000;
+/** Extra wall after task.timeoutMs — just enough for process teardown. */
+const PI_TIMEOUT_PAD_MS = 3_000;
+/** Grace after Stop before finalize (don't wait forever on CLAI mid-tool). */
+const STOP_GRACE_MS = 2_500;
 
 function scoreRows(rows: CompareRow[]): CompareScore {
-  const pass = rows.filter((r) => r.status === "pass").length;
-  const fail = rows.filter((r) => r.status === "fail").length;
-  const err = rows.filter((r) => r.status === "error").length;
+  const list = rows.filter(Boolean);
+  const pass = list.filter((r) => r.status === "pass").length;
+  const fail = list.filter((r) => r.status === "fail").length;
+  const err = list.filter((r) => r.status === "error").length;
   return {
     pass,
     fail,
     err,
-    total: rows.length,
-    rate: rows.length ? pass / rows.length : 0,
+    total: list.length,
+    rate: list.length ? pass / list.length : 0,
+  };
+}
+
+function abortedPiRow(id: string, detail = "aborted"): CompareRow {
+  return {
+    id,
+    harness: "pi",
+    status: "error",
+    wallMs: 0,
+    detail,
+    tokensIn: 0,
+    tokensOut: 0,
+    cost: 0,
+  };
+}
+
+function abortedClaiRow(id: string, detail = "aborted"): CompareRow {
+  return {
+    id,
+    harness: "clai",
+    status: "error",
+    wallMs: 0,
+    detail,
+    tokensIn: 0,
+    tokensOut: 0,
+    cost: 0,
   };
 }
 
@@ -286,15 +320,33 @@ function runPi(
     const usage = emptyPiUsage();
     let settled = false;
     let stalled = false;
+    let idleStalled = false;
+    // Fail fast on dead pi (DeepSeek often never emits JSON under load).
     const stallMs = Math.max(
-      10_000,
-      Number(process.env.COMPARE_PI_STALL_MS ?? 45_000),
+      5_000,
+      Number(process.env.COMPARE_PI_STALL_MS ?? 15_000),
     );
+    // After first JSON, kill if stdout goes quiet (hung mid-stream).
+    const idleMs = Math.max(
+      5_000,
+      Number(process.env.COMPARE_PI_IDLE_MS ?? 25_000),
+    );
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const killTree = () => {
+      child.kill();
+      if (child.pid && process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+      }
+    };
     const finish = (ok: boolean, timedOut: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(stallTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       if (lineBuf.trim()) ingestPiJsonLine(usage, lineBuf);
       const totals = piUsageTotals(usage, opts.provider);
@@ -312,7 +364,9 @@ function runPi(
         console.error(`[pi-usage] argv=${JSON.stringify(safeArgs)}`);
       }
       let output = textTail || raw.slice(-4000);
-      if (stalled && !output.trim()) {
+      if (idleStalled) {
+        output = `idle stall · no stdout for ${idleMs}ms after JSON (hung mid-stream)`;
+      } else if (stalled && !output.trim()) {
         output = `stall · 0 bytes after ${stallMs}ms (no pi JSON — hung or rate-limited)`;
       } else if ((timedOut || stalled) && output.trim()) {
         output = `${output} · jsonLines=${jsonLines} raw=${raw.length}`;
@@ -321,7 +375,7 @@ function runPi(
       }
       resolve({
         ok,
-        timedOut: timedOut || stalled,
+        timedOut: timedOut || stalled || idleStalled,
         output,
         wallMs: Date.now() - started,
         tokensIn: totals.tokensIn,
@@ -330,14 +384,16 @@ function runPi(
       });
     };
 
-    const killTree = () => {
-      child.kill();
-      if (child.pid && process.platform === "win32") {
-        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-          windowsHide: true,
-          stdio: "ignore",
-        });
-      }
+    let sawJsonStdout = false;
+    const bumpIdle = () => {
+      if (!sawJsonStdout || settled) return;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (settled) return;
+        idleStalled = true;
+        killTree();
+        finish(false, true);
+      }, idleMs);
     };
 
     const onAbort = () => {
@@ -346,7 +402,6 @@ function runPi(
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 
-    let sawJsonStdout = false;
     const onStdout = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       // Stall kill keys off JSON stdout only — stderr/otel noise must not cancel it.
@@ -361,6 +416,7 @@ function runPi(
         ingestPiJsonLine(usage, lineBuf.slice(0, nl));
         lineBuf = lineBuf.slice(nl + 1);
       }
+      if (text.length) bumpIdle();
     };
     const onStderr = (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -652,6 +708,7 @@ function buildCompareResult(
   claiLabel?: string,
   partial = false,
   concurrency?: { compareParallel: number; sideParallel: number },
+  stopped = false,
 ): CompareResult {
   return {
     at: new Date().toISOString(),
@@ -665,6 +722,7 @@ function buildCompareResult(
     compareParallel: concurrency?.compareParallel,
     sideParallel: concurrency?.sideParallel,
     partial: partial || undefined,
+    stopped: stopped || undefined,
   };
 }
 
@@ -685,22 +743,29 @@ export async function runComparePi(
   const provider = process.env.PI_PROVIDER ?? "deepseek";
   const model = process.env.PI_MODEL ?? "deepseek-v4-flash";
   const bin = process.env.PI_BIN ?? "pi";
+  // DeepSeek races melt under high concurrency — default 4 (→ side 2), not 8.
   const parallel = Math.max(
     1,
-    opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 8),
+    opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 4),
   );
   const freshClai = defaultFreshClai(opts.freshClai);
   // Racing both harnesses at full parallel doubles API load (e.g. 8+8=16) and
   // DeepSeek stalls pi with zero JSON until task timeout. Split concurrency.
-  const sideParallel = freshClai
-    ? Math.max(
-        1,
-        Math.min(
-          parallel,
-          Number(process.env.COMPARE_SIDE_PARALLEL ?? Math.ceil(parallel / 2)),
-        ),
-      )
-    : parallel;
+  const sideParallel =
+    opts.sideParallel != null && Number.isFinite(opts.sideParallel)
+      ? Math.max(1, Math.floor(Number(opts.sideParallel)))
+      : freshClai
+        ? Math.max(
+            1,
+            Math.min(
+              parallel,
+              Number(
+                process.env.COMPARE_SIDE_PARALLEL ??
+                  Math.min(2, Math.ceil(parallel / 2)),
+              ),
+            ),
+          )
+        : parallel;
 
   if (!process.env.DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY is not set (expected in .env or environment).");
@@ -785,6 +850,7 @@ export async function runComparePi(
       tasks,
       parallel: sideParallel,
       offline: false,
+      signal: opts.signal,
       onUpdate: (snap) => {
         claiLive = snap;
         // Only finished tasks enter the scorecard (queued/running ≠ error).
@@ -841,11 +907,17 @@ export async function runComparePi(
     emit(midPhase());
   };
 
+  let piCircuitOpen = false;
   const runPiSide = async () => {
     let next = 0;
+    let pressureStreak = 0;
+    const breaker = Math.max(
+      1,
+      Number(process.env.COMPARE_PI_STALL_BREAKER ?? 3),
+    );
     const worker = async () => {
       while (next < tasks.length) {
-        if (opts.signal?.aborted) break;
+        if (opts.signal?.aborted || piCircuitOpen) break;
         const i = next++;
         const task = tasks[i]!;
         piRunning.add(task.id);
@@ -864,6 +936,27 @@ export async function runComparePi(
         } finally {
           piRunning.delete(task.id);
         }
+        const row = piRows[i];
+        const detail = row?.detail ?? "";
+        const pressure =
+          row?.status === "error" &&
+          /stall|timed out|rate.?limit|429|hung|quota/i.test(detail);
+        if (pressure) pressureStreak += 1;
+        else if (row?.status === "pass" || row?.status === "fail") {
+          pressureStreak = 0;
+        }
+        if (!opts.signal?.aborted && pressureStreak >= breaker) {
+          piCircuitOpen = true;
+          while (next < tasks.length) {
+            const j = next++;
+            if (!piRows[j]) {
+              piRows[j] = abortedPiRow(
+                tasks[j]!.id,
+                `circuit breaker — ${breaker} consecutive pi stalls/timeouts`,
+              );
+            }
+          }
+        }
         emit(midPhase());
       }
     };
@@ -872,34 +965,50 @@ export async function runComparePi(
     );
   };
 
+  const abortGrace = (): Promise<void> =>
+    new Promise((resolve) => {
+      if (!opts.signal) return; // never settles — race only with harnesses
+      const arm = () => setTimeout(resolve, STOP_GRACE_MS);
+      if (opts.signal.aborted) arm();
+      else opts.signal.addEventListener("abort", arm, { once: true });
+    });
+
   try {
     // Both harnesses start immediately, each capped at sideParallel workers.
-    await Promise.all([runClaiSide(), runPiSide()]);
+    // On Stop: don't wait forever for CLAI mid-tool — finalize after grace.
+    await Promise.race([
+      Promise.all([runClaiSide(), runPiSide()]),
+      abortGrace(),
+    ]);
   } finally {
     opts.signal?.removeEventListener("abort", onAbort);
+    onAbort(); // ensure any lingering pi children die before we write
   }
 
-  const finalPi = piRows.map(
-    (r, i) =>
-      r ??
-      ({
-        id: tasks[i]!.id,
-        harness: "pi" as const,
-        status: "error" as const,
-        wallMs: 0,
-        detail: "aborted",
-        tokensIn: 0,
-        tokensOut: 0,
-        cost: 0,
-      }),
+  const stopped = !!(opts.signal?.aborted || piCircuitOpen);
+  const abortDetail = opts.signal?.aborted
+    ? "aborted"
+    : piCircuitOpen
+      ? "circuit breaker — pi stalls"
+      : "missing";
+
+  const finalPi = tasks.map(
+    (t, i) =>
+      piRows[i] ?? abortedPiRow(t.id, abortDetail),
   );
-  // Ensure token fields are always present in the scorecard JSON.
-  const finalClai = claiRows.map((r) => ({
-    ...r,
-    tokensIn: Number(r.tokensIn) || 0,
-    tokensOut: Number(r.tokensOut) || 0,
-    cost: Number(r.cost) || 0,
-  }));
+  const claiById = new Map(claiRows.filter(Boolean).map((r) => [r.id, r]));
+  const finalClai = tasks.map((t) => {
+    const existing = claiById.get(t.id);
+    if (existing) {
+      return {
+        ...existing,
+        tokensIn: Number(existing.tokensIn) || 0,
+        tokensOut: Number(existing.tokensOut) || 0,
+        cost: Number(existing.cost) || 0,
+      };
+    }
+    return abortedClaiRow(t.id, abortDetail);
+  });
   const result = buildCompareResult(
     finalClai,
     finalPi.map((r) => ({
@@ -913,6 +1022,7 @@ export async function runComparePi(
     claiLabel,
     false,
     concurrency,
+    stopped,
   );
 
   const outPath = path.join(workspaceRoot, ".clai", "bench", "compare-pi.json");
@@ -938,7 +1048,7 @@ async function main() {
     ?.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const parallel = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 8));
+  const parallel = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 4));
   let printedHeader = false;
   const seenPi = new Set<string>();
   const seenClai = new Set<string>();
