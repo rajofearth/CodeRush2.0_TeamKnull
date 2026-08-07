@@ -15,8 +15,8 @@
  * Fair fresh pi: after `--no-session`, compare pins a clean coding-agent
  * surface (`--no-extensions`, `--no-skills`, `--no-prompt-templates`,
  * `--no-themes`, `--no-context-files`, `--tools read,bash,edit,write`) to
- * match CLAI's coding tool profile. Set `COMPARE_PI_RAW=1` to skip those
- * flags (escape hatch for debugging local pi config).
+ * match CLAI's coding tool profile (same 4 tools). Set `COMPARE_PI_RAW=1`
+ * to skip those flags (escape hatch for debugging local pi config).
  *
  * Pi tokens: `--mode json` sums `message_end` usage
  * (input+cacheRead+cacheWrite / output). Cost uses estimateUsdBench —

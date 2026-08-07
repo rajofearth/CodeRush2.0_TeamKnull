@@ -393,6 +393,7 @@ async function agentSolve(
     workspaceRoot: workdir,
     sandbox,
     trace,
+    benchDenyCheckRead: true,
     onEvent: (event) => {
       if (event.type === "tool_call") {
         out.toolCalls[event.tool] = (out.toolCalls[event.tool] ?? 0) + 1;
@@ -400,17 +401,36 @@ async function agentSolve(
     },
     onBenchCheckPass: () => {
       benchCheckPassed = true;
-      checkAbort.abort();
+      // Defer abort so the current step's usage / tool results settle first.
+      setTimeout(() => checkAbort.abort(), 0);
     },
   };
 
   const timedOut = Symbol("timeout");
   let timer: NodeJS.Timeout | undefined;
-  const BENCH_SYSTEM = `You are running a scored coding benchmark task in a tiny isolated workspace.
-You MUST make the required code change with the edit/write tools and verify with bash ({command: "node check.mjs"}).
-Prefer: read (or glob) → edit/write → bash node check.mjs → stop.
-Do not use LSP, intake, task, or background shells — they are not available.
-If check.mjs exits 0, stop. If it fails, fix and re-check within your step budget.`;
+
+  // Workspace inventory (bench-only) — avoids glob and often skips reading check.mjs.
+  let workspaceFiles: string[] = [];
+  try {
+    workspaceFiles = (await readdir(workdir))
+      .filter(
+        (n) =>
+          !n.startsWith(".") &&
+          n !== "task.json" &&
+          n !== "_solution" &&
+          n !== "node_modules",
+      )
+      .sort();
+  } catch {
+    workspaceFiles = [];
+  }
+  const fileList = workspaceFiles.length
+    ? workspaceFiles.filter((n) => n !== "check.mjs").join(", ") || "(none)"
+    : "(unknown)";
+  // Keep short: task.prompt already says verify with node check.mjs.
+  const BENCH_SYSTEM = `Coding bench. Files: ${fileList}.
+Read/edit those (SPEC.md only if mentioned). Never read check.mjs — use bash stderr from node check.mjs instead.
+Flow: read → edit/write → bash {command:"node check.mjs"}; stop on exit 0. Multiple reads in one step OK.`;
   try {
     const loopPromise = runAgentLoop({
       ctx: toolCtx,

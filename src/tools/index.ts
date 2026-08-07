@@ -468,7 +468,113 @@ async function executeForModel(
 
 export type ToolProfile = "full" | "coding";
 
-/** edit / write / bash — shared by full and coding profiles. */
+function isNodeCheckCommand(command: string): boolean {
+  return (
+    /\bnode\s+check\.mjs\b/.test(command) ||
+    /(?:^|[;&|]\s*)node\s+check\.mjs\b/.test(command)
+  );
+}
+
+function maybeNotifyBenchCheckPass(
+  ctx: ToolContext,
+  command: string,
+  result: { ok: boolean; exitCode?: number },
+): void {
+  if (!isNodeCheckCommand(command)) return;
+  // Keep check.mjs reads denied — bash stderr already carries the failure signal.
+  // (Unlocking after fail often burns an extra read step for little gain.)
+  if (!ctx.onBenchCheckPass || !result.ok || result.exitCode !== 0) return;
+  ctx.onBenchCheckPass();
+}
+
+function isCheckMjsPath(filePath: string): boolean {
+  const base = path.basename(filePath.replace(/\\/g, "/"));
+  return base === "check.mjs";
+}
+
+/**
+ * Bench/compare lean surface — same 4 tools as pi (`read`/`edit`/`write`/`bash`).
+ * Short schemas/descriptions only; ADE `full` profile is unchanged.
+ */
+function createCodingAiTools(ctx: ToolContext) {
+  return {
+    read: tool({
+      description: "Read a workspace file by path.",
+      parameters: z.object({
+        path: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "read", async () => {
+          if (ctx.benchDenyCheckRead && isCheckMjsPath(args.path)) {
+            const started = Date.now();
+            await emit(ctx, "tool_call", "read", {
+              target: args.path,
+              input: args,
+            });
+            const out = {
+              ok: false as const,
+              tool: "read",
+              path: args.path,
+              error:
+                "bench: do not read check.mjs until node check.mjs fails — edit the implementation file, then bash node check.mjs",
+              durationMs: Date.now() - started,
+            };
+            await emit(ctx, "tool_result", "read", {
+              target: args.path,
+              ok: false,
+              durationMs: out.durationMs,
+              output: previewForLog("read", out),
+            });
+            return out;
+          }
+          return readTool(ctx, { path: args.path });
+        }),
+    }),
+    edit: tool({
+      description: "Exact string replace in a file.",
+      parameters: z.object({
+        path: z.string(),
+        oldString: z.string(),
+        newString: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "edit", () =>
+          editTool(ctx, {
+            path: args.path,
+            oldString: args.oldString,
+            newString: args.newString,
+            replaceAll: false,
+          }),
+        ),
+    }),
+    write: tool({
+      description: "Create or overwrite a file.",
+      parameters: z.object({
+        path: z.string(),
+        content: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "write", () => writeTool(ctx, args)),
+    }),
+    bash: tool({
+      description: "Run a shell command (~60s timeout).",
+      parameters: z.object({
+        command: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "bash", async () => {
+          const result = await bashTool(ctx, {
+            command: args.command,
+            timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
+          });
+          maybeNotifyBenchCheckPass(ctx, args.command, result);
+          return result;
+        }),
+    }),
+  };
+}
+
+/** edit / write / bash — ADE full profile (verbose guidance + bg-shell tip). */
 function createMutationAiTools(ctx: ToolContext) {
   return {
     edit: tool({
@@ -509,15 +615,7 @@ function createMutationAiTools(ctx: ToolContext) {
             command: args.command,
             timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
           });
-          if (ctx.onBenchCheckPass && result.ok && result.exitCode === 0) {
-            const cmd = String(args.command ?? "");
-            if (
-              /\bnode\s+check\.mjs\b/.test(cmd) ||
-              /(?:^|[;&|]\s*)node\s+check\.mjs\b/.test(cmd)
-            ) {
-              ctx.onBenchCheckPass();
-            }
-          }
+          maybeNotifyBenchCheckPass(ctx, args.command, result);
           return result;
         }),
     }),
@@ -529,23 +627,20 @@ function createMutationAiTools(ctx: ToolContext) {
  * Keep schemas minimal: Groq (gpt-oss) rejects optional-only keys and
  * often invents/omits extra fields when schemas are wide.
  * All results pass through the truncation layer before reaching the model.
+ *
+ * `profile: "coding"` — bench/compare only (4 tools, lean schemas).
+ * Default `"full"` — interactive ADE surface (unchanged).
  */
 export function createAiTools(
   ctx: ToolContext,
   opts?: { profile?: ToolProfile },
 ) {
   const profile = opts?.profile ?? "full";
-  const mutation = createMutationAiTools(ctx);
-
   if (profile === "coding") {
-    const ro = createReadOnlyAiTools(ctx);
-    return {
-      grep: ro.grep,
-      glob: ro.glob,
-      read: ro.read,
-      ...mutation,
-    };
+    return createCodingAiTools(ctx);
   }
+
+  const mutation = createMutationAiTools(ctx);
 
   return {
     ...createReadOnlyAiTools(ctx),

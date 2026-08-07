@@ -18,6 +18,11 @@ export type ToolContext = {
   shellJobs?: ShellJobManager;
   /** When set, called after bash when command looks like node check.mjs and exitCode===0. */
   onBenchCheckPass?: () => void;
+  /**
+   * Bench-only: when true, coding-profile `read` refuses `check.mjs` until a
+   * failed `node check.mjs` run clears it. Interactive ADE never sets this.
+   */
+  benchDenyCheckRead?: boolean;
 };
 
 export type ToolPlaneEvent = {
