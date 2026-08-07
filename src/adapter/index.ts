@@ -18,7 +18,7 @@ import {
   compactionConfigFromEnv,
   formatTokens,
 } from "../context/compact.js";
-import { withProviderRetry, type RetryStatusEvent } from "./retry.js";
+import { withProviderRetry, ProviderError, type RetryStatusEvent } from "./retry.js";
 import {
   createProviderHandle,
   hasAnyProviderKey,
@@ -246,12 +246,30 @@ export async function runAgentLoop(
   const totals = { promptTokens: 0, completionTokens: 0 };
   const system = composeSystem(opts.system);
 
+  const readUsage = (usage: unknown): { promptTokens: number; completionTokens: number } => {
+    const u = (usage ?? {}) as Record<string, unknown>;
+    const prompt = Number(
+      u.promptTokens ?? u.inputTokens ?? u.prompt_tokens ?? u.input_tokens ?? 0,
+    );
+    const completion = Number(
+      u.completionTokens ??
+        u.outputTokens ??
+        u.completion_tokens ??
+        u.output_tokens ??
+        0,
+    );
+    return {
+      promptTokens: Number.isFinite(prompt) ? prompt : 0,
+      completionTokens: Number.isFinite(completion) ? completion : 0,
+    };
+  };
+
   const onStepFinish = async (
     step: {
       text?: string;
       finishReason?: string;
       toolCalls?: Array<{ toolName: string; args: unknown }>;
-      usage?: { promptTokens?: number; completionTokens?: number };
+      usage?: unknown;
     },
   ) => {
     if (step.text) {
@@ -268,8 +286,9 @@ export async function runAgentLoop(
       })),
       usage: step.usage,
     });
-    totals.promptTokens += step.usage?.promptTokens ?? 0;
-    totals.completionTokens += step.usage?.completionTokens ?? 0;
+    const usage = readUsage(step.usage);
+    totals.promptTokens += usage.promptTokens;
+    totals.completionTokens += usage.completionTokens;
     opts.onUsage?.({ ...totals });
   };
 
@@ -335,12 +354,40 @@ export async function runAgentLoop(
     result = await once([...messages, nudge]);
   }
 
+  // Gemini sometimes returns finishReason "error" without throwing — treat as
+  // a hard failure so callers (bench) do not score a silent early stop as a
+  // normal completion.
+  if (result.finishReason === "error") {
+    const detail =
+      (result as { error?: { message?: string } }).error?.message ??
+      "model finished with finishReason=error";
+    opts.onStatus?.({
+      label: "provider error",
+      detail: detail.slice(0, 200),
+      level: "error",
+      sticky: true,
+    });
+    throw new ProviderError(detail.slice(0, 400));
+  }
+
   const nextMessages: CoreMessage[] = [
     ...messages,
     ...(result.response?.messages ?? [
       { role: "assistant" as const, content: result.text },
     ]),
   ];
+
+  const finalUsage = readUsage(
+    (result as { totalUsage?: unknown; usage?: unknown }).totalUsage ??
+      (result as { usage?: unknown }).usage,
+  );
+  if (finalUsage.promptTokens > totals.promptTokens) {
+    totals.promptTokens = finalUsage.promptTokens;
+  }
+  if (finalUsage.completionTokens > totals.completionTokens) {
+    totals.completionTokens = finalUsage.completionTokens;
+  }
+  opts.onUsage?.({ ...totals });
 
   return {
     text: result.text,
