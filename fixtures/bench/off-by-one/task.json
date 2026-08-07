@@ -1,0 +1,8 @@
+{
+  "id": "off-by-one",
+  "title": "Fix off-by-one in sumRange",
+  "prompt": "The function sumRange(a, b) in stats.mjs must return the sum of all integers from a to b INCLUSIVE (e.g. sumRange(1, 5) === 15), but it currently returns the wrong value because of an off-by-one bug. Fix the bug in stats.mjs, then verify by running `node check.mjs` (exit code 0 means done).",
+  "category": "bugfix",
+  "timeoutMs": 120000,
+  "maxSteps": 8
+}

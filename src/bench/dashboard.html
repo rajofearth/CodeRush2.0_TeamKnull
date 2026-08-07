@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>clai bench</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #141414;
+    --element: #1e1e1e;
+    --hover: #282828;
+    --border: #484848;
+    --border-subtle: #3c3c3c;
+    --text: #eeeeee;
+    --muted: #808080;
+    --faint: #606060;
+    --accent: #5c9cf5;
+    --accent-hover: #7fb3f8;
+    --success: #7fd88f;
+    --warning: #f5a742;
+    --error: #e06c75;
+    --info: #56b6c2;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    min-height: 100%;
+  }
+  body { padding: 20px 24px 48px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 700; margin: 0 0 4px; letter-spacing: 0.02em; }
+  h1 span.brand { color: var(--accent); }
+  h2 {
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text); margin: 0 0 12px;
+  }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { color: var(--accent-hover); }
+  .panel {
+    background: var(--panel);
+    border-left: 3px solid var(--border);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .panel.live { border-left-color: var(--accent); }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 12px 20px;
+    color: var(--muted); font-size: 12px; margin-bottom: 12px;
+  }
+  .meta strong { color: var(--text); font-weight: 600; }
+  .progress {
+    height: 8px; background: var(--element); margin: 8px 0 14px;
+    display: flex; overflow: hidden;
+  }
+  .progress > i {
+    display: block; height: 100%;
+    transition: width 0.25s ease;
+  }
+  .progress .p-pass { background: var(--success); }
+  .progress .p-fail { background: var(--error); }
+  .progress .p-run { background: var(--accent); }
+  .progress .p-queue { background: var(--faint); }
+  .progress .p-err { background: var(--warning); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+  }
+  .card {
+    background: var(--element);
+    padding: 10px 12px;
+    border-left: 3px solid var(--border-subtle);
+    min-height: 72px;
+  }
+  .card.queued { border-left-color: var(--faint); }
+  .card.running { border-left-color: var(--accent); }
+  .card.pass { border-left-color: var(--success); }
+  .card.fail { border-left-color: var(--error); }
+  .card.timeout, .card.error { border-left-color: var(--warning); }
+  .card .id { color: var(--text); font-weight: 600; font-size: 12px; }
+  .card .title { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .card .row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; font-size: 11px; color: var(--muted);
+  }
+  .status {
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: 10px;
+  }
+  .status.queued { color: var(--faint); }
+  .status.running { color: var(--accent); }
+  .status.pass { color: var(--success); }
+  .status.fail { color: var(--error); }
+  .status.timeout, .status.error { color: var(--warning); }
+  .spin {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); margin-right: 6px;
+    animation: pulse 0.9s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.85); }
+  }
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .chart-box {
+    background: var(--panel);
+    border-left: 3px solid var(--border-subtle);
+    padding: 12px 14px;
+  }
+  .chart-box h3 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  }
+  svg.chart { width: 100%; height: auto; display: block; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  th {
+    text-align: left; color: var(--muted); font-weight: 600;
+    padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  td {
+    padding: 8px; border-bottom: 1px solid var(--border-subtle);
+    color: var(--text); vertical-align: middle;
+  }
+  tr.hist:hover td { background: var(--hover); cursor: pointer; }
+  tr.hist.selected td { background: var(--element); }
+  .rate-hi { color: var(--success); }
+  .rate-mid { color: var(--warning); }
+  .rate-lo { color: var(--error); }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .detail {
+    margin-top: 12px; background: var(--element); padding: 12px;
+    display: none;
+  }
+  .detail.open { display: block; }
+  .detail pre {
+    margin: 8px 0 0; white-space: pre-wrap; word-break: break-word;
+    color: var(--muted); font-size: 11px; max-height: 280px; overflow: auto;
+  }
+  .pill {
+    display: inline-block; padding: 1px 6px;
+    background: var(--element); color: var(--muted); font-size: 10px;
+    margin-left: 6px;
+  }
+  .conn { float: right; font-size: 11px; color: var(--muted); }
+  .conn.on { color: var(--success); }
+  .conn.off { color: var(--error); }
+  .spark { vertical-align: middle; }
+</style>
+</head>
+<body>
+  <div class="conn" id="conn">● Connecting</div>
+  <h1><span class="brand">clai</span> bench</h1>
+  <p class="sub">live metrics · parallel runs · history &nbsp;·&nbsp; <a href="/api/runs">/api/runs</a></p>
+
+  <section class="panel live" id="live-panel">
+    <h2>Live run</h2>
+    <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
+    <div class="progress" id="live-progress" aria-hidden="true"></div>
+    <div class="grid" id="task-grid"></div>
+  </section>
+
+  <section>
+    <h2>Charts</h2>
+    <div class="charts">
+      <div class="chart-box">
+        <h3>Pass rate</h3>
+        <svg class="chart" id="chart-pass" viewBox="0 0 200 120" role="img"></svg>
+      </div>
+      <div class="chart-box">
+        <h3>Duration by task (ms)</h3>
+        <svg class="chart" id="chart-dur" viewBox="0 0 320 140" role="img"></svg>
+      </div>
+      <div class="chart-box">
+        <h3>Tokens by task</h3>
+        <svg class="chart" id="chart-tok" viewBox="0 0 320 140" role="img"></svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>History</h2>
+    <div id="spark-wrap" style="margin-bottom:10px;color:var(--muted);font-size:11px;"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>run</th>
+          <th>started</th>
+          <th>provider</th>
+          <th>pass</th>
+          <th>wall</th>
+          <th>cost</th>
+        </tr>
+      </thead>
+      <tbody id="history-body">
+        <tr><td colspan="6" class="empty">no runs yet</td></tr>
+      </tbody>
+    </table>
+    <div class="detail" id="run-detail"></div>
+  </section>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let snapshot = null;
+  let runs = [];
+  let selectedId = null;
+  let tickTimer = null;
+  const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
+
+  function fmtMs(ms) {
+    if (ms == null || Number.isNaN(ms)) return "—";
+    if (ms < 1000) return ms + "ms";
+    return (ms / 1000).toFixed(1) + "s";
+  }
+  function fmtCost(c) {
+    return "$" + (Number(c) || 0).toFixed(4);
+  }
+  function fmtPct(r) {
+    return Math.round((Number(r) || 0) * 100) + "%";
+  }
+  function rateClass(r) {
+    if (r >= 0.8) return "rate-hi";
+    if (r >= 0.4) return "rate-mid";
+    return "rate-lo";
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+  }
+
+  function setConn(on, label) {
+    const el = $("conn");
+    el.className = "conn " + (on ? "on" : "off");
+    el.textContent = "● " + label;
+  }
+
+  function renderLive() {
+    const meta = $("live-meta");
+    const grid = $("task-grid");
+    const prog = $("live-progress");
+    if (!snapshot) {
+      meta.innerHTML = '<span class="empty">waiting for a run…</span>';
+      grid.innerHTML = "";
+      prog.innerHTML = "";
+      return;
+    }
+    const tasks = snapshot.tasks || [];
+    const counts = { queued: 0, running: 0, pass: 0, fail: 0, timeout: 0, error: 0 };
+    let tokensIn = 0, tokensOut = 0, cost = 0;
+    for (const t of tasks) {
+      counts[t.status] = (counts[t.status] || 0) + 1;
+      tokensIn += t.tokensIn || 0;
+      tokensOut += t.tokensOut || 0;
+      cost += t.cost || 0;
+    }
+    const elapsed = Date.now() - startedMs();
+    const done = !!snapshot.done;
+    meta.innerHTML =
+      "<span><strong>" + esc(snapshot.runId) + "</strong>" +
+      (snapshot.offline ? '<span class="pill">offline</span>' : "") +
+      (done ? '<span class="pill">done</span>' : '<span class="pill">live</span>') +
+      "</span>" +
+      "<span>" + esc(snapshot.provider) + " · " + esc(snapshot.model) + "</span>" +
+      "<span>parallel <strong>" + esc(snapshot.parallel) + "</strong></span>" +
+      "<span>elapsed <strong id='elapsed'>" + fmtMs(elapsed) + "</strong></span>" +
+      "<span>tokens <strong>" + (tokensIn + tokensOut).toLocaleString() + "</strong></span>" +
+      "<span>cost <strong>" + fmtCost(cost) + "</strong></span>" +
+      "<span>pass <strong class='" + rateClass(counts.pass / Math.max(tasks.length, 1)) + "'>" +
+      counts.pass + "/" + tasks.length + "</strong></span>";
+
+    const n = Math.max(tasks.length, 1);
+    const seg = (key, cls) => {
+      const w = (counts[key] || 0) / n * 100;
+      return w > 0 ? '<i class="' + cls + '" style="width:' + w + '%"></i>' : "";
+    };
+    prog.innerHTML =
+      seg("pass", "p-pass") + seg("fail", "p-fail") + seg("error", "p-err") +
+      seg("timeout", "p-err") + seg("running", "p-run") + seg("queued", "p-queue");
+
+    grid.innerHTML = tasks.map((t) => {
+      const spin = t.status === "running" ? '<span class="spin"></span>' : "";
+      const wall = t.wallMs != null ? fmtMs(t.wallMs) : "—";
+      const steps = t.steps != null ? t.steps + " steps" : "";
+      return (
+        '<div class="card ' + esc(t.status) + '">' +
+          '<div class="id">' + esc(t.id) + '</div>' +
+          '<div class="title">' + esc(t.title) + ' · ' + esc(t.category) + '</div>' +
+          '<div class="row">' +
+            '<span class="status ' + esc(t.status) + '">' + spin + esc(t.status) + '</span>' +
+            '<span>' + wall + (steps ? " · " + steps : "") + '</span>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+
+    renderCharts(tasks);
+    if (!done) {
+      clearInterval(tickTimer);
+      tickTimer = setInterval(() => {
+        const el = $("elapsed");
+        if (el && snapshot && !snapshot.done) el.textContent = fmtMs(Date.now() - startedMs());
+      }, 250);
+    } else {
+      clearInterval(tickTimer);
+    }
+  }
+
+  function renderCharts(tasks) {
+    const passSvg = $("chart-pass");
+    const durSvg = $("chart-dur");
+    const tokSvg = $("chart-tok");
+    if (!tasks || !tasks.length) {
+      passSvg.innerHTML = emptySvg(200, 120);
+      durSvg.innerHTML = emptySvg(320, 140);
+      tokSvg.innerHTML = emptySvg(320, 140);
+      return;
+    }
+    const passed = tasks.filter((t) => t.status === "pass").length;
+    const failed = tasks.filter((t) => t.status === "fail" || t.status === "error" || t.status === "timeout").length;
+    const pending = tasks.length - passed - failed;
+    passSvg.innerHTML = donutSvg(passed, failed, pending, tasks.length);
+
+    const durations = tasks.map((t) => ({
+      id: t.id,
+      v: t.wallMs || 0,
+      status: t.status,
+    }));
+    durSvg.innerHTML = barSvg(durations, 320, 140, (v) => fmtMs(v));
+
+    const tokens = tasks.map((t) => ({
+      id: t.id,
+      v: (t.tokensIn || 0) + (t.tokensOut || 0),
+      status: t.status,
+    }));
+    tokSvg.innerHTML = barSvg(tokens, 320, 140, (v) => String(v));
+  }
+
+  function emptySvg(w, h) {
+    return '<text x="' + (w / 2) + '" y="' + (h / 2) +
+      '" text-anchor="middle" fill="#808080" font-size="11">no data</text>';
+  }
+
+  function donutSvg(pass, fail, pending, total) {
+    const cx = 70, cy = 60, r = 38, stroke = 14;
+    const circ = 2 * Math.PI * r;
+    const parts = [
+      { n: pass, c: "#7fd88f" },
+      { n: fail, c: "#e06c75" },
+      { n: pending, c: "#606060" },
+    ];
+    let offset = 0;
+    let arcs = "";
+    for (const p of parts) {
+      if (!p.n) continue;
+      const len = (p.n / total) * circ;
+      arcs +=
+        '<circle cx="' + cx + '" cy="' + cy + '" r="' + r +
+        '" fill="none" stroke="' + p.c + '" stroke-width="' + stroke +
+        '" stroke-dasharray="' + len + " " + (circ - len) +
+        '" stroke-dashoffset="' + (-offset) +
+        '" transform="rotate(-90 ' + cx + " " + cy + ')" />';
+      offset += len;
+    }
+    const pct = Math.round((pass / total) * 100);
+    return arcs +
+      '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle" fill="#eeeeee" font-size="16" font-weight="700">' +
+      pct + "%</text>" +
+      '<text x="145" y="40" fill="#7fd88f" font-size="11">pass ' + pass + "</text>" +
+      '<text x="145" y="58" fill="#e06c75" font-size="11">fail ' + fail + "</text>" +
+      '<text x="145" y="76" fill="#808080" font-size="11">other ' + pending + "</text>";
+  }
+
+  function barSvg(items, w, h, fmt) {
+    const padL = 90, padR = 12, padT = 8, padB = 16;
+    const max = Math.max(1, ...items.map((i) => i.v));
+    const barH = Math.min(14, (h - padT - padB) / Math.max(items.length, 1) - 4);
+    let out = "";
+    items.forEach((it, i) => {
+      const y = padT + i * ((h - padT - padB) / items.length);
+      const bw = ((w - padL - padR) * it.v) / max;
+      const color =
+        it.status === "pass" ? "#7fd88f" :
+        it.status === "running" ? "#5c9cf5" :
+        it.status === "fail" || it.status === "error" || it.status === "timeout" ? "#e06c75" :
+        "#606060";
+      out +=
+        '<text x="0" y="' + (y + barH) + '" fill="#808080" font-size="10">' +
+        esc(it.id.length > 14 ? it.id.slice(0, 13) + "…" : it.id) + "</text>" +
+        '<rect x="' + padL + '" y="' + (y + 2) + '" width="' + Math.max(bw, 0) +
+        '" height="' + barH + '" fill="' + color + '" />' +
+        '<text x="' + (padL + bw + 4) + '" y="' + (y + barH) +
+        '" fill="#808080" font-size="10">' + esc(fmt(it.v)) + "</text>";
+    });
+    return out || emptySvg(w, h);
+  }
+
+  function sparkline(rates, w, h) {
+    if (!rates.length) return "";
+    const max = 1, min = 0;
+    const step = rates.length > 1 ? (w - 4) / (rates.length - 1) : 0;
+    const pts = rates.map((r, i) => {
+      const x = 2 + i * step;
+      const y = h - 2 - ((r - min) / (max - min || 1)) * (h - 4);
+      return x + "," + y;
+    }).join(" ");
+    return (
+      '<svg class="spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + " " + h + '">' +
+      '<polyline fill="none" stroke="#5c9cf5" stroke-width="1.5" points="' + pts + '" />' +
+      "</svg>"
+    );
+  }
+
+  function renderHistory() {
+    const body = $("history-body");
+    const sparkWrap = $("spark-wrap");
+    if (!runs.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty">no runs yet</td></tr>';
+      sparkWrap.innerHTML = "";
+      return;
+    }
+    const rates = runs.map((r) => r.passRate || 0);
+    sparkWrap.innerHTML = "pass-rate trend " + sparkline(rates, 160, 28);
+
+    body.innerHTML = runs.slice().reverse().map((r) => {
+      const sel = r.runId === selectedId ? " selected" : "";
+      return (
+        '<tr class="hist' + sel + '" data-id="' + esc(r.runId) + '">' +
+          "<td>" + esc(r.runId) + (r.offline ? ' <span class="pill">offline</span>' : "") + "</td>" +
+          "<td>" + esc((r.startedAt || "").replace("T", " ").slice(0, 19)) + "</td>" +
+          "<td>" + esc(r.provider) + " / " + esc(r.model) + "</td>" +
+          '<td class="' + rateClass(r.passRate) + '">' +
+            (r.passed || 0) + "/" + (r.total || 0) + " (" + fmtPct(r.passRate) + ")</td>" +
+          "<td>" + fmtMs(r.totalWallMs) + "</td>" +
+          "<td>" + fmtCost(r.totalCost) + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+
+    body.querySelectorAll("tr.hist").forEach((tr) => {
+      tr.addEventListener("click", () => selectRun(tr.getAttribute("data-id")));
+    });
+  }
+
+  async function selectRun(id) {
+    selectedId = id;
+    renderHistory();
+    const detail = $("run-detail");
+    detail.className = "detail open";
+    detail.innerHTML = '<span class="empty">loading ' + esc(id) + "…</span>";
+    try {
+      const res = await fetch("/api/runs/" + encodeURIComponent(id));
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const run = await res.json();
+      const rows = (run.tasks || []).map((t) =>
+        t.id.padEnd(22) + " " + String(t.status).padEnd(8) + " " +
+        fmtMs(t.wallMs).padStart(8) + "  steps=" + (t.steps || 0) +
+        "  tok=" + ((t.tokensIn || 0) + (t.tokensOut || 0)) +
+        (t.error ? "  err=" + t.error : "")
+      ).join("\n");
+      detail.innerHTML =
+        "<strong>" + esc(run.runId) + "</strong>" +
+        '<span class="pill">' + esc(run.provider) + "</span>" +
+        '<span class="pill">' + fmtPct(run.aggregates?.passRate) + " pass</span>" +
+        "<pre>" + esc(rows) + "</pre>";
+      if (run.tasks && (!snapshot || snapshot.done)) {
+        renderCharts(run.tasks.map((t) => ({
+          id: t.id,
+          title: t.title,
+          category: t.category,
+          status: t.status,
+          wallMs: t.wallMs,
+          steps: t.steps,
+          tokensIn: t.tokensIn,
+          tokensOut: t.tokensOut,
+          cost: t.cost,
+        })));
+      }
+    } catch (err) {
+      detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
+    }
+  }
+
+  async function loadRuns() {
+    try {
+      const res = await fetch("/api/runs");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      runs = await res.json();
+      renderHistory();
+    } catch (err) {
+      $("history-body").innerHTML =
+        '<tr><td colspan="6" class="empty">history unavailable: ' + esc(err.message) + "</td></tr>";
+    }
+  }
+
+  function connectSse() {
+    const es = new EventSource("/events");
+    es.onopen = () => setConn(true, "Connected");
+    es.onerror = () => setConn(false, "Reconnecting");
+    es.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "snapshot" && msg.snapshot) {
+          const wasDone = snapshot && snapshot.done;
+          snapshot = msg.snapshot;
+          renderLive();
+          if (snapshot.done && !wasDone) loadRuns();
+        }
+      } catch { /* ignore bad frames */ }
+    };
+  }
+
+  renderLive();
+  loadRuns();
+  connectSse();
+  setInterval(loadRuns, 30_000);
+})();
+</script>
+</body>
+</html>

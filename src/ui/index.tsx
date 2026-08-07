@@ -42,15 +42,51 @@ export {
 export {
   Activity,
   ApprovalPrompt,
-  ContextStrip,
-  Footer,
-  Header,
-  InputLine,
+  FooterBar,
+  HintLine,
   PlanBlock,
-  StatusLine,
-  ToolRow,
+  ProgressBar,
+  PromptBox,
+  SIDEBAR_WIDTH,
+  Sidebar,
+  SplashFooter,
+  ToolRowLine,
   VerifyResult,
+  Wordmark,
+  WorkingLine,
   formatCost,
   formatDuration,
   formatTokens,
+  toolSigil,
 } from "./components.js";
+
+export type { FooterHint, Segment } from "./components.js";
+
+export {
+  colorLevel,
+  detectColorLevel,
+  detectGlyphs,
+  expandWordmarkRow,
+  glyph,
+  glyphs,
+  resolve,
+  setColorLevel,
+  setGlyphs,
+  tintHex,
+  WORDMARK_LEFT,
+  WORDMARK_RIGHT,
+} from "./theme.js";
+
+export type { ColorLevel, GlyphName, GlyphSet, ThemeToken, WordmarkCell } from "./theme.js";
+
+export {
+  armMouse,
+  createHitRegistry,
+  createSgrMouseParser,
+  enterAltScreen,
+  isMouseEnabled,
+  measureAbsolute,
+  registerRestore,
+} from "./mouse.js";
+
+export type { Box, HitRegistry, MouseEvent, MouseEventKind, MouseHandlers } from "./mouse.js";

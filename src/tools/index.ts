@@ -23,6 +23,7 @@ import {
   lspReferencesTool,
 } from "./lsp.js";
 import { intakeTool } from "./intake.js";
+import { capToolResultForModel } from "./limits.js";
 
 export type { ToolContext, ToolPlaneEvent, ToolResult } from "./common.js";
 export { resolveInWorkspace, pathExists } from "./common.js";
@@ -34,6 +35,7 @@ export {
   disposeLspSessions,
 } from "./lsp.js";
 export { intakeTool, scanIntakeMap, type IntakeMap } from "./intake.js";
+export { MODEL_OUTPUT_CAPS, capToolResultForModel } from "./limits.js";
 
 async function emit(
   ctx: ToolContext,
@@ -85,6 +87,8 @@ export async function grepTool(
     if (result.exitCode === 0 || result.exitCode === 1) {
       const matches: Array<{ file: string; line: number; text: string }> = [];
       for (const line of (result.stdout ?? "").split("\n")) {
+        // `rg -m` limits per file, not globally — enforce the global cap here.
+        if (matches.length >= maxResults) break;
         if (!line.trim()) continue;
         try {
           const row = JSON.parse(line) as {
@@ -246,27 +250,45 @@ export async function readTool(
   const started = Date.now();
   const abs = resolveInWorkspace(ctx.workspaceRoot, args.path);
   await emit(ctx, "tool_call", "read", { target: args.path, input: args });
-  const content = await readFile(abs, "utf8");
-  const lines = content.split(/\r?\n/);
-  const offset = Math.max(1, args.offset ?? 1);
-  const limit = args.limit ?? lines.length;
-  const slice = lines.slice(offset - 1, offset - 1 + limit);
-  const out = {
-    ok: true,
-    tool: "read",
-    path: path.relative(ctx.workspaceRoot, abs),
-    offset,
-    lines: slice.map((text, i) => ({ line: offset + i, text })),
-    totalLines: lines.length,
-    durationMs: Date.now() - started,
-  };
-  await emit(ctx, "tool_result", "read", {
-    target: args.path,
-    ok: true,
-    durationMs: out.durationMs,
-    output: { totalLines: lines.length, shown: slice.length },
-  });
-  return out;
+  try {
+    const content = await readFile(abs, "utf8");
+    const lines = content.split(/\r?\n/);
+    const offset = Math.max(1, args.offset ?? 1);
+    const limit = args.limit ?? lines.length;
+    const slice = lines.slice(offset - 1, offset - 1 + limit);
+    const out = {
+      ok: true,
+      tool: "read",
+      path: path.relative(ctx.workspaceRoot, abs),
+      offset,
+      lines: slice.map((text, i) => ({ line: offset + i, text })),
+      totalLines: lines.length,
+      durationMs: Date.now() - started,
+    };
+    await emit(ctx, "tool_result", "read", {
+      target: args.path,
+      ok: true,
+      durationMs: out.durationMs,
+      output: { totalLines: lines.length, shown: slice.length },
+    });
+    return out;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const out = {
+      ok: false,
+      tool: "read",
+      path: args.path,
+      error: message,
+      durationMs: Date.now() - started,
+    };
+    await emit(ctx, "tool_result", "read", {
+      target: args.path,
+      ok: false,
+      durationMs: out.durationMs,
+      detail: message.slice(0, 200),
+    });
+    return out;
+  }
 }
 
 export async function editTool(
@@ -338,21 +360,26 @@ export async function writeTool(
   return out;
 }
 
+/** Default bash wall-clock timeout when the model omits one (ms). */
+const DEFAULT_BASH_TIMEOUT_MS = 60_000;
+
 export async function bashTool(
   ctx: ToolContext,
   args: { command: string; cwd?: string; timeoutMs?: number },
 ): Promise<ToolResult> {
   const started = Date.now();
+  const timeoutMs = args.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
   await emit(ctx, "tool_call", "bash", {
     target: args.command,
-    input: args,
+    input: { ...args, timeoutMs },
   });
   const result = await ctx.sandbox.run(args.command, {
     cwd: args.cwd
       ? resolveInWorkspace(ctx.workspaceRoot, args.cwd)
       : ctx.workspaceRoot,
-    timeoutMs: args.timeoutMs,
+    timeoutMs,
   });
+  // Source safety clip; model-facing head+tail lives in limits.ts.
   const out = {
     ok: result.exitCode === 0,
     tool: "bash",
@@ -413,11 +440,83 @@ async function safeExecute(
 }
 
 /**
+ * Single truncation layer where tool results enter the message history.
+ * The full result is appended to the JSONL trace whenever capping occurred,
+ * so nothing is lost — the model sees a marker telling it how to get more.
+ */
+async function executeForModel(
+  ctx: ToolContext,
+  toolName: string,
+  run: () => Promise<ToolResult>,
+): Promise<ToolResult> {
+  const full = await safeExecute(toolName, run);
+  const { result, truncated } = capToolResultForModel(toolName, full);
+  if (truncated) {
+    await ctx.trace?.append("tool_result", {
+      tool: toolName,
+      fullOutput: true,
+      output: full,
+    });
+  }
+  return result;
+}
+
+/**
  * AI SDK tool map — same implementations, swappable model.
  * Keep schemas minimal: Groq (gpt-oss) rejects optional-only keys and
  * often invents/omits extra fields when schemas are wide.
+ * All results pass through the truncation layer before reaching the model.
  */
 export function createAiTools(ctx: ToolContext) {
+  return {
+    ...createReadOnlyAiTools(ctx),
+    edit: tool({
+      description: "Exact string replacement edit in an existing file.",
+      parameters: z.object({
+        path: z.string(),
+        oldString: z.string().describe("Exact text to find"),
+        newString: z.string().describe("Replacement text"),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "edit", () =>
+          editTool(ctx, {
+            path: args.path,
+            oldString: args.oldString,
+            newString: args.newString,
+            replaceAll: false,
+          }),
+        ),
+    }),
+    write: tool({
+      description: "Create or overwrite a text file.",
+      parameters: z.object({
+        path: z.string(),
+        content: z.string(),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "write", () => writeTool(ctx, args)),
+    }),
+    bash: tool({
+      description:
+        "Run a shell command in the sandboxed workspace (network deny-by-default). Hard timeout ~60s; large stdout/stderr is truncated for context.",
+      parameters: z.object({
+        command: z.string().describe("Shell command to run"),
+      }),
+      execute: async (args) =>
+        executeForModel(ctx, "bash", () =>
+          bashTool(ctx, {
+            command: args.command,
+            timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
+          }),
+        ),
+    }),
+  };
+}
+
+/**
+ * Read-only tool map — used by the `task` subagent (no edit/write/bash).
+ */
+export function createReadOnlyAiTools(ctx: ToolContext) {
   return {
     grep: tool({
       description: "Search file contents with ripgrep (or Node fallback).",
@@ -429,7 +528,7 @@ export function createAiTools(ctx: ToolContext) {
           .describe("Subdir to search, or null for workspace root"),
       }),
       execute: async (args) =>
-        safeExecute("grep", () =>
+        executeForModel(ctx, "grep", () =>
           grepTool(ctx, {
             pattern: args.pattern,
             path: args.path ?? undefined,
@@ -445,55 +544,36 @@ export function createAiTools(ctx: ToolContext) {
           .describe("Glob pattern, e.g. **/* or *.ts (empty defaults to **/*)"),
       }),
       execute: async (args) =>
-        safeExecute("glob", () =>
+        executeForModel(ctx, "glob", () =>
           globTool(ctx, {
             pattern: args.pattern,
           }),
         ),
     }),
     read: tool({
-      description: "Read a text file from the workspace.",
+      description:
+        "Read a text file from the workspace. Large files are shown head+tail truncated; pass offset/limit to see a specific line range.",
       parameters: z.object({
         path: z.string().describe("File path relative to workspace"),
+        offset: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .describe("1-based start line, or null for start of file"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .describe("Max lines to read, or null for all"),
       }),
       execute: async (args) =>
-        safeExecute("read", () => readTool(ctx, { path: args.path })),
-    }),
-    edit: tool({
-      description: "Exact string replacement edit in an existing file.",
-      parameters: z.object({
-        path: z.string(),
-        oldString: z.string().describe("Exact text to find"),
-        newString: z.string().describe("Replacement text"),
-      }),
-      execute: async (args) =>
-        safeExecute("edit", () =>
-          editTool(ctx, {
+        executeForModel(ctx, "read", () =>
+          readTool(ctx, {
             path: args.path,
-            oldString: args.oldString,
-            newString: args.newString,
-            replaceAll: false,
-          }),
-        ),
-    }),
-    write: tool({
-      description: "Create or overwrite a text file.",
-      parameters: z.object({
-        path: z.string(),
-        content: z.string(),
-      }),
-      execute: async (args) => safeExecute("write", () => writeTool(ctx, args)),
-    }),
-    bash: tool({
-      description:
-        "Run a shell command in the sandboxed workspace (network deny-by-default).",
-      parameters: z.object({
-        command: z.string().describe("Shell command to run"),
-      }),
-      execute: async (args) =>
-        safeExecute("bash", () =>
-          bashTool(ctx, {
-            command: args.command,
+            offset: args.offset ?? undefined,
+            limit: args.limit ?? undefined,
           }),
         ),
     }),
@@ -510,7 +590,9 @@ export function createAiTools(ctx: ToolContext) {
           .describe("0-based column"),
       }),
       execute: async (args) =>
-        safeExecute("lsp_definition", () => lspDefinitionTool(ctx, args)),
+        executeForModel(ctx, "lsp_definition", () =>
+          lspDefinitionTool(ctx, args),
+        ),
     }),
     lsp_references: tool({
       description:
@@ -525,7 +607,9 @@ export function createAiTools(ctx: ToolContext) {
           .describe("0-based column"),
       }),
       execute: async (args) =>
-        safeExecute("lsp_references", () => lspReferencesTool(ctx, args)),
+        executeForModel(ctx, "lsp_references", () =>
+          lspReferencesTool(ctx, args),
+        ),
     }),
     lsp_diagnostics: tool({
       description:
@@ -537,7 +621,7 @@ export function createAiTools(ctx: ToolContext) {
           .describe("File path, or null for workspace-wide (TS)"),
       }),
       execute: async (args) =>
-        safeExecute("lsp_diagnostics", () =>
+        executeForModel(ctx, "lsp_diagnostics", () =>
           lspDiagnosticsTool(ctx, { path: args.path ?? undefined }),
         ),
     }),
@@ -551,7 +635,7 @@ export function createAiTools(ctx: ToolContext) {
           .describe("Subdir to scan, or null for workspace root"),
       }),
       execute: async (args) =>
-        safeExecute("repo_intake", () =>
+        executeForModel(ctx, "repo_intake", () =>
           intakeTool(ctx, { path: args.path ?? undefined }),
         ),
     }),

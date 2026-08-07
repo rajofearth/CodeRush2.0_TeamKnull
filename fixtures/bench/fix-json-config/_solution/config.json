@@ -1,0 +1,6 @@
+{
+  "name": "widget-service",
+  "port": 8080,
+  "retries": 3,
+  "features": ["alpha", "beta"]
+}

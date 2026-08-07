@@ -12,7 +12,14 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 
 /** Reserved bare words. A bare `clai demo` is a subcommand, `clai ./demo` is a path. */
-export const SUBCOMMANDS = ["run", "demo", "intake", "memory", "help"] as const;
+export const SUBCOMMANDS = [
+  "run",
+  "demo",
+  "intake",
+  "memory",
+  "bench",
+  "help",
+] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];
 

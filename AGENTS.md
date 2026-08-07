@@ -33,6 +33,7 @@ pnpm clai <folder>      # launch on a folder (`-- <dir>` / `--cwd <dir>` if it c
 pnpm clai demo          # offline edit+bash on fixtures/tiny-edit (no API key)
 pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts
 pnpm clai intake        # print repository intake map JSON
+pnpm clai bench run --offline --serve  # 8-task subset + live dashboard
 pnpm clai run "…"       # soft agent loop (needs a provider key)
 ```
 

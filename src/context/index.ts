@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { hashFile, type MemoryItem, type MemoryStore } from "../memory/index.js";
 
+export {
+  compactHistory,
+  compactionConfigFromEnv,
+  estimateMessagesTokens,
+  estimateTokens,
+  formatTokens,
+  type CompactionConfig,
+  type CompactionResult,
+} from "./compact.js";
+
 export interface ContextRequest {
   taskId: string;
   runId: string;

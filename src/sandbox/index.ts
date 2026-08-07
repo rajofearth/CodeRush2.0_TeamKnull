@@ -57,6 +57,12 @@ const SECRET_ENV_RE =
 const DESTRUCTIVE_RE =
   /\b(rm\s+(-[a-zA-Z]*f|-[a-zA-Z]*r)|del\s+\/[sq]|format\s+|mkfs\.|dd\s+if=|>\s*\/dev\/|Remove-Item\s+.*-Recurse)\b/i;
 
+/** Default wall-clock timeout for sandboxed bash (ms). */
+export const DEFAULT_BASH_TIMEOUT_MS = 60_000;
+
+/** Source-level capture cap before model-facing truncation (chars per stream). */
+export const BASH_CAPTURE_MAX_CHARS = 64_000;
+
 function scrubEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
@@ -65,6 +71,11 @@ function scrubEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     out[k] = v;
   }
   return out;
+}
+
+function clipCapture(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n…(truncated ${text.length - maxChars} chars at source)`;
 }
 
 function defaultApproval(autoApprove: boolean): ApprovalHook {
@@ -251,20 +262,31 @@ export async function createSandbox(
       }
 
       const started = Date.now();
+      const timeoutMs = runOpts.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
+      // Effective mode: wrap failure falls through to scrubbed stub exec.
+      const effectiveMode: SandboxMode =
+        runtime && wrapped !== command ? "runtime" : "stub";
+      // Stub and runtime paths share scrubEnv + timeout + output caps.
       try {
         const result = await execa(wrapped, {
           shell: true,
           cwd,
           env: scrubEnv(),
           reject: false,
-          timeout: runOpts.timeoutMs ?? 60_000,
+          timeout: timeoutMs,
+          maxBuffer: BASH_CAPTURE_MAX_CHARS,
           all: false,
         });
+        let stdout = clipCapture(result.stdout ?? "", BASH_CAPTURE_MAX_CHARS);
+        let stderr = clipCapture(result.stderr ?? "", BASH_CAPTURE_MAX_CHARS);
+        if (result.timedOut) {
+          stderr = `${stderr}${stderr ? "\n" : ""}timed out after ${timeoutMs}ms`;
+        }
         return {
-          exitCode: result.exitCode ?? 1,
-          stdout: result.stdout ?? "",
-          stderr: result.stderr ?? "",
-          mode: runtime && wrapped !== command ? "runtime" : mode,
+          exitCode: result.timedOut ? 124 : (result.exitCode ?? 1),
+          stdout,
+          stderr,
+          mode: effectiveMode,
           command,
           wrappedCommand: wrapped !== command ? wrapped : undefined,
           durationMs: Date.now() - started,
@@ -274,7 +296,7 @@ export async function createSandbox(
           exitCode: 1,
           stdout: "",
           stderr: err instanceof Error ? err.message : String(err),
-          mode,
+          mode: effectiveMode,
           command,
           wrappedCommand: wrapped !== command ? wrapped : undefined,
           durationMs: Date.now() - started,

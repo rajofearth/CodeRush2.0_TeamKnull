@@ -12,6 +12,13 @@ import {
 import type { ToolContext } from "../tools/index.js";
 import { createAiTools } from "../tools/index.js";
 import type { TraceWriter } from "../trace/index.js";
+import { createTaskTool } from "../agents/index.js";
+import {
+  compactHistory,
+  compactionConfigFromEnv,
+  formatTokens,
+} from "../context/compact.js";
+import { withProviderRetry, type RetryStatusEvent } from "./retry.js";
 import {
   createProviderHandle,
   hasAnyProviderKey,
@@ -21,6 +28,13 @@ import {
 
 export type { ProviderId, ProviderHandle } from "./providers.js";
 export { listProviders, DEFAULT_PROVIDER } from "./providers.js";
+export {
+  withProviderRetry,
+  classifyProviderError,
+  ProviderError,
+  type RetryStatusEvent,
+  type RetryOptions,
+} from "./retry.js";
 
 export type ResolvedModel = {
   model: ProviderHandle["model"];
@@ -53,6 +67,10 @@ export type AgentLoopOptions = {
   prompt: string;
   /** Prior turns for multi-turn chat (excluding the new user prompt). */
   history?: CoreMessage[];
+  /**
+   * Extra system context (e.g. intake notes). Appended AFTER the built-in
+   * behavior policy — it never replaces it.
+   */
   system?: string;
   maxSteps?: number;
   model?: ResolvedModel;
@@ -62,6 +80,8 @@ export type AgentLoopOptions = {
     promptTokens: number;
     completionTokens: number;
   }) => void;
+  /** Harness status updates (compaction, rate-limit retries). */
+  onStatus?: (status: RetryStatusEvent) => void;
 };
 
 export type AgentLoopResult = {
@@ -75,11 +95,42 @@ export type AgentLoopResult = {
 };
 
 const DEFAULT_SYSTEM = `You are CLAI, a coding agent in an interactive ADE session. Use tools to explore and edit the workspace.
+
+## Proportional effort — match your response to the request
+Classify each request before touching tools:
+1. CONVERSATIONAL / INFORMATIONAL ("what is this project about?", "which package manager?", "what does src/x.ts do?"):
+   Answer directly in prose. Use AT MOST 1-2 quick reads of obvious sources (package.json, README.md / AGENTS.md, the intake notes already in context, or the one file asked about). Do NOT run bash, do NOT run repo_intake if intake notes are already provided, do NOT explore fixtures or spawn search batches.
+   Important: a "Bounded intake issue …" seed is a demo task hint, NOT the project description. If intake notes begin with "Project: …", that IS the product summary — answer from it with ZERO tool calls. Otherwise read package.json (preferred) or AGENTS.md / README.md.
+2. CHANGE / VERIFY tasks ("fix the bug in…", "add a flag…", "why does the test fail?"):
+   Explore as needed (grep/glob/read/LSP), edit, then verify with lsp_diagnostics and/or a bash command.
+Examples:
+- "what's this project about?" → answer from intake "Project: …" line, or one read of package.json. No bash. No fixture spelunking. No test runs.
+- "list the entrypoints" → answer from intake notes; maybe one read of package.json.
+- "rename function foo to bar" → grep for usages, edit, lsp_diagnostics, done.
+Running tests or bash is for verifying changes or diagnosing failures — never for answering descriptive questions.
+
+## Style
+Answer in prose FIRST for simple questions — never narrate a tool plan for a trivial query.
+Be concise. Soft completion: stop when the task looks done — there is no hard finish gate.
+
+## Tool use
 Prefer read-only discovery (grep/glob/read/repo_intake/LSP) before edits.
+Use the task tool to delegate broad read-only investigations ("how does X work across the codebase?") — it keeps raw exploration out of your context and returns a short summary.
 Use lsp_diagnostics after edits on TS/Python; lsp_definition / lsp_references for navigation.
-After editing, run a command to verify when useful.
-Soft completion: stop when the task looks done — there is no hard finish gate. Be concise.
-Tool tips: glob pattern use **/* ; read only needs path; edit needs path+oldString+newString; bash only needs command.`;
+Large tool outputs are truncated with a marker — re-run scoped narrower (read with offset/limit, grep with a tighter pattern/path) if you need the omitted part.
+Tool tips: glob pattern use **/* ; read needs path (offset/limit optional); edit needs path+oldString+newString; bash only needs command.`;
+
+/** Compose the built-in policy with caller-provided extra context. */
+function composeSystem(extra?: string): string {
+  if (!extra) return DEFAULT_SYSTEM;
+  return `${DEFAULT_SYSTEM}
+
+## Session context
+${extra}
+
+## Reminder
+Session context above is evidence (intake notes, etc.). For conversational / informational questions, answer from it directly — do not treat a generic "explore" nudge as permission to spelunk fixtures or run bash.`;
+}
 
 function isToolValidationError(err: unknown): boolean {
   if (InvalidToolArgumentsError.isInstance(err)) return true;
@@ -155,7 +206,10 @@ export async function runAgentLoop(
   opts: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
   const resolved = opts.model ?? (await resolveModel());
-  const tools = createAiTools(opts.ctx);
+  const tools = {
+    ...createAiTools(opts.ctx),
+    task: createTaskTool(opts.ctx, resolved),
+  };
   const maxSteps = opts.maxSteps ?? 12;
 
   await opts.trace?.append("model_step", {
@@ -165,11 +219,32 @@ export async function runAgentLoop(
     prompt: opts.prompt.slice(0, 500),
   });
 
-  const messages: CoreMessage[] = [
+  let messages: CoreMessage[] = [
     ...(opts.history ?? []),
     { role: "user", content: opts.prompt },
   ];
+
+  // Context compaction: when assembled history approaches the budget, replace
+  // older turns with a deterministic structured digest (system prompt, the
+  // original task, and the last N messages are kept verbatim).
+  const compactCfg = compactionConfigFromEnv();
+  {
+    const compaction = compactHistory(messages, compactCfg);
+    if (compaction.compacted) {
+      messages = compaction.messages;
+      const label = `compacted context: ${formatTokens(compaction.beforeTokens)} → ${formatTokens(compaction.afterTokens)} tokens`;
+      opts.onStatus?.({ label, sticky: true });
+      await opts.trace?.append("info", {
+        message: "context_compacted",
+        beforeTokens: compaction.beforeTokens,
+        afterTokens: compaction.afterTokens,
+        droppedMessages: compaction.droppedMessages,
+      });
+    }
+  }
+
   const totals = { promptTokens: 0, completionTokens: 0 };
+  const system = composeSystem(opts.system);
 
   const onStepFinish = async (
     step: {
@@ -199,35 +274,47 @@ export async function runAgentLoop(
   };
 
   async function once(activeMessages: CoreMessage[]) {
-    return generateText({
-      model: resolved.model as Parameters<typeof generateText>[0]["model"],
-      tools,
-      maxSteps,
-      system: opts.system ?? DEFAULT_SYSTEM,
-      messages: activeMessages,
-      experimental_repairToolCall: async ({
-        toolCall,
-        parameterSchema,
-        error,
-      }) => {
-        await opts.trace?.append("tool_repair", {
-          toolName: toolCall.toolName,
-          error: error.message,
-          args: toolCall.args,
-        });
-        const schema = parameterSchema({
-          toolName: toolCall.toolName,
-        }) as { properties?: Record<string, unknown>; required?: string[] };
-        const repaired = repairToolArgs(
-          toolCall.toolName,
-          toolCall.args,
-          schema,
-        );
-        if (!repaired) return null;
-        return { ...toolCall, args: repaired };
+    // maxRetries: 0 — we own 429/5xx backoff via withProviderRetry so the SDK
+    // does not double-retry underneath us.
+    return withProviderRetry(
+      () =>
+        generateText({
+          model: resolved.model as Parameters<typeof generateText>[0]["model"],
+          tools,
+          maxSteps,
+          maxRetries: 0,
+          system,
+          messages: activeMessages,
+          experimental_repairToolCall: async ({
+            toolCall,
+            parameterSchema,
+            error,
+          }) => {
+            await opts.trace?.append("tool_repair", {
+              toolName: toolCall.toolName,
+              error: error.message,
+              args: toolCall.args,
+            });
+            const schema = parameterSchema({
+              toolName: toolCall.toolName,
+            }) as { properties?: Record<string, unknown>; required?: string[] };
+            const repaired = repairToolArgs(
+              toolCall.toolName,
+              toolCall.args,
+              schema,
+            );
+            if (!repaired) return null;
+            return { ...toolCall, args: repaired };
+          },
+          onStepFinish,
+        }),
+      {
+        onStatus: opts.onStatus,
+        onTrace: async (payload) => {
+          await opts.trace?.append("info", payload);
+        },
       },
-      onStepFinish,
-    });
+    );
   }
 
   let result;
