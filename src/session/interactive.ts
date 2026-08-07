@@ -83,6 +83,10 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   const lsp = await probeLspAvailability(cwd);
   const lspNames = lsp.filter((s) => s.available).map((s) => s.engine);
   const model = await resolveModel();
+  const { openMemoryStore } = await import("../memory/index.js");
+  const memoryStore = await openMemoryStore({
+    directory: opts.workspace.dataDir,
+  });
 
   let history: CoreMessage[] = [];
   let turnCount = 0;
@@ -152,6 +156,8 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
           .join("\n\n") || undefined,
         trace,
         model,
+        memoryStore,
+        agentRole: "chat",
         onStatus: (status) =>
           opts.bus.emit({
             type: "status",
@@ -298,6 +304,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<SessionSummary
   } finally {
     rl.close();
     shellJobs.dispose();
+    memoryStore.close();
     await trace.close(lastTurnFailed ? "fail" : "ok");
     await sandbox.dispose();
   }

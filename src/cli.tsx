@@ -26,6 +26,7 @@ Usage:
   clai intake [--cwd <path>]
   clai memory list|get|set|delete|export
   clai bench run|serve|list [--offline] [--parallel N] [--serve]
+  clai glass [--run <runId>] [--follow-latest] [--cwd <path>]
   clai chat ["<prompt>"] [--cwd <path>]
   clai --fixture <path>
   clai run "<prompt>" [--cwd <path>]
@@ -39,13 +40,14 @@ Options:
   --fixture <path>        Fixture workspace (default: fixtures/tiny-edit)
   run "<prompt>"          Soft agent loop via AI SDK (needs API key)
   chat ["<prompt>"]       Verbose log-mode session — tools, I/O, tokens, cost
+  glass                   Live view of context assembly — memory retrieval, relevance scoring, staleness, and injection checks as they happen, in a parallel terminal.
   bench run               Parallel task subset (use --offline with no API key)
   bench serve             Live metrics dashboard over history (port 4310)
   --cwd <path>            Workspace root; overrides a positional <folder>
   --                      Everything after it is a path, never a subcommand
 
 Workspace root:
-  A bare first word matching run/chat/demo/intake/memory/bench/help is a subcommand;
+  A bare first word matching run/chat/demo/intake/memory/bench/glass/help is a subcommand;
   anything else is the workspace folder. Use "clai -- demo" or
   "clai --cwd demo" to open a folder that shares a subcommand name.
   The resolved root governs tool cwd, .clai/traces, .clai memory, and intake.
@@ -75,6 +77,8 @@ Quick start:
   pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
   pnpm clai chat
   pnpm clai chat "how does the bench runner work?"
+  pnpm clai glass --follow-latest
+  pnpm clai glass --run <runId>
 `.trim();
 
 const entry = parseEntry(process.argv.slice(2));
@@ -105,6 +109,7 @@ const wantsDemo =
 const wantsRun = entry.subcommand === "run";
 const wantsChat = entry.subcommand === "chat";
 const wantsBench = entry.subcommand === "bench";
+const wantsGlass = entry.subcommand === "glass";
 /** Bare `clai` / `clai <folder>` — launch the interface on the resolved root. */
 const wantsLaunch =
   !wantsHelp &&
@@ -115,7 +120,8 @@ const wantsLaunch =
   !wantsDemo &&
   !wantsRun &&
   !wantsChat &&
-  !wantsBench;
+  !wantsBench &&
+  !wantsGlass;
 
 async function resolveWorkspace(showNotes = true) {
   try {
@@ -143,6 +149,14 @@ if (wantsHelp) {
   const workspace = await resolveWorkspace(false);
   const { runBenchCli } = await import("./bench/index.js");
   process.exitCode = await runBenchCli(args.slice(1), workspace.root);
+} else if (wantsGlass) {
+  const workspace = await resolveWorkspace(false);
+  const { runGlassCli } = await import("./glass/cli.js");
+  process.exitCode = await runGlassCli({
+    tracesDir: workspace.tracesDir,
+    cwd: workspace.root,
+    args: args.slice(1),
+  });
 } else if (wantsChat) {
   const workspace = await resolveWorkspace();
   const { runChatCli } = await import("./chat/index.js");
@@ -313,6 +327,11 @@ if (wantsHelp) {
 
     const model = await resolveModel();
 
+    const { openMemoryStore } = await import("./memory/index.js");
+    const memoryStore = await openMemoryStore({
+      directory: workspace.dataDir,
+    });
+
     const ctx = {
       workspaceRoot: cwd,
       sandbox,
@@ -360,6 +379,8 @@ if (wantsHelp) {
             : undefined,
           trace,
           model,
+          memoryStore,
+          agentRole: "main",
           onStatus: (status) =>
             bus.emit({
               type: "status",
@@ -504,6 +525,7 @@ if (wantsHelp) {
       await shell.waitUntilExit();
       await sessionLog.close();
       shellJobs.dispose();
+      memoryStore.close();
       await trace.close("ok");
       await sandbox.dispose();
     } else {
@@ -527,6 +549,7 @@ if (wantsHelp) {
         process.exitCode = 1;
       } finally {
         shellJobs.dispose();
+        memoryStore.close();
         await sandbox.dispose();
       }
     }

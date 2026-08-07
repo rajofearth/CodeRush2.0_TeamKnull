@@ -75,6 +75,21 @@ export type AgentLoopOptions = {
   maxSteps?: number;
   model?: ResolvedModel;
   trace?: TraceWriter;
+  /**
+   * Optional harness memory store. When set with `trace`, runs ContextManager
+   * assemble() for glass-box `context_stage` events. Does not change the
+   * prompt unless `injectAssembledContext` is true.
+   */
+  memoryStore?: import("../memory/index.js").MemoryStore;
+  /** Role label for glass correlation (main / chat / explore / …). */
+  agentRole?: string;
+  /** Token budget for the observability assemble() call. */
+  assembleTokenBudget?: number;
+  /**
+   * When true, merge assemble() systemExtras into the system prompt.
+   * Default false — preserves existing loop behaviour; stages still emit.
+   */
+  injectAssembledContext?: boolean;
   onText?: (text: string) => void;
   /**
    * Incremental assistant prose (token/chunk deltas). Prefer this for live TUI
@@ -252,7 +267,45 @@ export async function runAgentLoop(
   }
 
   const totals = { promptTokens: 0, completionTokens: 0 };
-  const system = composeSystem(opts.system);
+  let systemExtra = opts.system;
+
+  // Glass-box: stage 0 (prompt_synthesis) then assemble() stages into the same
+  // trace. Prompt injection is opt-in so loop behaviour stays unchanged by default.
+  if (opts.trace && opts.memoryStore) {
+    try {
+      const {
+        ContextManager,
+        createTraceStageEmitter,
+        synthesizeContextRequest,
+      } = await import("../context/index.js");
+      const emitStage = createTraceStageEmitter(opts.trace);
+      const req = synthesizeContextRequest(opts.prompt, {
+        runId: opts.trace.runId,
+        tokenBudget: opts.assembleTokenBudget ?? 8000,
+        memoryEnabled: process.env.CLAI_MEMORY_ENABLED !== "0",
+        structuralCitationsEnabled:
+          process.env.CLAI_STRUCTURAL_CITATIONS !== "0",
+        agentRole: opts.agentRole ?? "main",
+        emitStage,
+      });
+      const assembled = new ContextManager(
+        opts.memoryStore,
+        opts.ctx.workspaceRoot,
+      ).assemble(req);
+      if (opts.injectAssembledContext && assembled.systemExtras.length > 0) {
+        systemExtra = [opts.system, ...assembled.systemExtras]
+          .filter(Boolean)
+          .join("\n\n");
+      }
+    } catch (err) {
+      await opts.trace.append("info", {
+        message: "context_assemble_skipped",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const system = composeSystem(systemExtra);
 
   const readUsage = (usage: unknown): { promptTokens: number; completionTokens: number } => {
     const u = (usage ?? {}) as Record<string, unknown>;

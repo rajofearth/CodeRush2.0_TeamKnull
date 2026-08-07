@@ -16,7 +16,9 @@ export type TraceEventType =
   | "tool_repair"
   | "approval"
   | "error"
-  | "info";
+  | "info"
+  /** ContextManager.assemble() + prompt_synthesis stage start/complete — consumed by `clai glass`. */
+  | "context_stage";
 
 export type TraceEvent = {
   ts: string;
@@ -73,3 +75,12 @@ export async function createTraceWriter(
     },
   };
 }
+
+export {
+  findLatestRun,
+  readTraceFile,
+  startTraceTail,
+  type TraceLine,
+  type TraceTailHandle,
+  type TraceTailOptions,
+} from "./tail.js";
