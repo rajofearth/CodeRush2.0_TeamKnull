@@ -39,7 +39,7 @@ export type TaskResult = {
   toolCalls: Record<string, number>;
   tokensIn: number;
   tokensOut: number;
-  /** Estimated USD cost (see PRICING in runner.ts — rough, per-1M-token). */
+  /** USD from estimateUsdBench — tokensIn×inputPerM + tokensOut×outputPerM. */
   cost: number;
   /** check.mjs exit code, when it ran. */
   checkExitCode?: number;
