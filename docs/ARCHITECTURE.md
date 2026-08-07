@@ -14,8 +14,8 @@ This document is a visual and structural map of how CLAI is organized, how a run
 | **Exploration** | Live tools first (rg, LSP, read) — no vector DB | Live tools + LSP; rules in `AGENTS.md` via `/init` |
 | **Memory** | SQLite/JSON with provenance + invalidation | Session history; durable memory is convention/prompt |
 | **Context** | Budgeted `assemble()` + deterministic history compaction | Compaction + prompt; no harness memory plane |
-| **Subagents** | `task` tool — read-only sub-loop with bounded summary return | Sub-agents, multi-session |
-| **Benchmarks** | Built-in 81-task bench + live SSE dashboard | Community evals; no first-party harness bench |
+| **Subagents** | `task` tool — `explore` (read-only) / `general` (+bash); bounded summary return | Sub-agents, multi-session |
+| **Benchmarks** | Built-in 81-task bench + live SSE dashboard + CLAI vs pi compare | Community evals; no first-party harness bench |
 | **Done means** | Designed: `PASS \| FAIL \| BLOCKED` + evidence *(verify seam scaffolded)* | Model `stop` finish reason — tests are advisory |
 | **Trace** | Append-only JSONL under `.clai/traces/<runId>/` | Session store + share links |
 | **UI** | Ink ADE pane (`UiBus` → TUI or headless) | SolidJS/OpenTUI; event bus across threads |
@@ -47,7 +47,7 @@ flowchart TB
     Adapter["adapter/<br/>AI SDK loop · retry · compaction"]
     Context["context/<br/>assemble() · compactHistory()"]
     Memory["memory/<br/>SQLite / JSON store"]
-    Agents["agents/<br/>task subagent"]
+    Agents["agents/<br/>task · explore / general"]
     Verify["verify/<br/>completion contract (scaffold)"]
     Trace["trace/<br/>JSONL writer"]
     Context --> Memory
@@ -59,28 +59,32 @@ flowchart TB
 
   subgraph Tool["Tool plane"]
   direction TB
-    Tools["tools/<br/>grep · glob · read · edit · write · bash"]
+    Tools["tools/<br/>grep · glob · read · edit · write · bash<br/>parallel · bash_bg*"]
     Limits["tools/limits.ts<br/>model-facing caps"]
     LSP["tools/lsp<br/>defs · refs · diagnostics"]
     Intake["tools/intake<br/>repo map JSON"]
+    Shell["shell/jobs<br/>bg process manager"]
     Sandbox["sandbox/<br/>approval + env scrub"]
     Tools --> Limits
     Tools --> Sandbox
+    Tools --> Shell
     LSP --> Tools
     Intake --> Tools
   end
 
   subgraph Bench["Benchmark plane"]
     Runner["bench/runner.ts"]
+    Compare["bench/compare-pi.ts<br/>CLAI vs pi race"]
     Server["bench/server.ts<br/>SSE + jobs"]
     Store["bench/store.ts<br/>history.jsonl"]
     Runner --> Store
+    Compare --> Store
     Server --> Store
     Server --> Dashboard
   end
 
   subgraph External["External"]
-    LLM["LLM providers<br/>Groq · Cerebras · Gemini · …"]
+    LLM["LLM providers<br/>Groq · DeepSeek · Cerebras · …"]
     Repo["Workspace / fixtures"]
     LspSrv["Language servers<br/>tsserver · pyright"]
   end
@@ -106,12 +110,12 @@ CLAI splits **exploration** from **harness intelligence**. This is architecture,
 ```mermaid
 flowchart LR
   subgraph TP["Tool plane — explore like an engineer"]
-    G["grep / glob"]
+    G["grep / glob / parallel"]
     R["read / edit / write"]
-    B["bash (sandboxed)"]
+    B["bash · bash_bg*"]
     L["LSP"]
     I["repo_intake"]
-    T["task subagent"]
+    T["task · explore / general"]
   end
 
   subgraph HP["Harness plane — remember & bound context"]
@@ -211,10 +215,10 @@ sequenceDiagram
       A->>TR: model_step
       opt tool call
         alt task delegation
-          A->>S: read-only sub-loop (~10 steps)
+          A->>S: explore (RO) or general (+bash) · ~10 steps
           S-->>A: bounded summary
         else direct tool
-          A->>T: grep · read · edit · bash · LSP
+          A->>T: grep · parallel · read · edit · bash · bash_bg · LSP
           T-->>A: capped result (+ full in trace)
         end
         A->>TR: tool_call / tool_result
@@ -234,7 +238,9 @@ sequenceDiagram
 | Intake summary seed | **Wired** | First turn runs `repo_intake`; product one-liner appended to system context |
 | `ContextManager.assemble()` | **Wired for glass observability** | Emits `context_stage` into the run trace each turn; prompt injection remains opt-in (`injectAssembledContext`) |
 | `compactHistory()` | **Wired** | Triggers at ~45k estimated tokens; keeps original task + last N messages |
-| `task` subagent | **Wired** | Parent delegates broad read-only exploration |
+| Multi-tool-call parallelism | **Wired** | AI SDK runs multiple tool calls in one step concurrently |
+| `task` subagent | **Wired** | `explore` (read-only) or `general` (+bash); multiple `task` calls parallelize |
+| Background shells | **Wired** | `bash_bg` / `bash_jobs` / `bash_output` / `bash_kill` via `ShellJobManager` |
 | Provider retry | **Wired** | 429/5xx backoff with jitter; quota waits ~60s |
 | Tool arg repair | **Wired** | Groq-ish schema mistakes repaired or nudged once |
 | Verification gate | **Scaffold** | `verify/` exports empty; loop uses soft completion |
@@ -253,13 +259,16 @@ src/
 │   ├── retry.ts         # 429/5xx exponential backoff
 │   └── env.ts           # .env loading
 ├── agents/
-│   └── task.ts          # Read-only subagent + `task` AI SDK tool
+│   └── task.ts          # explore/general subagent + `task` AI SDK tool
 ├── tools/
-│   ├── index.ts         # grep, glob, read, edit, write, bash, LSP, intake
+│   ├── index.ts         # grep, glob, read, edit, write, bash, parallel, LSP, intake
+│   ├── bg-shell.ts      # bash_bg / bash_jobs / bash_output / bash_kill
 │   ├── common.ts        # workspace path confinement, tool events
 │   ├── limits.ts        # Model-facing output caps (single truncation layer)
 │   ├── lsp.ts           # TS Language Service + Python pyright
 │   └── intake.ts        # Repository map scanner
+├── shell/
+│   └── jobs.ts          # Session-scoped ShellJobManager (bg processes)
 ├── context/
 │   ├── index.ts         # ContextManager.assemble() + ablation gates + stage emit
 │   ├── synthesize.ts    # stage 0: raw input → ContextRequest (prompt_synthesis)
@@ -294,10 +303,10 @@ src/
 │   ├── runner.ts        # Parallel task execution + check.mjs
 │   ├── server.ts        # Live dashboard (node:http + SSE)
 │   ├── store.ts         # history.jsonl + LiveRunFeed
-│   ├── jobs.ts          # Dashboard-triggered job manager
+│   ├── jobs.ts          # Dashboard-triggered clai / offline / compare jobs
 │   ├── types.ts         # BenchRunRecord, LiveSnapshot
-│   ├── compare-pi.ts    # CLAI vs pi harness scorecard
-│   └── dashboard.html   # Self-contained metrics UI
+│   ├── compare-pi.ts    # CLAI vs pi race + scorecard (partial / sideParallel)
+│   └── dashboard.html   # Self-contained metrics + compare UI
 └── demo/
     ├── offline.ts       # No-API edit+bash happy path
     ├── lsp.ts           # Intake + diagnostics demo
@@ -378,16 +387,36 @@ Retry policy (`retry.ts`): up to 4 retries on 429/5xx; quota errors wait ~60s ba
 | `grep` | Ripgrep JSON → Node fallback | Parallel-safe read-only; default 50 matches |
 | `glob` | fast-glob patterns | Workspace-confined; empty pattern → `**/*` |
 | `read` | File I/O with offset/limit | Head+tail truncation via `limits.ts` |
-| `edit` | Exact string replacement | Single or replace-all |
+| `parallel` | Batch ≤6 `grep`/`glob`/`read` | One combined result; prefer native multi-tool-call when possible |
+| `edit` | Exact string replacement | Exact `oldString` → `newString` |
 | `write` | Create/overwrite text files | Creates parent dirs |
 | `bash` | Shell via sandbox | 60s default timeout; approval for egress/destructive/out-of-repo |
+| `bash_bg` | Start background shell | Returns job id immediately; session-scoped |
+| `bash_jobs` | List bg jobs | Filter `all` / `running` / `done` |
+| `bash_output` | Poll bg stdout/stderr | Optional `tail` chars per stream |
+| `bash_kill` | Kill bg job | Windows `taskkill` / Unix SIGTERM |
 | `lsp_definition` | Go to definition | TS Language Service; Python via pyright when installed |
 | `lsp_references` | Find references | Same engines as definition |
 | `lsp_diagnostics` | Errors/warnings | Prefer after edits |
 | `repo_intake` | Structured repo map | Languages, entrypoints, configs, test hints, summary |
-| `task` | Read-only subagent delegation | ~10 step budget; summary-only return to parent |
+| `task` | Subagent delegation | `explore` (RO) or `general` (+bash); ~10 step budget; summary-only to parent |
+
+**Parallelism:** the Vercel AI SDK runs multiple tool calls emitted in one model step concurrently. Prefer that for independent reads/greps/`task` calls. Use `parallel({jobs:[…]})` when a single batched result is clearer.
+
+**Background shells:** `ShellJobManager` (`src/shell/jobs.ts`) holds in-memory jobs for the session. Env scrub + destructive/egress approval apply on `bash_bg`. Subagents do not inherit `shellJobs` (bg control stays on the parent).
 
 All paths resolve under `workspaceRoot` via `resolveInWorkspace()` — the harness cannot wander outside the fixture/repo.
+
+### Subagents (`agents/task.ts`)
+
+Parent loop wires `task` via `createTaskTool` (not included in the child's toolset — no recursion).
+
+| Kind | Tools | Use |
+|------|-------|-----|
+| `explore` (default) | grep/glob/read/LSP/intake | Broad read-only investigation |
+| `general` | explore tools + `bash` | Verify-oriented digs (tests, git, typecheck) |
+
+Multiple `task` calls in one step run in parallel. Only a capped plain-text summary returns to the parent (`CLAI_TASK_MAX_STEPS`, default 10).
 
 ### Output caps (`tools/limits.ts`)
 
@@ -602,10 +631,28 @@ flowchart LR
 - `GET /` — self-contained `dashboard.html`
 - `GET /events` — SSE live snapshots + compare events
 - `GET /api/runs`, `GET /api/runs/:id` — history from `.clai/bench/history.jsonl`
-- `GET /api/compare` — CLAI vs pi harness scorecard
-- `POST /api/jobs` — start clai / offline / compare jobs from the UI
+- `GET /api/compare` — CLAI vs pi harness scorecard (`compare-pi.json`)
+- `GET /api/tasks` — catalog `{ count, ids }` for the dashboard task-limit control
+- `POST /api/jobs` — start clai / offline / compare (`limit` = first N catalog tasks; also `parallel`, `tasks`, `freshClai`)
 
 Each task: hard wall-clock timeout, configurable `maxSteps`, isolated temp workspace (fixtures never mutated), per-task trace, token/cost estimates via provider pricing table.
+
+### CLAI vs pi compare (`compare-pi.ts`)
+
+Same-model race (default DeepSeek via `PI_PROVIDER` / `PI_MODEL`; needs `DEEPSEEK_API_KEY` + `pi` on PATH). Start from the dashboard **Compare CLAI vs pi** button, `POST /api/jobs` with `kind: "compare"`, or `pnpm bench:compare-pi`.
+
+Race hardening:
+
+| Behavior | Detail |
+|----------|--------|
+| **Task limit UI** | Dashboard **10 / +10 / max** sends `limit` on job start (catalog from `/api/tasks`) |
+| **Total wall time** | Scoreboard + compare cards show per-harness Σ `wallMs` (live while partial) |
+| **Partial scorecards** | `compare.partial: true` while either harness is still running; task table streams live |
+| **Scoreboard freeze** | Winner / composite scores stay frozen until `partial` clears (phase `"done"`) |
+| **`sideParallel` split** | Fresh CLAI+pi race uses `ceil(COMPARE_PARALLEL/2)` workers per side (override `COMPARE_SIDE_PARALLEL`) so API load is not doubled |
+| **Pi stall kill** | If pi emits no JSON stdout within `COMPARE_PI_STALL_MS` (default 45s), the child is killed; stderr/otel noise does not cancel the stall timer |
+
+While a compare job is in flight, `/api/compare` and SSE prefer the in-memory partial card so reconnects never flash a prior finished scoreboard.
 
 ---
 
@@ -698,8 +745,8 @@ Node **≥ 20** required. Package manager: **pnpm 9**.
 | **Built-in bench** | 81-task suite (TB/DeepSWE adapted), offline mode, live dashboard, pi comparison — no external harness required |
 | **Honest completion** | Verification contract aims for evidence-based `PASS`, not “model stopped talking” |
 | **Context discipline** | Token budget, staleness invalidation, injection labels, deterministic compaction |
-| **Subagent isolation** | `task` tool keeps exploration out of parent context |
-| **Simplicity** | One package, clear seams (`adapter` / `tools` / `memory` / `context` / `trace` / `bench`) |
+| **Subagent isolation** | `task` (`explore` / `general`) keeps investigation out of parent context |
+| **Simplicity** | One package, clear seams (`adapter` / `tools` / `agents` / `shell` / `memory` / `context` / `trace` / `bench`) |
 | **Offline demos** | `clai demo`, `clai demo lsp`, `clai intake`, `clai bench run --offline` — no API key |
 | **Platform pragmatism** | Optional deps + stub fallbacks; install succeeds even without C++ toolset |
 
@@ -732,6 +779,7 @@ pnpm clai intake --cwd .      # repo map JSON
 pnpm clai memory list         # harness plane store
 pnpm clai bench list          # 81 eval tasks
 pnpm clai bench run --offline --serve   # offline run + dashboard :4310
+pnpm bench:compare-pi         # CLAI vs pi scorecard (DeepSeek + pi)
 CLAI_NO_TUI=1 pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
 ```
 
