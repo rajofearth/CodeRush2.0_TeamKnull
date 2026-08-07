@@ -303,6 +303,7 @@
           <th>task</th>
           <th>clai</th>
           <th>pi</th>
+          <th>notes</th>
         </tr>
       </thead>
       <tbody id="compare-body"></tbody>
@@ -494,6 +495,10 @@
       const spin = t.status === "running" ? '<span class="spin"></span>' : "";
       const wall = t.wallMs != null ? fmtMs(t.wallMs) : "—";
       const steps = t.steps != null ? t.steps + " steps" : "";
+      const err = t.error
+        ? '<div class="title" style="margin-top:6px;color:var(--muted);font-size:10px">' +
+          esc(t.error.length > 140 ? t.error.slice(0, 139) + "…" : t.error) + "</div>"
+        : "";
       return (
         '<div class="card ' + esc(t.status) + '">' +
           '<div class="id">' + esc(t.id) + '</div>' +
@@ -502,6 +507,7 @@
             '<span class="status ' + esc(t.status) + '">' + spin + esc(t.status) + '</span>' +
             '<span>' + wall + (steps ? " · " + steps : "") + '</span>' +
           '</div>' +
+          err +
         '</div>'
       );
     }).join("");
@@ -1114,7 +1120,12 @@
       (compare.claiLabel
         ? "<span>CLAI source <strong>" + esc(compare.claiLabel) + "</strong></span>"
         : "") +
-      "<span>mode <strong>parallel</strong> — CLAI + pi together (provider <code>clai+pi</code>)</span>" +
+      "<span>mode <strong>parallel</strong> — CLAI + pi together</span>" +
+      (compare.sideParallel != null
+        ? "<span>workers <strong>" + esc(compare.sideParallel) + " each</strong>" +
+          (compare.compareParallel != null ? " (req " + esc(compare.compareParallel) + ")" : "") +
+          "</span>"
+        : "") +
       (compareRunning
         ? "<span>progress <strong>" + claiRows.length + " clai · " + piRows.length + " pi</strong> rows</span>"
         : "");
@@ -1192,13 +1203,21 @@
     const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
     const ids = [...new Set([...piRows.map((r) => r.id), ...claiRows.map((r) => r.id)])];
 
-    $("compare-body").innerHTML = ids.map((id) =>
-      "<tr>" +
-        "<td>" + esc(id) + "</td>" +
-        "<td>" + statusCell(claiMap[id]) + "</td>" +
-        "<td>" + statusCell(piMap[id]) + "</td>" +
-      "</tr>"
-    ).join("");
+    $("compare-body").innerHTML = ids.map((id) => {
+      const note = [claiMap[id]?.detail && "clai: " + claiMap[id].detail, piMap[id]?.detail && "pi: " + piMap[id].detail]
+        .filter(Boolean)
+        .join(" · ");
+      return (
+        "<tr>" +
+          "<td>" + esc(id) + "</td>" +
+          "<td>" + statusCell(claiMap[id]) + "</td>" +
+          "<td>" + statusCell(piMap[id]) + "</td>" +
+          "<td style=\"color:var(--muted);font-size:11px;max-width:280px\">" +
+            (note ? esc(note.length > 160 ? note.slice(0, 159) + "…" : note) : "—") +
+          "</td>" +
+        "</tr>"
+      );
+    }).join("");
 
     const maxWall = Math.max(
       1,
