@@ -26,7 +26,7 @@ https://github.com/rajofearth/CodeRush2.0_TeamKnull/issues/1
 
 ```bash
 pnpm install
-cp .env.example .env   # set OPENROUTER_API_KEY (default provider)
+cp .env.example .env   # set GROQ_API_KEY (default provider)
 pnpm clai --help
 pnpm clai demo          # offline edit+bash on fixtures/tiny-edit (no API key)
 pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts
@@ -40,12 +40,13 @@ Registry: `src/adapter/providers.ts`. Default **cerebras**. Add/remove providers
 
 | Env | `CLAI_PROVIDER` |
 |-----|-----------------|
-| `OPENROUTER_API_KEY` | `openrouter` (default, free models) |
+| `GROQ_API_KEY` | `groq` (default) |
+| `OPENROUTER_API_KEY` | `openrouter` |
 | `CEREBRAS_API_KEY` | `cerebras` |
 | `OPENAI_API_KEY` | `openai` |
 | `ANTHROPIC_API_KEY` | `anthropic` |
 
-`CLAI_MODEL` overrides the model id (default `google/gemma-4-31b-it:free`). Never commit `.env`.
+`CLAI_MODEL` overrides the model id (default `openai/gpt-oss-20b`). Never commit `.env`.
 
 Heavy natives (`better-sqlite3`, `@anthropic-ai/sandbox-runtime`) are lazy-imported so `--help` stays light.
 

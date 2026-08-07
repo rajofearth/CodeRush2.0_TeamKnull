@@ -30,17 +30,17 @@ Options:
   --cwd <path>            Working directory for run/intake (default: cwd)
 
 Env:
-  OPENROUTER_API_KEY                Default provider (CLAI_PROVIDER=openrouter)
-  CEREBRAS_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY  Alternates
-  CLAI_PROVIDER                     openrouter | cerebras | openai | anthropic
-  CLAI_MODEL                        Model id (default google/gemma-4-31b-it:free)
+  GROQ_API_KEY                      Default provider (CLAI_PROVIDER=groq)
+  OPENROUTER_API_KEY / CEREBRAS_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
+  CLAI_PROVIDER                     groq | openrouter | cerebras | openai | anthropic
+  CLAI_MODEL                        Model id (default openai/gpt-oss-20b)
   CLAI_AUTO_APPROVE=1               Auto-approve gated bash (dev only)
   CLAI_NO_TUI=1                     Headless activity (CI / pipes)
   CLAI_LSP_PY                       Optional Python language-server binary
 
 Quick start:
   pnpm install
-  cp .env.example .env   # add OPENROUTER_API_KEY
+  cp .env.example .env   # add GROQ_API_KEY
   pnpm clai --help
   pnpm clai demo
   CLAI_NO_TUI=1 pnpm clai demo lsp
@@ -194,7 +194,7 @@ if (
 
   if (!hasApiKey()) {
     console.error(
-      "No API key. Set OPENROUTER_API_KEY (default), or CEREBRAS/OPENAI/ANTHROPIC — or use `clai demo`.",
+      "No API key. Set GROQ_API_KEY (default), or OPENROUTER/CEREBRAS/OPENAI/ANTHROPIC — or use `clai demo`.",
     );
     process.exitCode = 1;
   } else if (!ui.isTuiEnabled() && !initialPrompt) {

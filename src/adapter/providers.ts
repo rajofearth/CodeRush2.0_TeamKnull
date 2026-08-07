@@ -6,7 +6,12 @@
  * with a custom baseURL so we stay on AI SDK 4 (v1 models).
  */
 
-export type ProviderId = "openrouter" | "cerebras" | "openai" | "anthropic";
+export type ProviderId =
+  | "groq"
+  | "openrouter"
+  | "cerebras"
+  | "openai"
+  | "anthropic";
 
 /** Opaque AI SDK language model. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +46,16 @@ async function openaiCompatible(
 }
 
 const PROVIDERS: Record<ProviderId, ProviderDef> = {
+  groq: {
+    id: "groq",
+    envKey: "GROQ_API_KEY",
+    defaultModel: "openai/gpt-oss-20b",
+    create: (apiKey, modelId) =>
+      openaiCompatible(apiKey, modelId, {
+        baseURL: "https://api.groq.com/openai/v1",
+        name: "groq",
+      }),
+  },
   openrouter: {
     id: "openrouter",
     envKey: "OPENROUTER_API_KEY",
@@ -112,8 +127,8 @@ const PROVIDERS: Record<ProviderId, ProviderDef> = {
   },
 };
 
-/** Default provider — free OpenRouter models for the hackathon. */
-export const DEFAULT_PROVIDER: ProviderId = "openrouter";
+/** Default provider — Groq for fast free/hackathon runs. */
+export const DEFAULT_PROVIDER: ProviderId = "groq";
 
 export function listProviders(): ProviderId[] {
   return Object.keys(PROVIDERS) as ProviderId[];
