@@ -368,7 +368,20 @@
   let tickTimer = null;
   let job = { status: "idle" };
   let historyDetailTasks = null;
+  /** True only after an explicit history-row click; prefer that run in Charts. */
+  let historyChartsPinned = false;
   const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
+
+  /** Axis max: optional minMax floor + pad for tiny series (cost); else Math.max(1, dataMax). */
+  function metricScaleMax(values, opts) {
+    const dataMax = Math.max(0, ...values);
+    if (opts && opts.minMax != null) {
+      const pad = opts.pad != null ? opts.pad : 1.05;
+      const max = dataMax < opts.minMax ? opts.minMax : dataMax * pad;
+      return max > 0 ? max : opts.minMax;
+    }
+    return Math.max(1, dataMax);
+  }
 
   function fmtMs(ms) {
     if (ms == null || Number.isNaN(ms)) return "—";
@@ -451,13 +464,17 @@
     }
     const elapsed = Date.now() - startedMs();
     const done = !!snapshot.done;
+    const dualHarness = snapshot.provider === "clai+pi";
     meta.innerHTML =
       "<span><strong>" + esc(snapshot.runId) + "</strong>" +
       (snapshot.offline ? '<span class="pill">offline</span>' : "") +
       (done ? '<span class="pill">done</span>' : '<span class="pill">live</span>') +
+      (dualHarness ? '<span class="pill">CLAI + pi</span>' : "") +
       "</span>" +
-      "<span>" + esc(snapshot.provider) + " · " + esc(snapshot.model) + "</span>" +
-      "<span>parallel <strong>" + esc(snapshot.parallel) + "</strong></span>" +
+      "<span>" + esc(snapshot.provider) + " · " + esc(snapshot.model) +
+      (dualHarness ? " · both harnesses in parallel" : "") + "</span>" +
+      "<span>parallel <strong>" + esc(snapshot.parallel) + "</strong>" +
+      (dualHarness ? " each" : "") + "</span>" +
       "<span>elapsed <strong id='elapsed'>" + fmtMs(elapsed) + "</strong></span>" +
       "<span>tokens <strong>" + (tokensIn + tokensOut).toLocaleString() + "</strong></span>" +
       "<span>cost <strong>" + fmtCost(cost) + "</strong></span>" +
@@ -489,8 +506,12 @@
       );
     }).join("");
 
-    renderCharts(tasks);
-    refreshChartTitles("live");
+    // Charts: defer to refreshChartsFromBestSource (SSE/load) so a pinned history
+    // run is not overwritten by live snapshots. Only paint here when not pinned.
+    if (!(historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length)) {
+      renderCharts(tasks);
+      refreshChartTitles("live");
+    }
     if (!done) {
       clearInterval(tickTimer);
       tickTimer = setInterval(() => {
@@ -502,7 +523,7 @@
     }
   }
 
-  function refreshChartTitles(mode) {
+  function refreshChartTitles(mode, runId) {
     const passT = $("chart-pass-title");
     const durT = $("chart-dur-title");
     const tokT = $("chart-tok-title");
@@ -514,6 +535,13 @@
       tokT.textContent = "Tokens by task (shared scale · CLAI + pi)";
       if (costT) costT.textContent = "Cost by task USD (shared scale · CLAI + pi)";
       if (avgBox) avgBox.classList.remove("hidden");
+    } else if (mode === "history" && runId) {
+      const tag = " — " + runId;
+      passT.textContent = "Pass rate" + tag;
+      durT.textContent = "Duration by task (ms)" + tag;
+      tokT.textContent = "Tokens by task" + tag;
+      if (costT) costT.textContent = "Cost by task (USD)" + tag;
+      if (avgBox) avgBox.classList.add("hidden");
     } else {
       passT.textContent = "Pass rate";
       durT.textContent = "Duration by task (ms)";
@@ -588,9 +616,12 @@
       draw(240, piM.passRate, "#56b6c2", "pi", piM.pass + "/" + piM.n);
   }
 
-  function dualMetricBars(ids, getClai, getPi, w, h, fmt, colors) {
+  function dualMetricBars(ids, getClai, getPi, w, h, fmt, colors, opts) {
     const padL = 96, padR = 56, padT = 18, padB = 8;
-    const max = Math.max(1, ...ids.flatMap((id) => [getClai(id) || 0, getPi(id) || 0]));
+    const max = metricScaleMax(
+      ids.flatMap((id) => [getClai(id) || 0, getPi(id) || 0]),
+      opts,
+    );
     const rowH = (h - padT - padB) / Math.max(ids.length, 1);
     const barH = Math.min(7, rowH / 2 - 2);
     let out =
@@ -664,14 +695,14 @@
         '<div class="avg">' +
           "<div>pass <strong>" + piM.pass + "/" + piM.n + "</strong> (" + fmtPct(piM.passRate) + ")</div>" +
           "<div>avg time <strong>" + fmtMs(piM.avgWallMs) + "</strong></div>" +
-          "<div>avg tokens <strong>" + (piM.avgTokens == null ? "n/a (pi)" : Math.round(piM.avgTokens).toLocaleString()) + "</strong></div>" +
-          "<div>avg cost <strong>" + (piM.avgCost == null ? "n/a (pi)" : fmtCost(piM.avgCost)) + "</strong></div>" +
+          "<div>avg tokens <strong>" + (piM.avgTokens == null ? "n/a" : Math.round(piM.avgTokens).toLocaleString()) + "</strong></div>" +
+          "<div>avg cost <strong>" + (piM.avgCost == null ? "n/a" : fmtCost(piM.avgCost)) + "</strong></div>" +
         "</div></div>";
     if (formula) {
       formula.textContent =
         "Composite /100 = pass×" + claiScore.wPass + " + speed×" + claiScore.wSpeed +
         " + tokens×" + claiScore.wTok + " + cost×" + claiScore.wCost +
-        " · same weights both sides · efficiency = bestAvg/avg · tok/cost from CLAI usage + pi --mode json";
+        " · efficiency = bestAvg/avg · cost from shared provider list prices × measured tokens";
     }
   }
 
@@ -728,7 +759,8 @@
         ids,
         (id) => Number(claiMap[id]?.cost) || 0,
         (id) => Number(piMap[id]?.cost) || 0,
-        320, h, (v) => "$" + v.toFixed(4), colors,
+        320, h, (v) => "$" + Number(v).toFixed(4), colors,
+        { minMax: 0.05, pad: 1.05 },
       );
     }
     const avgSvg = $("chart-avg");
@@ -737,6 +769,12 @@
   }
 
   function refreshChartsFromBestSource() {
+    // Explicit history-row selection wins over compare/live dual charts.
+    if (historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length) {
+      renderCharts(historyDetailTasks);
+      refreshChartTitles("history", selectedId);
+      return;
+    }
     // During/after compare, prefer dual harness charts (not the live pi-only snapshot).
     if (compare && (job.kind === "compare" || !snapshot || snapshot.done || String(snapshot.provider || "").startsWith("pi"))) {
       if (renderCompareCharts()) return;
@@ -749,7 +787,7 @@
     if (compare && renderCompareCharts()) return;
     if (historyDetailTasks && historyDetailTasks.length) {
       renderCharts(historyDetailTasks);
-      refreshChartTitles("live");
+      refreshChartTitles(selectedId ? "history" : "live", selectedId || undefined);
       return;
     }
     if (runs.length) {
@@ -811,7 +849,10 @@
     if (costBox) costBox.classList.toggle("hidden", !hasCost);
     if (hasCost && costSvg) {
       costSvg.setAttribute("viewBox", "0 0 320 " + h);
-      costSvg.innerHTML = barSvg(costs, 320, h, (v) => "$" + v.toFixed(4));
+      costSvg.innerHTML = barSvg(
+        costs, 320, h, (v) => "$" + Number(v).toFixed(4),
+        { minMax: 0.05, pad: 1.05 },
+      );
     }
   }
 
@@ -850,11 +891,16 @@
       '<text x="145" y="76" fill="#808080" font-size="11">other ' + pending + "</text>";
   }
 
-  function barSvg(items, w, h, fmt) {
+  function barSvg(items, w, h, fmt, opts) {
     const padL = 90, padR = 12, padT = 8, padB = 16;
-    const max = Math.max(1, ...items.map((i) => i.v));
+    const max = metricScaleMax(items.map((i) => i.v), opts);
     const barH = Math.min(14, (h - padT - padB) / Math.max(items.length, 1) - 4);
     let out = "";
+    if (opts && opts.minMax != null) {
+      out +=
+        '<text x="' + (w - 4) + '" y="10" text-anchor="end" fill="#606060" font-size="9">max ' +
+        esc(fmt(max)) + "</text>";
+    }
     items.forEach((it, i) => {
       const y = padT + i * ((h - padT - padB) / items.length);
       const bw = ((w - padL - padR) * it.v) / max;
@@ -917,7 +963,10 @@
     }).join("");
 
     body.querySelectorAll("tr.hist").forEach((tr) => {
-      tr.addEventListener("click", () => selectRun(tr.getAttribute("data-id")));
+      tr.addEventListener("click", () => {
+        historyChartsPinned = true;
+        selectRun(tr.getAttribute("data-id"));
+      });
     });
   }
 
@@ -954,7 +1003,12 @@
           tokensOut: t.tokensOut,
           cost: t.cost,
         }));
-        if (!snapshot || snapshot.done) refreshChartsFromBestSource();
+        if (historyChartsPinned) {
+          renderCharts(historyDetailTasks);
+          refreshChartTitles("history", selectedId);
+        } else if (!snapshot || snapshot.done) {
+          refreshChartsFromBestSource();
+        }
       }
     } catch (err) {
       detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
@@ -1004,6 +1058,34 @@
     return { who: "tie", reason: "identical pass rate" };
   }
 
+  function isTerminalCompareStatus(s) {
+    return s === "pass" || s === "fail" || s === "error";
+  }
+
+  /** Both harnesses have the same task ids, all in a terminal status. */
+  function bothHarnessesComplete(c) {
+    const clai = (c && c.clai) || [];
+    const pi = (c && c.pi) || [];
+    if (!clai.length || !pi.length || clai.length !== pi.length) return false;
+    if (!clai.every((r) => isTerminalCompareStatus(r.status))) return false;
+    if (!pi.every((r) => isTerminalCompareStatus(r.status))) return false;
+    const piIds = new Set(pi.map((r) => r.id));
+    for (const r of clai) {
+      if (!piIds.has(r.id)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Winner/composite only when the race is finished — not as partial rows stream in.
+   * Runner sets compare.partial until phase "done"; also require matching terminal rows.
+   */
+  function isCompareScoringReady(c) {
+    if (!c) return false;
+    if (c.partial === true) return false;
+    return bothHarnessesComplete(c);
+  }
+
   function statusCell(row) {
     if (!row) return '<span class="empty">—</span>';
     return (
@@ -1020,24 +1102,11 @@
     }
     panel.style.display = "block";
 
-    const claiScore = compare.claiScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
-    const piScore = compare.piScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
-    const claiM = harnessMetrics(compare.clai || []);
-    const piM = harnessMetrics(compare.pi || []);
-    const weights = sharedScoreWeights(claiM, piM);
-    const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
-    const refs = {
-      bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
-      bestAvgTok: weights.bothTok
-        ? Math.min(claiM.avgTokens, piM.avgTokens)
-        : null,
-      bestAvgCost: weights.bothCost
-        ? Math.min(claiM.avgCost, piM.avgCost)
-        : null,
-    };
-    const claiComposite = scoreHarness(claiM, refs, weights);
-    const piComposite = scoreHarness(piM, refs, weights);
-    const winner = pickWinner(claiScore, piScore, claiComposite, piComposite);
+    const claiRows = compare.clai || [];
+    const piRows = compare.pi || [];
+    const scoringReady = isCompareScoringReady(compare);
+    const compareRunning =
+      (job.status === "running" || job.status === "stopping") && job.kind === "compare";
 
     $("compare-meta").innerHTML =
       "<span>model <strong>" + esc(compare.piProvider) + " / " + esc(compare.piModel) + "</strong></span>" +
@@ -1045,52 +1114,83 @@
       (compare.claiLabel
         ? "<span>CLAI source <strong>" + esc(compare.claiLabel) + "</strong></span>"
         : "") +
-      "<span>mode <strong>parallel</strong> — fresh CLAI + pi together · task concurrency from job</span>";
+      "<span>mode <strong>parallel</strong> — CLAI + pi together (provider <code>clai+pi</code>)</span>" +
+      (compareRunning
+        ? "<span>progress <strong>" + claiRows.length + " clai · " + piRows.length + " pi</strong> rows</span>"
+        : "");
 
     const winEl = $("compare-winner");
-    // Mid-run: pi total can be &lt; clai total — don't call a false "tie".
-    const piDone = (compare.pi || []).length;
-    const claiTotal = claiScore.total || 0;
-    const inFlight = piDone < claiTotal && job.status === "running" && job.kind === "compare";
-    if (inFlight) {
+    if (!scoringReady) {
+      // Freeze winner + composite while either harness is still finishing tasks.
       winEl.className = "winner-callout tie";
-      winEl.textContent =
-        "Pi still running (" + piDone + "/" + claiTotal +
-        ") — CLAI column is prior history, not a live race";
-    } else if (winner.who === "none") {
-      winEl.className = "winner-callout tie";
-      winEl.textContent = winner.reason;
-    } else if (winner.who === "tie") {
-      winEl.className = "winner-callout tie";
-      winEl.textContent = "Tie — " + winner.reason;
+      winEl.textContent = "Scoring when both harnesses finish…";
+      $("compare-scores").innerHTML =
+        '<div class="compare-score">' +
+          '<div class="label">CLAI</div>' +
+          '<div class="value" style="color:var(--faint)">—</div>' +
+          '<div style="margin-top:6px;font-size:11px;color:var(--faint)">composite pending</div>' +
+        "</div>" +
+        '<div class="compare-score">' +
+          '<div class="label">pi</div>' +
+          '<div class="value" style="color:var(--faint)">—</div>' +
+          '<div style="margin-top:6px;font-size:11px;color:var(--faint)">composite pending</div>' +
+        "</div>";
     } else {
-      winEl.className = "winner-callout";
-      winEl.innerHTML = "<strong>" + esc(winner.who.toUpperCase()) + " wins</strong> — " + esc(winner.reason);
+      const claiScore = compare.claiScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
+      const piScore = compare.piScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
+      const claiM = harnessMetrics(claiRows);
+      const piM = harnessMetrics(piRows);
+      const weights = sharedScoreWeights(claiM, piM);
+      const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+      const refs = {
+        bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
+        bestAvgTok: weights.bothTok
+          ? Math.min(claiM.avgTokens, piM.avgTokens)
+          : null,
+        bestAvgCost: weights.bothCost
+          ? Math.min(claiM.avgCost, piM.avgCost)
+          : null,
+      };
+      const claiComposite = scoreHarness(claiM, refs, weights);
+      const piComposite = scoreHarness(piM, refs, weights);
+      const winner = pickWinner(claiScore, piScore, claiComposite, piComposite);
+
+      if (winner.who === "none") {
+        winEl.className = "winner-callout tie";
+        winEl.textContent = winner.reason;
+      } else if (winner.who === "tie") {
+        winEl.className = "winner-callout tie";
+        winEl.textContent = "Tie — " + winner.reason;
+      } else {
+        winEl.className = "winner-callout";
+        winEl.innerHTML = "<strong>" + esc(winner.who.toUpperCase()) + " wins</strong> — " + esc(winner.reason);
+      }
+
+      const claiWin = winner.who === "clai";
+      const piWin = winner.who === "pi";
+      $("compare-scores").innerHTML =
+        '<div class="compare-score' + (claiWin ? " winner" : "") + '">' +
+          '<div class="label">CLAI</div>' +
+          '<div class="value ' + rateClass(claiScore.rate) + '">' +
+            (claiScore.pass || 0) + "/" + (claiScore.total || 0) +
+            ' <span style="font-size:12px;font-weight:600">(' + fmtPct(claiScore.rate) + ")</span></div>" +
+          '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+            claiComposite.total.toFixed(1) + "</strong>/100</div>" +
+        "</div>" +
+        '<div class="compare-score' + (piWin ? " winner" : "") + '">' +
+          '<div class="label">pi</div>' +
+          '<div class="value ' + rateClass(piScore.rate) + '">' +
+            (piScore.pass || 0) + "/" + (piScore.total || 0) +
+            ' <span style="font-size:12px;font-weight:600">(' + fmtPct(piScore.rate) + ")</span></div>" +
+          '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+            piComposite.total.toFixed(1) + "</strong>/100</div>" +
+        "</div>";
     }
 
-    const claiWin = winner.who === "clai";
-    const piWin = winner.who === "pi";
-    $("compare-scores").innerHTML =
-      '<div class="compare-score' + (claiWin ? " winner" : "") + '">' +
-        '<div class="label">CLAI</div>' +
-        '<div class="value ' + rateClass(claiScore.rate) + '">' +
-          (claiScore.pass || 0) + "/" + (claiScore.total || 0) +
-          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(claiScore.rate) + ")</span></div>" +
-        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
-          claiComposite.total.toFixed(1) + "</strong>/100</div>" +
-      "</div>" +
-      '<div class="compare-score' + (piWin ? " winner" : "") + '">' +
-        '<div class="label">pi</div>' +
-        '<div class="value ' + rateClass(piScore.rate) + '">' +
-          (piScore.pass || 0) + "/" + (piScore.total || 0) +
-          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(piScore.rate) + ")</span></div>" +
-        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
-          piComposite.total.toFixed(1) + "</strong>/100</div>" +
-      "</div>";
-
-    const claiMap = Object.fromEntries((compare.clai || []).map((r) => [r.id, r]));
-    const piMap = Object.fromEntries((compare.pi || []).map((r) => [r.id, r]));
-    const ids = [...new Set([...(compare.pi || []).map((r) => r.id), ...(compare.clai || []).map((r) => r.id)])];
+    // Task table + wall bars always update from streaming compare rows.
+    const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
+    const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
+    const ids = [...new Set([...piRows.map((r) => r.id), ...claiRows.map((r) => r.id)])];
 
     $("compare-body").innerHTML = ids.map((id) =>
       "<tr>" +
@@ -1128,7 +1228,10 @@
           "</div>"
         );
       }).join("");
-    refreshChartsFromBestSource();
+    // Avoid pass-rate pie / composite chart thrash while rows are still streaming.
+    if (scoringReady || !compareRunning) {
+      refreshChartsFromBestSource();
+    }
   }
 
   async function hydrateClaiTokens() {
@@ -1191,8 +1294,11 @@
         : "idle";
     } else {
       const elapsed = job.startedAt ? fmtMs(Date.now() - Date.parse(job.startedAt)) : "";
+      const compareHint =
+        job.kind === "compare" ? " · CLAI + pi in parallel" : "";
       meta.innerHTML =
         "<strong>" + esc(job.status) + "</strong> · " + esc(job.kind || "") +
+        compareHint +
         (elapsed ? " · " + elapsed : "");
     }
     $("job-err").textContent = job.error || "";
@@ -1200,6 +1306,7 @@
 
   async function startJob(kind) {
     $("job-err").textContent = "";
+    historyChartsPinned = false;
     try {
       const res = await fetch("/api/jobs", {
         method: "POST",
