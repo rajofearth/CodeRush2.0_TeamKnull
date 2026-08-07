@@ -104,12 +104,6 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.35; transform: scale(0.85); }
   }
-  .charts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-  }
   .chart-box {
     background: var(--panel);
     border-left: 3px solid var(--border-subtle);
@@ -169,12 +163,124 @@
   .banner strong { color: var(--warning); }
   .banner .detail { color: var(--muted); margin-top: 4px; font-size: 12px; }
   .spark { vertical-align: middle; }
+  .panel.compare { border-left-color: var(--info); }
+  .compare-scores {
+    display: flex; flex-wrap: wrap; gap: 12px 24px;
+    margin-bottom: 12px;
+  }
+  .compare-score {
+    background: var(--element);
+    padding: 10px 14px;
+    min-width: 140px;
+  }
+  .compare-score .label {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px;
+  }
+  .compare-score .value { font-size: 18px; font-weight: 700; }
+  .compare-score.winner { outline: 1px solid var(--success); }
+  .winner-callout {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    background: var(--element);
+    border-left: 3px solid var(--success);
+    font-size: 12px;
+  }
+  .winner-callout.tie { border-left-color: var(--muted); }
+  .compare-bars { margin-top: 12px; }
+  .compare-bar-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .compare-bar-row .task-id { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .compare-bar-track {
+    height: 10px; background: var(--element); position: relative;
+  }
+  .compare-bar-fill {
+    height: 100%; transition: width 0.25s ease;
+  }
+  .compare-bar-fill.clai { background: var(--accent); }
+  .compare-bar-fill.pi { background: var(--info); }
+  .compare-bar-label {
+    position: absolute; right: 4px; top: -14px;
+    font-size: 9px; color: var(--faint);
+  }
+  .compare-note { color: var(--faint); font-size: 11px; margin-top: 10px; }
+  .compare-note code { color: var(--muted); }
+  .status-cell.pass { color: var(--success); }
+  .status-cell.fail { color: var(--error); }
+  .status-cell.error { color: var(--warning); }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 16px; padding: 12px 14px;
+    background: var(--panel); border-left: 3px solid var(--accent);
+  }
+  .controls button {
+    font: inherit; cursor: pointer;
+    background: var(--element); color: var(--text);
+    border: 1px solid var(--border-subtle); padding: 6px 12px;
+  }
+  .controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .controls button.primary { border-color: var(--accent); color: var(--accent); }
+  .controls button.danger { border-color: var(--error); color: var(--error); }
+  .controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .controls .job-meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .controls .job-meta strong { color: var(--text); }
+  .controls .job-err { color: var(--error); font-size: 11px; width: 100%; margin-top: 4px; }
+  .chart-box.hidden { display: none; }
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .score-card {
+    background: var(--element);
+    padding: 12px 14px;
+    border-left: 3px solid var(--border-subtle);
+  }
+  .score-card.winner { border-left-color: var(--success); }
+  .score-card .name {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .score-card .big {
+    font-size: 28px; font-weight: 700; color: var(--text); line-height: 1.1;
+  }
+  .score-card .avg {
+    margin-top: 8px; font-size: 11px; color: var(--muted);
+  }
+  .score-card .avg div { margin-top: 2px; }
+  .score-card .avg strong { color: var(--text); font-weight: 600; }
+  .score-formula {
+    font-size: 11px; color: var(--faint); margin: 0 0 10px;
+  }
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .chart-box svg.chart { min-height: 160px; }
 </style>
 </head>
 <body>
   <div class="conn" id="conn">● Connecting</div>
   <h1><span class="brand">clai</span> bench</h1>
-  <p class="sub">live metrics · parallel runs · history &nbsp;·&nbsp; <a href="/api/runs">/api/runs</a></p>
+  <p class="sub">control center · live · harness compare · history &nbsp;·&nbsp; <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a></p>
+
+  <div class="controls" id="controls">
+    <button type="button" class="primary" id="btn-clai" data-kind="clai">Run CLAI</button>
+    <button type="button" id="btn-offline" data-kind="offline">Run offline</button>
+    <button type="button" class="primary" id="btn-compare" data-kind="compare">Compare CLAI vs pi</button>
+    <button type="button" class="danger" id="btn-stop" disabled>Stop</button>
+    <span class="job-meta" id="job-meta">idle</span>
+    <div class="job-err" id="job-err"></div>
+  </div>
 
   <section class="panel live" id="live-panel">
     <h2>Live run</h2>
@@ -184,20 +290,49 @@
     <div class="grid" id="task-grid"></div>
   </section>
 
+  <section class="panel compare" id="compare-panel" style="display:none">
+    <h2>Harness compare</h2>
+    <div class="meta" id="compare-meta"></div>
+    <div class="winner-callout" id="compare-winner"></div>
+    <div class="compare-scores" id="compare-scores"></div>
+    <div id="scoreboard" class="scoreboard"></div>
+    <p class="score-formula" id="score-formula"></p>
+    <table>
+      <thead>
+        <tr>
+          <th>task</th>
+          <th>clai</th>
+          <th>pi</th>
+        </tr>
+      </thead>
+      <tbody id="compare-body"></tbody>
+    </table>
+    <div class="compare-bars" id="compare-bars"></div>
+    <p class="compare-note">source: <code>.clai/bench/compare-pi.json</code> · start from the control bar or <code>pnpm bench:compare-pi</code></p>
+  </section>
+
   <section>
     <h2>Charts</h2>
     <div class="charts">
       <div class="chart-box">
-        <h3>Pass rate</h3>
-        <svg class="chart" id="chart-pass" viewBox="0 0 200 120" role="img"></svg>
+        <h3 id="chart-pass-title">Pass rate</h3>
+        <svg class="chart" id="chart-pass" viewBox="0 0 320 150" role="img"></svg>
       </div>
       <div class="chart-box">
-        <h3>Duration by task (ms)</h3>
-        <svg class="chart" id="chart-dur" viewBox="0 0 320 140" role="img"></svg>
+        <h3 id="chart-dur-title">Duration by task (ms)</h3>
+        <svg class="chart" id="chart-dur" viewBox="0 0 320 200" role="img"></svg>
       </div>
-      <div class="chart-box">
-        <h3>Tokens by task</h3>
-        <svg class="chart" id="chart-tok" viewBox="0 0 320 140" role="img"></svg>
+      <div class="chart-box" id="chart-tok-box">
+        <h3 id="chart-tok-title">Tokens by task</h3>
+        <svg class="chart" id="chart-tok" viewBox="0 0 320 200" role="img"></svg>
+      </div>
+      <div class="chart-box" id="chart-cost-box">
+        <h3 id="chart-cost-title">Cost by task (USD)</h3>
+        <svg class="chart" id="chart-cost" viewBox="0 0 320 200" role="img"></svg>
+      </div>
+      <div class="chart-box" id="chart-avg-box">
+        <h3>Averages (per task)</h3>
+        <svg class="chart" id="chart-avg" viewBox="0 0 320 150" role="img"></svg>
       </div>
     </div>
   </section>
@@ -228,8 +363,11 @@
   const $ = (id) => document.getElementById(id);
   let snapshot = null;
   let runs = [];
+  let compare = null;
   let selectedId = null;
   let tickTimer = null;
+  let job = { status: "idle" };
+  let historyDetailTasks = null;
   const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
 
   function fmtMs(ms) {
@@ -352,6 +490,7 @@
     }).join("");
 
     renderCharts(tasks);
+    refreshChartTitles("live");
     if (!done) {
       clearInterval(tickTimer);
       tickTimer = setInterval(() => {
@@ -363,34 +502,317 @@
     }
   }
 
+  function refreshChartTitles(mode) {
+    const passT = $("chart-pass-title");
+    const durT = $("chart-dur-title");
+    const tokT = $("chart-tok-title");
+    const costT = $("chart-cost-title");
+    const avgBox = $("chart-avg-box");
+    if (mode === "compare") {
+      passT.textContent = "Pass rate — both harness pies";
+      durT.textContent = "Wall time CLAI vs pi (shared scale)";
+      tokT.textContent = "Tokens by task (shared scale · CLAI + pi)";
+      if (costT) costT.textContent = "Cost by task USD (shared scale · CLAI + pi)";
+      if (avgBox) avgBox.classList.remove("hidden");
+    } else {
+      passT.textContent = "Pass rate";
+      durT.textContent = "Duration by task (ms)";
+      tokT.textContent = "Tokens by task";
+      if (costT) costT.textContent = "Cost by task (USD)";
+      if (avgBox) avgBox.classList.add("hidden");
+    }
+  }
+
+  function harnessMetrics(rows) {
+    const list = rows || [];
+    const n = Math.max(list.length, 1);
+    const pass = list.filter((r) => r.status === "pass").length;
+    const avgWall = list.reduce((a, r) => a + (r.wallMs || 0), 0) / n;
+    const toks = list.map((r) => (r.tokensIn || 0) + (r.tokensOut || 0));
+    const costs = list.map((r) => Number(r.cost) || 0);
+    const hasTok = toks.some((v) => v > 0);
+    const hasCost = costs.some((v) => v > 0);
+    return {
+      n: list.length,
+      pass,
+      passRate: list.length ? pass / list.length : 0,
+      avgWallMs: avgWall,
+      avgTokens: hasTok ? toks.reduce((a, b) => a + b, 0) / n : null,
+      avgCost: hasCost ? costs.reduce((a, b) => a + b, 0) / n : null,
+      hasTok,
+      hasCost,
+    };
+  }
+
+  function sharedScoreWeights(claiM, piM) {
+    // Same weights for both harnesses. Tok/cost only count when BOTH report them.
+    const bothTok = !!(claiM.hasTok && piM.hasTok);
+    const bothCost = !!(claiM.hasCost && piM.hasCost);
+    let wPass = 50, wSpeed = 30, wTok = 10, wCost = 10;
+    if (!bothTok && !bothCost) { wPass = 60; wSpeed = 40; wTok = 0; wCost = 0; }
+    else if (!bothTok) { wPass = 55; wSpeed = 35; wTok = 0; wCost = 10; }
+    else if (!bothCost) { wPass = 55; wSpeed = 35; wTok = 10; wCost = 0; }
+    return { wPass, wSpeed, wTok, wCost, bothTok, bothCost };
+  }
+
+  function scoreHarness(m, refs, weights) {
+    const { wPass, wSpeed, wTok, wCost } = weights;
+    const passPts = wPass * m.passRate;
+    const speedPts = m.avgWallMs > 0 ? wSpeed * Math.min(1, refs.bestAvgWall / m.avgWallMs) : 0;
+    const tokPts =
+      wTok > 0 && m.avgTokens != null && m.avgTokens > 0 && refs.bestAvgTok != null
+        ? wTok * Math.min(1, refs.bestAvgTok / m.avgTokens)
+        : 0;
+    const costPts =
+      wCost > 0 && m.avgCost != null && m.avgCost > 0 && refs.bestAvgCost != null
+        ? wCost * Math.min(1, refs.bestAvgCost / m.avgCost)
+        : 0;
+    return { total: passPts + speedPts + tokPts + costPts, wPass, wSpeed, wTok, wCost };
+  }
+
+  function dualDonutSvg(claiM, piM) {
+    const draw = (cx, rate, color, label, sub) => {
+      const r = 36, stroke = 12, circ = 2 * Math.PI * r;
+      const len = Math.max(0, Math.min(1, rate)) * circ;
+      return (
+        '<circle cx="' + cx + '" cy="70" r="' + r + '" fill="none" stroke="#3c3c3c" stroke-width="' + stroke + '" />' +
+        '<circle cx="' + cx + '" cy="70" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="' + stroke +
+        '" stroke-dasharray="' + len + " " + (circ - len) + '" transform="rotate(-90 ' + cx + ' 70)" />' +
+        '<text x="' + cx + '" y="74" text-anchor="middle" fill="#eeeeee" font-size="16" font-weight="700">' +
+        Math.round(rate * 100) + "%</text>" +
+        '<text x="' + cx + '" y="128" text-anchor="middle" fill="' + color + '" font-size="11">' + esc(label) + "</text>" +
+        '<text x="' + cx + '" y="142" text-anchor="middle" fill="#808080" font-size="10">' + esc(sub) + "</text>"
+      );
+    };
+    return draw(80, claiM.passRate, "#5c9cf5", "CLAI", claiM.pass + "/" + claiM.n) +
+      draw(240, piM.passRate, "#56b6c2", "pi", piM.pass + "/" + piM.n);
+  }
+
+  function dualMetricBars(ids, getClai, getPi, w, h, fmt, colors) {
+    const padL = 96, padR = 56, padT = 18, padB = 8;
+    const max = Math.max(1, ...ids.flatMap((id) => [getClai(id) || 0, getPi(id) || 0]));
+    const rowH = (h - padT - padB) / Math.max(ids.length, 1);
+    const barH = Math.min(7, rowH / 2 - 2);
+    let out =
+      '<text x="' + padL + '" y="12" fill="' + colors.clai + '" font-size="9">CLAI</text>' +
+      '<text x="' + (padL + 40) + '" y="12" fill="' + colors.pi + '" font-size="9">pi</text>' +
+      '<text x="' + (w - 4) + '" y="12" text-anchor="end" fill="#606060" font-size="9">max ' +
+      esc(fmt(max)) + "</text>";
+    ids.forEach((id, i) => {
+      const y = padT + i * rowH;
+      const cv = getClai(id) || 0;
+      const pv = getPi(id) || 0;
+      const cBw = ((w - padL - padR) * cv) / max;
+      const pBw = ((w - padL - padR) * pv) / max;
+      out +=
+        '<text x="0" y="' + (y + barH + 5) + '" fill="#808080" font-size="9">' +
+        esc(id.length > 15 ? id.slice(0, 14) + "…" : id) + "</text>" +
+        '<rect x="' + padL + '" y="' + y + '" width="' + Math.max(cBw, cv ? 1 : 0) +
+        '" height="' + barH + '" fill="' + colors.clai + '" />' +
+        '<text x="' + (padL + cBw + 3) + '" y="' + (y + barH - 1) +
+        '" fill="#808080" font-size="8">' + (cv ? esc(fmt(cv)) : "—") + "</text>" +
+        '<rect x="' + padL + '" y="' + (y + barH + 2) + '" width="' + Math.max(pBw, pv ? 1 : 0) +
+        '" height="' + barH + '" fill="' + colors.pi + '" />' +
+        '<text x="' + (padL + pBw + 3) + '" y="' + (y + 2 * barH + 1) +
+        '" fill="#808080" font-size="8">' + (pv ? esc(fmt(pv)) : "—") + "</text>";
+    });
+    return out;
+  }
+
+  function avgGroupedSvg(claiM, piM) {
+    const groups = [
+      { label: "avg time", c: claiM.avgWallMs / 1000, p: piM.avgWallMs / 1000, fmt: (v) => (v == null ? "n/a" : v.toFixed(1) + "s") },
+      { label: "avg tokens", c: claiM.avgTokens, p: piM.avgTokens, fmt: (v) => (v == null ? "n/a" : Math.round(v).toLocaleString()) },
+      { label: "avg cost", c: claiM.avgCost, p: piM.avgCost, fmt: (v) => (v == null ? "n/a" : "$" + v.toFixed(4)) },
+    ];
+    let out = '<text x="20" y="14" fill="#5c9cf5" font-size="9">CLAI</text><text x="60" y="14" fill="#56b6c2" font-size="9">pi</text>';
+    groups.forEach((g, i) => {
+      const y = 28 + i * 38;
+      const vals = [g.c, g.p].filter((v) => v != null && v > 0);
+      const max = Math.max(1e-9, ...vals, 1e-9);
+      const cBw = g.c != null && g.c > 0 ? (180 * g.c) / max : 0;
+      const pBw = g.p != null && g.p > 0 ? (180 * g.p) / max : 0;
+      out +=
+        '<text x="0" y="' + (y + 10) + '" fill="#808080" font-size="10">' + esc(g.label) + "</text>" +
+        '<rect x="90" y="' + y + '" width="' + cBw + '" height="10" fill="#5c9cf5" />' +
+        '<text x="' + (94 + cBw) + '" y="' + (y + 9) + '" fill="#808080" font-size="9">' + esc(g.fmt(g.c)) + "</text>" +
+        '<rect x="90" y="' + (y + 14) + '" width="' + pBw + '" height="10" fill="#56b6c2" />' +
+        '<text x="' + (94 + pBw) + '" y="' + (y + 23) + '" fill="#808080" font-size="9">' + esc(g.fmt(g.p)) + "</text>";
+    });
+    return out;
+  }
+
+  function renderScoreboard(claiM, piM, claiScore, piScore) {
+    const board = $("scoreboard");
+    const formula = $("score-formula");
+    if (!board) return;
+    const cWin = claiScore.total > piScore.total + 0.05;
+    const pWin = piScore.total > claiScore.total + 0.05;
+    board.innerHTML =
+      '<div class="score-card' + (cWin ? " winner" : "") + '">' +
+        '<div class="name">CLAI composite / 100</div>' +
+        '<div class="big">' + claiScore.total.toFixed(1) + "</div>" +
+        '<div class="avg">' +
+          "<div>pass <strong>" + claiM.pass + "/" + claiM.n + "</strong> (" + fmtPct(claiM.passRate) + ")</div>" +
+          "<div>avg time <strong>" + fmtMs(claiM.avgWallMs) + "</strong></div>" +
+          "<div>avg tokens <strong>" + (claiM.avgTokens == null ? "n/a" : Math.round(claiM.avgTokens).toLocaleString()) + "</strong></div>" +
+          "<div>avg cost <strong>" + (claiM.avgCost == null ? "n/a" : fmtCost(claiM.avgCost)) + "</strong></div>" +
+        "</div></div>" +
+      '<div class="score-card' + (pWin ? " winner" : "") + '">' +
+        '<div class="name">pi composite / 100</div>' +
+        '<div class="big">' + piScore.total.toFixed(1) + "</div>" +
+        '<div class="avg">' +
+          "<div>pass <strong>" + piM.pass + "/" + piM.n + "</strong> (" + fmtPct(piM.passRate) + ")</div>" +
+          "<div>avg time <strong>" + fmtMs(piM.avgWallMs) + "</strong></div>" +
+          "<div>avg tokens <strong>" + (piM.avgTokens == null ? "n/a (pi)" : Math.round(piM.avgTokens).toLocaleString()) + "</strong></div>" +
+          "<div>avg cost <strong>" + (piM.avgCost == null ? "n/a (pi)" : fmtCost(piM.avgCost)) + "</strong></div>" +
+        "</div></div>";
+    if (formula) {
+      formula.textContent =
+        "Composite /100 = pass×" + claiScore.wPass + " + speed×" + claiScore.wSpeed +
+        " + tokens×" + claiScore.wTok + " + cost×" + claiScore.wCost +
+        " · same weights both sides · efficiency = bestAvg/avg · tok/cost from CLAI usage + pi --mode json";
+    }
+  }
+
+  function renderCompareCharts() {
+    if (!compare) return false;
+    const claiRows = compare.clai || [];
+    const piRows = compare.pi || [];
+    const claiM = harnessMetrics(claiRows);
+    const piM = harnessMetrics(piRows);
+    const weights = sharedScoreWeights(claiM, piM);
+    const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+    const tokCands = weights.bothTok
+      ? [claiM.avgTokens, piM.avgTokens].filter((v) => v != null && v > 0)
+      : [];
+    const costCands = weights.bothCost
+      ? [claiM.avgCost, piM.avgCost].filter((v) => v != null && v > 0)
+      : [];
+    const refs = {
+      bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
+      bestAvgTok: tokCands.length ? Math.min.apply(null, tokCands) : null,
+      bestAvgCost: costCands.length ? Math.min.apply(null, costCands) : null,
+    };
+    const claiScore = scoreHarness(claiM, refs, weights);
+    const piScore = scoreHarness(piM, refs, weights);
+    renderScoreboard(claiM, piM, claiScore, piScore);
+
+    const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
+    const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
+    const ids = [...new Set(piRows.map((r) => r.id).concat(claiRows.map((r) => r.id)))];
+    const h = Math.max(200, ids.length * 24 + 24);
+    const colors = { clai: "#5c9cf5", pi: "#56b6c2" };
+
+    refreshChartTitles("compare");
+    $("chart-pass").setAttribute("viewBox", "0 0 320 150");
+    $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
+    $("chart-dur").setAttribute("viewBox", "0 0 320 " + h);
+    $("chart-dur").innerHTML = dualMetricBars(
+      ids, (id) => claiMap[id]?.wallMs || 0, (id) => piMap[id]?.wallMs || 0,
+      320, h, (v) => fmtMs(v), colors,
+    );
+    $("chart-tok-box").classList.remove("hidden");
+    $("chart-tok").setAttribute("viewBox", "0 0 320 " + h);
+    $("chart-tok").innerHTML = dualMetricBars(
+      ids,
+      (id) => (claiMap[id]?.tokensIn || 0) + (claiMap[id]?.tokensOut || 0),
+      (id) => (piMap[id]?.tokensIn || 0) + (piMap[id]?.tokensOut || 0),
+      320, h, (v) => Math.round(v).toLocaleString(), colors,
+    );
+    const costBox = $("chart-cost-box");
+    if (costBox) {
+      costBox.classList.remove("hidden");
+      $("chart-cost").setAttribute("viewBox", "0 0 320 " + h);
+      $("chart-cost").innerHTML = dualMetricBars(
+        ids,
+        (id) => Number(claiMap[id]?.cost) || 0,
+        (id) => Number(piMap[id]?.cost) || 0,
+        320, h, (v) => "$" + v.toFixed(4), colors,
+      );
+    }
+    const avgSvg = $("chart-avg");
+    if (avgSvg) avgSvg.innerHTML = avgGroupedSvg(claiM, piM);
+    return true;
+  }
+
+  function refreshChartsFromBestSource() {
+    // During/after compare, prefer dual harness charts (not the live pi-only snapshot).
+    if (compare && (job.kind === "compare" || !snapshot || snapshot.done || String(snapshot.provider || "").startsWith("pi"))) {
+      if (renderCompareCharts()) return;
+    }
+    if (snapshot && snapshot.tasks && snapshot.tasks.length && !String(snapshot.provider || "").startsWith("pi")) {
+      renderCharts(snapshot.tasks);
+      refreshChartTitles("live");
+      return;
+    }
+    if (compare && renderCompareCharts()) return;
+    if (historyDetailTasks && historyDetailTasks.length) {
+      renderCharts(historyDetailTasks);
+      refreshChartTitles("live");
+      return;
+    }
+    if (runs.length) {
+      const latest = runs[runs.length - 1];
+      if (latest && !selectedId) {
+        selectRun(latest.runId);
+        return;
+      }
+    }
+    renderCharts([]);
+  }
+
   function renderCharts(tasks) {
     const passSvg = $("chart-pass");
     const durSvg = $("chart-dur");
     const tokSvg = $("chart-tok");
+    const costSvg = $("chart-cost");
+    const costBox = $("chart-cost-box");
     if (!tasks || !tasks.length) {
       passSvg.innerHTML = emptySvg(200, 120);
       durSvg.innerHTML = emptySvg(320, 140);
       tokSvg.innerHTML = emptySvg(320, 140);
+      if (costSvg) costSvg.innerHTML = emptySvg(320, 140);
       return;
     }
     const passed = tasks.filter((t) => t.status === "pass").length;
     const failed = tasks.filter((t) => t.status === "fail" || t.status === "error" || t.status === "timeout").length;
     const pending = tasks.length - passed - failed;
+    passSvg.setAttribute("viewBox", "0 0 320 120");
     passSvg.innerHTML = donutSvg(passed, failed, pending, tasks.length);
 
+    const h = Math.max(160, tasks.length * 18 + 20);
     const durations = tasks.map((t) => ({
       id: t.id,
       v: t.wallMs || 0,
       status: t.status,
     }));
-    durSvg.innerHTML = barSvg(durations, 320, 140, (v) => fmtMs(v));
+    durSvg.setAttribute("viewBox", "0 0 320 " + h);
+    durSvg.innerHTML = barSvg(durations, 320, h, (v) => fmtMs(v));
 
     const tokens = tasks.map((t) => ({
       id: t.id,
       v: (t.tokensIn || 0) + (t.tokensOut || 0),
       status: t.status,
     }));
-    tokSvg.innerHTML = barSvg(tokens, 320, 140, (v) => String(v));
+    const hasTok = tokens.some((t) => t.v > 0);
+    $("chart-tok-box").classList.toggle("hidden", !hasTok);
+    if (hasTok) {
+      tokSvg.setAttribute("viewBox", "0 0 320 " + h);
+      tokSvg.innerHTML = barSvg(tokens, 320, h, (v) => String(v));
+    }
+
+    const costs = tasks.map((t) => ({
+      id: t.id,
+      v: Number(t.cost) || 0,
+      status: t.status,
+    }));
+    const hasCost = costs.some((t) => t.v > 0);
+    if (costBox) costBox.classList.toggle("hidden", !hasCost);
+    if (hasCost && costSvg) {
+      costSvg.setAttribute("viewBox", "0 0 320 " + h);
+      costSvg.innerHTML = barSvg(costs, 320, h, (v) => "$" + v.toFixed(4));
+    }
   }
 
   function emptySvg(w, h) {
@@ -520,8 +942,8 @@
         '<span class="pill">' + esc(run.provider) + "</span>" +
         '<span class="pill">' + fmtPct(run.aggregates?.passRate) + " pass</span>" +
         "<pre>" + esc(rows) + "</pre>";
-      if (run.tasks && (!snapshot || snapshot.done)) {
-        renderCharts(run.tasks.map((t) => ({
+      if (run.tasks) {
+        historyDetailTasks = run.tasks.map((t) => ({
           id: t.id,
           title: t.title,
           category: t.category,
@@ -531,7 +953,8 @@
           tokensIn: t.tokensIn,
           tokensOut: t.tokensOut,
           cost: t.cost,
-        })));
+        }));
+        if (!snapshot || snapshot.done) refreshChartsFromBestSource();
       }
     } catch (err) {
       detail.innerHTML = '<span class="empty">failed to load: ' + esc(err.message) + "</span>";
@@ -550,6 +973,263 @@
     }
   }
 
+  function pickWinner(claiScore, piScore, claiComposite, piComposite) {
+    if (!claiScore || !claiScore.total) {
+      return { who: "none", reason: "CLAI data unavailable — run pnpm bench:compare-pi with a history run or COMPARE_CLAI=1" };
+    }
+    if (claiComposite != null && piComposite != null) {
+      const c = claiComposite.total;
+      const p = piComposite.total;
+      if (c > p + 0.05) {
+        return {
+          who: "clai",
+          reason: "composite " + c.toFixed(1) + " vs " + p.toFixed(1) +
+            " (pass " + fmtPct(claiScore.rate) + " / " + fmtPct(piScore.rate) + ")",
+        };
+      }
+      if (p > c + 0.05) {
+        return {
+          who: "pi",
+          reason: "composite " + p.toFixed(1) + " vs " + c.toFixed(1) +
+            " (pass " + fmtPct(piScore.rate) + " / " + fmtPct(claiScore.rate) + ")",
+        };
+      }
+      return {
+        who: "tie",
+        reason: "composite " + c.toFixed(1) + " each · pass " + fmtPct(claiScore.rate),
+      };
+    }
+    if (claiScore.rate > piScore.rate) return { who: "clai", reason: "higher pass rate" };
+    if (piScore.rate > claiScore.rate) return { who: "pi", reason: "higher pass rate" };
+    return { who: "tie", reason: "identical pass rate" };
+  }
+
+  function statusCell(row) {
+    if (!row) return '<span class="empty">—</span>';
+    return (
+      '<span class="status-cell ' + esc(row.status) + '">' + esc(row.status) +
+      "</span> " + fmtMs(row.wallMs)
+    );
+  }
+
+  function renderCompare() {
+    const panel = $("compare-panel");
+    if (!compare) {
+      panel.style.display = "none";
+      return;
+    }
+    panel.style.display = "block";
+
+    const claiScore = compare.claiScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
+    const piScore = compare.piScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
+    const claiM = harnessMetrics(compare.clai || []);
+    const piM = harnessMetrics(compare.pi || []);
+    const weights = sharedScoreWeights(claiM, piM);
+    const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+    const refs = {
+      bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
+      bestAvgTok: weights.bothTok
+        ? Math.min(claiM.avgTokens, piM.avgTokens)
+        : null,
+      bestAvgCost: weights.bothCost
+        ? Math.min(claiM.avgCost, piM.avgCost)
+        : null,
+    };
+    const claiComposite = scoreHarness(claiM, refs, weights);
+    const piComposite = scoreHarness(piM, refs, weights);
+    const winner = pickWinner(claiScore, piScore, claiComposite, piComposite);
+
+    $("compare-meta").innerHTML =
+      "<span>model <strong>" + esc(compare.piProvider) + " / " + esc(compare.piModel) + "</strong></span>" +
+      "<span>generated <strong>" + esc((compare.at || "").replace("T", " ").slice(0, 19)) + "</strong></span>" +
+      (compare.claiLabel
+        ? "<span>CLAI source <strong>" + esc(compare.claiLabel) + "</strong></span>"
+        : "") +
+      "<span>mode <strong>parallel</strong> — fresh CLAI + pi together · task concurrency from job</span>";
+
+    const winEl = $("compare-winner");
+    // Mid-run: pi total can be &lt; clai total — don't call a false "tie".
+    const piDone = (compare.pi || []).length;
+    const claiTotal = claiScore.total || 0;
+    const inFlight = piDone < claiTotal && job.status === "running" && job.kind === "compare";
+    if (inFlight) {
+      winEl.className = "winner-callout tie";
+      winEl.textContent =
+        "Pi still running (" + piDone + "/" + claiTotal +
+        ") — CLAI column is prior history, not a live race";
+    } else if (winner.who === "none") {
+      winEl.className = "winner-callout tie";
+      winEl.textContent = winner.reason;
+    } else if (winner.who === "tie") {
+      winEl.className = "winner-callout tie";
+      winEl.textContent = "Tie — " + winner.reason;
+    } else {
+      winEl.className = "winner-callout";
+      winEl.innerHTML = "<strong>" + esc(winner.who.toUpperCase()) + " wins</strong> — " + esc(winner.reason);
+    }
+
+    const claiWin = winner.who === "clai";
+    const piWin = winner.who === "pi";
+    $("compare-scores").innerHTML =
+      '<div class="compare-score' + (claiWin ? " winner" : "") + '">' +
+        '<div class="label">CLAI</div>' +
+        '<div class="value ' + rateClass(claiScore.rate) + '">' +
+          (claiScore.pass || 0) + "/" + (claiScore.total || 0) +
+          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(claiScore.rate) + ")</span></div>" +
+        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+          claiComposite.total.toFixed(1) + "</strong>/100</div>" +
+      "</div>" +
+      '<div class="compare-score' + (piWin ? " winner" : "") + '">' +
+        '<div class="label">pi</div>' +
+        '<div class="value ' + rateClass(piScore.rate) + '">' +
+          (piScore.pass || 0) + "/" + (piScore.total || 0) +
+          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(piScore.rate) + ")</span></div>" +
+        '<div style="margin-top:6px;font-size:11px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+          piComposite.total.toFixed(1) + "</strong>/100</div>" +
+      "</div>";
+
+    const claiMap = Object.fromEntries((compare.clai || []).map((r) => [r.id, r]));
+    const piMap = Object.fromEntries((compare.pi || []).map((r) => [r.id, r]));
+    const ids = [...new Set([...(compare.pi || []).map((r) => r.id), ...(compare.clai || []).map((r) => r.id)])];
+
+    $("compare-body").innerHTML = ids.map((id) =>
+      "<tr>" +
+        "<td>" + esc(id) + "</td>" +
+        "<td>" + statusCell(claiMap[id]) + "</td>" +
+        "<td>" + statusCell(piMap[id]) + "</td>" +
+      "</tr>"
+    ).join("");
+
+    const maxWall = Math.max(
+      1,
+      ...ids.flatMap((id) => [claiMap[id]?.wallMs || 0, piMap[id]?.wallMs || 0]),
+    );
+    $("compare-bars").innerHTML =
+      '<div class="compare-bar-row" style="margin-bottom:8px">' +
+        '<span></span><span style="color:var(--accent);font-size:10px">CLAI</span>' +
+        '<span style="color:var(--info);font-size:10px">pi</span>' +
+      "</div>" +
+      ids.map((id) => {
+        const cw = claiMap[id]?.wallMs || 0;
+        const pw = piMap[id]?.wallMs || 0;
+        const cPct = (cw / maxWall) * 100;
+        const pPct = (pw / maxWall) * 100;
+        return (
+          '<div class="compare-bar-row">' +
+            '<span class="task-id" title="' + esc(id) + '">' + esc(id) + "</span>" +
+            '<div class="compare-bar-track">' +
+              '<div class="compare-bar-fill clai" style="width:' + cPct + '%"></div>' +
+              '<span class="compare-bar-label">' + fmtMs(cw) + "</span>" +
+            "</div>" +
+            '<div class="compare-bar-track">' +
+              '<div class="compare-bar-fill pi" style="width:' + pPct + '%"></div>' +
+              '<span class="compare-bar-label">' + fmtMs(pw) + "</span>" +
+            "</div>" +
+          "</div>"
+        );
+      }).join("");
+    refreshChartsFromBestSource();
+  }
+
+  async function hydrateClaiTokens() {
+    if (!compare || !(compare.clai || []).length) return;
+    const hasTok = (compare.clai || []).some((r) => (r.tokensIn || 0) + (r.tokensOut || 0) > 0);
+    const hasCost = (compare.clai || []).some((r) => Number(r.cost) > 0);
+    if (hasTok && hasCost) return;
+    const label = compare.claiLabel || "";
+    const m = /^(\S+)/.exec(label);
+    if (!m) return;
+    try {
+      const res = await fetch("/api/runs/" + encodeURIComponent(m[1]));
+      if (!res.ok) return;
+      const run = await res.json();
+      const byId = Object.fromEntries((run.tasks || []).map((t) => [t.id, t]));
+      compare.clai = (compare.clai || []).map((r) => {
+        const t = byId[r.id];
+        if (!t) return r;
+        return {
+          ...r,
+          tokensIn: Number(t.tokensIn) || Number(r.tokensIn) || 0,
+          tokensOut: Number(t.tokensOut) || Number(r.tokensOut) || 0,
+          cost: Number(t.cost) || Number(r.cost) || 0,
+        };
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function loadCompare() {
+    try {
+      const res = await fetch("/api/compare");
+      if (res.status === 404) {
+        compare = null;
+        renderCompare();
+        refreshChartsFromBestSource();
+        return;
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      compare = await res.json();
+      await hydrateClaiTokens();
+      renderCompare();
+      refreshChartsFromBestSource();
+    } catch {
+      /* keep last good compare data on transient errors */
+    }
+  }
+
+  function renderJob() {
+    const running = job.status === "running" || job.status === "stopping";
+    $("btn-clai").disabled = running;
+    $("btn-offline").disabled = running;
+    $("btn-compare").disabled = running;
+    $("btn-stop").disabled = !running;
+    const meta = $("job-meta");
+    if (job.status === "idle") {
+      meta.innerHTML = job.error
+        ? 'idle · <span style="color:var(--error)">last error</span>'
+        : "idle";
+    } else {
+      const elapsed = job.startedAt ? fmtMs(Date.now() - Date.parse(job.startedAt)) : "";
+      meta.innerHTML =
+        "<strong>" + esc(job.status) + "</strong> · " + esc(job.kind || "") +
+        (elapsed ? " · " + elapsed : "");
+    }
+    $("job-err").textContent = job.error || "";
+  }
+
+  async function startJob(kind) {
+    $("job-err").textContent = "";
+    try {
+      const res = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          parallel: kind === "compare" ? 8 : kind === "offline" ? 3 : 1,
+          freshClai: kind === "compare" ? true : undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        $("job-err").textContent = body.error || ("HTTP " + res.status);
+        return;
+      }
+      job = body.job || { status: "running", kind, startedAt: new Date().toISOString() };
+      renderJob();
+    } catch (err) {
+      $("job-err").textContent = err.message || String(err);
+    }
+  }
+
+  async function stopJob() {
+    try {
+      await fetch("/api/jobs/stop", { method: "POST" });
+    } catch (err) {
+      $("job-err").textContent = err.message || String(err);
+    }
+  }
+
   function connectSse() {
     const es = new EventSource("/events");
     es.onopen = () => setConn(true, "Connected");
@@ -561,16 +1241,40 @@
           const wasDone = snapshot && snapshot.done;
           snapshot = msg.snapshot;
           renderLive();
+          refreshChartsFromBestSource();
           if (snapshot.done && !wasDone) loadRuns();
+        }
+        if (msg.type === "compare" && msg.compare) {
+          compare = msg.compare;
+          hydrateClaiTokens().then(() => {
+            renderCompare();
+            refreshChartsFromBestSource();
+          });
+        }
+        if (msg.type === "job" && msg.job) {
+          const wasRunning = job.status === "running" || job.status === "stopping";
+          job = msg.job;
+          renderJob();
+          if (wasRunning && job.status === "idle") loadRuns();
         }
       } catch { /* ignore bad frames */ }
     };
   }
 
+  $("btn-clai").addEventListener("click", () => startJob("clai"));
+  $("btn-offline").addEventListener("click", () => startJob("offline"));
+  $("btn-compare").addEventListener("click", () => startJob("compare"));
+  $("btn-stop").addEventListener("click", () => stopJob());
+
   renderLive();
-  loadRuns();
+  renderJob();
+  loadRuns().then(() => refreshChartsFromBestSource());
+  loadCompare();
   connectSse();
   setInterval(loadRuns, 30_000);
+  setInterval(() => {
+    if (job.status === "running" || job.status === "stopping") renderJob();
+  }, 1000);
 })();
 </script>
 </body>

@@ -1,42 +1,99 @@
 /**
- * compare-pi — run the same 8-task bench against Pi (`pi`) on DeepSeek
- * and emit a side-by-side scorecard vs the latest CLAI live run (or a fresh
- * CLAI serial run if COMPARE_CLAI=1).
+ * compare-pi — run the same bench tasks on CLAI and Pi (same model), then
+ * emit a side-by-side scorecard with wall time, tokens, and cost.
  *
  * Usage:
  *   pnpm exec tsx src/bench/compare-pi.ts
  *   pnpm exec tsx src/bench/compare-pi.ts --tasks off-by-one,fix-broken-import
- *   COMPARE_CLAI=1 pnpm exec tsx src/bench/compare-pi.ts
+ *   COMPARE_CLAI=0 pnpm exec tsx src/bench/compare-pi.ts   # history CLAI only
  *
- * Defaults match CLAI DeepSeek wiring:
+ * Defaults:
+ *   fresh CLAI + pi in parallel, COMPARE_PARALLEL=8 (all 8 tasks concurrently
+ *   per harness → up to 16 in-flight API calls)
  *   PI_PROVIDER=deepseek  PI_MODEL=deepseek-v4-flash
- *   DEEPSEEK_API_KEY from .env / environment
+ *
+ * Pi token/cost: `--mode json` sums `message_end` usage
+ * (input+cacheRead+cacheWrite / output / cost.total).
  */
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadEnvFiles } from "../adapter/env.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
 import { runBench } from "./runner.js";
 import { BenchStore } from "./store.js";
+import type { BenchTaskSpec, LiveSnapshot, LiveTask } from "./types.js";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-await loadEnvFiles();
+export const COMPARE_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
 
-const PI_PROVIDER = process.env.PI_PROVIDER ?? "deepseek";
-const PI_MODEL = process.env.PI_MODEL ?? "deepseek-v4-flash";
-const PI_BIN = process.env.PI_BIN ?? "pi";
-const PARALLEL = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 1));
-/** Hard cap per pi task (pi print-mode hangs if stdin stays open). */
+export type CompareRow = {
+  id: string;
+  harness: "clai" | "pi";
+  status: "pass" | "fail" | "error";
+  wallMs: number;
+  detail?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
+};
+
+export type CompareScore = {
+  pass: number;
+  fail: number;
+  err: number;
+  total: number;
+  rate: number;
+};
+
+export type CompareResult = {
+  at: string;
+  piProvider: string;
+  piModel: string;
+  pi: CompareRow[];
+  clai: CompareRow[];
+  piScore: CompareScore;
+  claiScore: CompareScore;
+  claiLabel?: string;
+};
+
+export type CompareProgress = {
+  phase: "clai" | "pi" | "done";
+  claiRows: CompareRow[];
+  piRows: CompareRow[];
+  claiLabel: string;
+  /** Synthetic live snapshot for the dashboard Live panel (pi tasks). */
+  live?: LiveSnapshot;
+  compare?: CompareResult;
+};
+
+export type RunComparePiOptions = {
+  workspaceRoot?: string;
+  taskIds?: string[];
+  freshClai?: boolean;
+  parallel?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: CompareProgress) => void;
+};
+
 const PI_TIMEOUT_PAD_MS = 15_000;
 
-function flagValue(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  if (i >= 0 && args[i + 1] && !args[i + 1]!.startsWith("-")) return args[i + 1];
-  return undefined;
+function scoreRows(rows: CompareRow[]): CompareScore {
+  const pass = rows.filter((r) => r.status === "pass").length;
+  const fail = rows.filter((r) => r.status === "fail").length;
+  const err = rows.filter((r) => r.status === "error").length;
+  return {
+    pass,
+    fail,
+    err,
+    total: rows.length,
+    rate: rows.length ? pass / rows.length : 0,
+  };
 }
 
 function runCheck(workdir: string): Promise<{ exitCode: number; output: string }> {
@@ -55,8 +112,7 @@ function runCheck(workdir: string): Promise<{ exitCode: number; output: string }
   });
 }
 
-function resolvePiInvocation(): { command: string; prefixArgs: string[] } {
-  // Prefer invoking the JS entry directly so Windows doesn't need shell:true for .cmd.
+function resolvePiInvocation(piBin: string): { command: string; prefixArgs: string[] } {
   const roamingCli = path.join(
     process.env.APPDATA ?? "",
     "npm",
@@ -67,43 +123,131 @@ function resolvePiInvocation(): { command: string; prefixArgs: string[] } {
     "cli.js",
   );
   if (
-    (PI_BIN.endsWith(".cmd") || PI_BIN.endsWith(".ps1") || PI_BIN === "pi") &&
+    (piBin.endsWith(".cmd") || piBin.endsWith(".ps1") || piBin === "pi") &&
     existsSync(roamingCli)
   ) {
     return { command: process.execPath, prefixArgs: [roamingCli] };
   }
-  return { command: PI_BIN, prefixArgs: [] };
+  return { command: piBin, prefixArgs: [] };
 }
 
-function runPi(workdir: string, prompt: string, timeoutMs: number): Promise<{
+type PiUsageAcc = {
+  tokensIn: number;
+  tokensOut: number;
+  cost: number;
+  textParts: string[];
+};
+
+function emptyPiUsage(): PiUsageAcc {
+  return { tokensIn: 0, tokensOut: 0, cost: 0, textParts: [] };
+}
+
+function addPiUsage(acc: PiUsageAcc, usage: unknown): void {
+  if (!usage || typeof usage !== "object") return;
+  const u = usage as Record<string, unknown>;
+  const cost = u.cost && typeof u.cost === "object" ? (u.cost as Record<string, unknown>) : null;
+  // Match session-format Usage: prompt ≈ input + cacheRead + cacheWrite.
+  acc.tokensIn +=
+    (Number(u.input) || 0) + (Number(u.cacheRead) || 0) + (Number(u.cacheWrite) || 0);
+  acc.tokensOut += Number(u.output) || 0;
+  acc.cost += Number(cost?.total) || 0;
+}
+
+function extractAssistantText(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const m = message as { role?: string; content?: unknown };
+  if (m.role !== "assistant") return "";
+  const content = m.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const b = block as { type?: string; text?: string };
+      return b.type === "text" && typeof b.text === "string" ? b.text : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Parse pi `--mode json` stdout: sum usage from message_end (authoritative). */
+function ingestPiJsonLine(acc: PiUsageAcc, line: string): void {
+  const t = line.trim().replace(/^\uFEFF/, "");
+  if (!t.startsWith("{")) return;
+  let ev: { type?: string; message?: unknown };
+  try {
+    ev = JSON.parse(t) as { type?: string; message?: unknown };
+  } catch {
+    return;
+  }
+  if (ev.type !== "message_end" || !ev.message || typeof ev.message !== "object") return;
+  const msg = ev.message as { role?: string; usage?: unknown };
+  if (msg.role === "assistant" || msg.role === "toolResult") {
+    addPiUsage(acc, msg.usage);
+  }
+  const text = extractAssistantText(msg);
+  if (text) acc.textParts.push(text);
+}
+
+function runPi(
+  workdir: string,
+  prompt: string,
+  timeoutMs: number,
+  opts: {
+    provider: string;
+    model: string;
+    bin: string;
+    signal?: AbortSignal;
+    onSpawn?: (child: ChildProcess) => void;
+  },
+): Promise<{
   ok: boolean;
   timedOut: boolean;
   output: string;
   wallMs: number;
+  tokensIn: number;
+  tokensOut: number;
+  cost: number;
 }> {
   const started = Date.now();
-  const { command, prefixArgs } = resolvePiInvocation();
+  const { command, prefixArgs } = resolvePiInvocation(opts.bin);
   const limitMs = timeoutMs + PI_TIMEOUT_PAD_MS;
   return new Promise((resolve) => {
+    if (opts.signal?.aborted) {
+      resolve({
+        ok: false,
+        timedOut: false,
+        output: "aborted",
+        wallMs: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cost: 0,
+      });
+      return;
+    }
+    // --mode json streams native usage on message_end (print -p has no telemetry).
+    // Extensions (pi-tps / pi-token-usage / pi-otel) are interactive overlays on the same data.
+    // Build flags then prompt — never splice between a flag and its value.
     const args = [
       ...prefixArgs,
-      "-p",
+      "--mode",
+      "json",
       "--provider",
-      PI_PROVIDER,
+      opts.provider,
       "--model",
-      PI_MODEL,
-      "--thinking",
-      process.env.PI_THINKING ?? "off",
+      opts.model,
       "--no-session",
       "-a",
-      prompt,
     ];
-    if (process.env.DEEPSEEK_API_KEY) {
-      args.splice(prefixArgs.length + 1, 0, "--api-key", process.env.DEEPSEEK_API_KEY);
+    // Only pass --thinking when explicitly set — defaulting to "off" hurts quality.
+    if (process.env.PI_THINKING) {
+      args.push("--thinking", process.env.PI_THINKING);
     }
+    if (process.env.DEEPSEEK_API_KEY) {
+      args.push("--api-key", process.env.DEEPSEEK_API_KEY);
+    }
+    args.push(prompt);
 
-    // CRITICAL: stdin must be "ignore". Pi print-mode calls readPipedStdin() whenever
-    // stdin is not a TTY and waits for EOF — an open execFile pipe hangs until timeout.
     const child = spawn(command, args, {
       cwd: workdir,
       windowsHide: true,
@@ -111,60 +255,104 @@ function runPi(workdir: string, prompt: string, timeoutMs: number): Promise<{
       env: {
         ...process.env,
         DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? "",
+        // Keep bench runs offline from Aspire/OTLP unless the user opted in.
+        PI_OTEL_DISABLED: process.env.PI_OTEL_DISABLED ?? "1",
       },
     });
+    opts.onSpawn?.(child);
 
-    let output = "";
+    let raw = "";
+    let lineBuf = "";
+    const usage = emptyPiUsage();
     let settled = false;
     const finish = (ok: boolean, timedOut: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      if (lineBuf.trim()) ingestPiJsonLine(usage, lineBuf);
+      const textTail = usage.textParts.join("\n").slice(-2000);
+      if (process.env.COMPARE_PI_DEBUG === "1") {
+        const jsonLines = raw.split(/\r?\n/).filter((l) => l.trim().startsWith("{")).length;
+        const safeArgs = args.map((a, i) =>
+          args[i - 1] === "--api-key" ? "***" : a.length > 80 ? `${a.slice(0, 77)}…` : a,
+        );
+        console.error(
+          `[pi-usage] jsonLines=${jsonLines} in=${usage.tokensIn} out=${usage.tokensOut} cost=${usage.cost} raw=${raw.length}`,
+        );
+        console.error(`[pi-usage] argv=${JSON.stringify(safeArgs)}`);
+      }
       resolve({
         ok,
         timedOut,
-        output: output.slice(-4000),
+        output: textTail || raw.slice(-4000),
         wallMs: Date.now() - started,
+        tokensIn: usage.tokensIn,
+        tokensOut: usage.tokensOut,
+        cost: usage.cost,
       });
     };
 
-    const onChunk = (chunk: Buffer | string) => {
-      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      output += text;
-    };
-    child.stdout?.on("data", onChunk);
-    child.stderr?.on("data", onChunk);
-    child.on("error", (err) => {
-      output += `\n${err.message}`;
-      finish(false, false);
-    });
-    child.on("close", (code) => finish(code === 0, false));
-
-    const timer = setTimeout(() => {
+    const killTree = () => {
       child.kill();
-      // Windows often needs a harder kill if the tree ignores SIGTERM.
       if (child.pid && process.platform === "win32") {
         spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
           windowsHide: true,
           stdio: "ignore",
         });
       }
+    };
+
+    const onAbort = () => {
+      killTree();
+      finish(false, false);
+    };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const onStdout = (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      raw += text;
+      lineBuf += text;
+      let nl: number;
+      while ((nl = lineBuf.indexOf("\n")) >= 0) {
+        ingestPiJsonLine(usage, lineBuf.slice(0, nl));
+        lineBuf = lineBuf.slice(nl + 1);
+      }
+    };
+    const onStderr = (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      raw += text;
+    };
+    child.stdout?.on("data", onStdout);
+    child.stderr?.on("data", onStderr);
+    child.on("error", (err) => {
+      raw += `\n${err.message}`;
+      finish(false, false);
+    });
+    child.on("close", (code) => finish(code === 0, false));
+
+    const timer = setTimeout(() => {
+      killTree();
       finish(false, true);
     }, limitMs);
   });
 }
 
-type Row = {
-  id: string;
-  harness: "clai" | "pi";
-  status: "pass" | "fail" | "error";
-  wallMs: number;
-  detail?: string;
-};
+function truncateDetail(text: string, max = 800): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+}
 
 async function runPiTask(
-  task: Awaited<ReturnType<typeof loadBenchTasks>>[number],
-): Promise<Row> {
+  task: BenchTaskSpec,
+  opts: {
+    provider: string;
+    model: string;
+    bin: string;
+    signal?: AbortSignal;
+    onSpawn?: (child: ChildProcess) => void;
+  },
+): Promise<CompareRow> {
   const workdir = await mkdtemp(path.join(os.tmpdir(), `pi-bench-${task.id}-`));
   try {
     await cp(task.dir, workdir, {
@@ -178,19 +366,44 @@ async function runPiTask(
       workdir,
       `${task.prompt}\n\nWork only inside this directory. When done, node check.mjs must exit 0.`,
       task.timeoutMs,
+      opts,
     );
+    const usage = {
+      tokensIn: pi.tokensIn,
+      tokensOut: pi.tokensOut,
+      cost: pi.cost,
+    };
+    if (opts.signal?.aborted) {
+      return {
+        id: task.id,
+        harness: "pi",
+        status: "error",
+        wallMs: pi.wallMs,
+        detail: "aborted",
+        ...usage,
+      };
+    }
     if (pi.timedOut) {
       return {
         id: task.id,
         harness: "pi",
         status: "error",
         wallMs: pi.wallMs,
-        detail: `timed out after ${pi.wallMs}ms`,
+        detail: truncateDetail(
+          `timed out after ${pi.wallMs}ms · ${pi.output.slice(-800)}`,
+        ),
+        ...usage,
       };
     }
     const check = await runCheck(workdir);
     if (check.exitCode === 0) {
-      return { id: task.id, harness: "pi", status: "pass", wallMs: pi.wallMs };
+      return {
+        id: task.id,
+        harness: "pi",
+        status: "pass",
+        wallMs: pi.wallMs,
+        ...usage,
+      };
     }
     if (!pi.ok && /quota|rate.?limit|429|api.?key|unauthorized|401/i.test(pi.output)) {
       return {
@@ -198,15 +411,21 @@ async function runPiTask(
         harness: "pi",
         status: "error",
         wallMs: pi.wallMs,
-        detail: pi.output.split("\n").find((l) => l.trim())?.slice(0, 120) ?? "provider error",
+        detail: truncateDetail(pi.output),
+        ...usage,
       };
     }
+    const checkLine = check.output.split("\n").find((l) => l.trim()) ?? "";
+    const piTail = pi.output.slice(-800);
     return {
       id: task.id,
       harness: "pi",
       status: "fail",
       wallMs: pi.wallMs,
-      detail: check.output.split("\n")[0] || pi.output.split("\n").find((l) => l.trim())?.slice(0, 80),
+      detail: truncateDetail(
+        [checkLine, piTail && `pi: ${piTail}`].filter(Boolean).join(" · "),
+      ),
+      ...usage,
     };
   } catch (err) {
     return {
@@ -215,37 +434,41 @@ async function runPiTask(
       status: "error",
       wallMs: 0,
       detail: err instanceof Error ? err.message : String(err),
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
     };
   } finally {
     await rm(workdir, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
   }
 }
 
-async function loadClaiRows(
-  tasks: Awaited<ReturnType<typeof loadBenchTasks>>,
-): Promise<{ rows: Row[]; label: string }> {
-  if (process.env.COMPARE_CLAI === "1") {
-    console.log("  clai fresh live run (parallel=1)…");
-    const record = await runBench({
-      workspaceRoot: ROOT,
-      tasks,
-      parallel: 1,
-      offline: false,
-    });
-    await new BenchStore(ROOT).appendRun(record);
-    return {
-      label: `${record.runId} [${record.provider}/${record.model}] fresh`,
-      rows: record.tasks.map((t) => ({
-        id: t.id,
-        harness: "clai" as const,
-        status: t.status === "pass" ? "pass" : t.status === "fail" ? "fail" : "error",
-        wallMs: t.wallMs,
-        detail: t.error?.slice(0, 120),
-      })),
-    };
-  }
+function taskResultToClaiRow(t: {
+  id: string;
+  status: string;
+  wallMs: number;
+  error?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
+}): CompareRow {
+  return {
+    id: t.id,
+    harness: "clai",
+    status: t.status === "pass" ? "pass" : t.status === "fail" ? "fail" : "error",
+    wallMs: t.wallMs,
+    detail: t.error?.slice(0, 120),
+    tokensIn: Number(t.tokensIn) || 0,
+    tokensOut: Number(t.tokensOut) || 0,
+    cost: Number(t.cost) || 0,
+  };
+}
 
-  const store = new BenchStore(ROOT);
+async function loadClaiFromHistory(
+  workspaceRoot: string,
+  tasks: BenchTaskSpec[],
+): Promise<{ rows: CompareRow[]; label: string }> {
+  const store = new BenchStore(workspaceRoot);
   const runs = await store.listRuns();
   const live = [...runs]
     .reverse()
@@ -256,110 +479,431 @@ async function loadClaiRows(
         (r.provider === "deepseek" || !process.env.COMPARE_REQUIRE_DEEPSEEK),
     );
   if (!live) {
-    return { rows: [], label: "none (set COMPARE_CLAI=1)" };
+    return { rows: [], label: "none (fresh CLAI required)" };
   }
   const full = await store.getRun(live.runId);
+  const wanted = new Set(tasks.map((t) => t.id));
+  const rows = (full?.tasks ?? [])
+    .filter((t) => wanted.has(t.id))
+    .map((t) => taskResultToClaiRow(t));
   return {
     label: `${live.runId} [${live.provider}/${live.model}] history`,
-    rows: (full?.tasks ?? []).map((t) => ({
-      id: t.id,
-      harness: "clai" as const,
-      status: t.status === "pass" ? "pass" : t.status === "fail" ? "fail" : "error",
-      wallMs: t.wallMs,
-      detail: t.error?.slice(0, 120),
-    })),
+    rows,
   };
+}
+
+function statusRank(s: string): number {
+  switch (s) {
+    case "running":
+      return 5;
+    case "queued":
+      return 4;
+    case "error":
+    case "timeout":
+      return 3;
+    case "fail":
+      return 2;
+    case "pass":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/** Merge CLAI live feed + pi rows so the Live panel shows both harnesses. */
+function buildCompareLiveSnapshot(
+  tasks: BenchTaskSpec[],
+  claiLive: LiveSnapshot | null,
+  piRows: Array<CompareRow | undefined>,
+  piRunning: Set<string>,
+  opts: {
+    runId: string;
+    startedAt: string;
+    model: string;
+    parallel: number;
+    done: boolean;
+  },
+): LiveSnapshot {
+  const claiById = new Map((claiLive?.tasks ?? []).map((t) => [t.id, t]));
+  const liveTasks: LiveTask[] = tasks.map((t, i) => {
+    const c = claiById.get(t.id);
+    const p = piRows[i];
+    const piStatus = p
+      ? p.status === "pass"
+        ? "pass"
+        : p.status === "fail"
+          ? "fail"
+          : "error"
+      : piRunning.has(t.id)
+        ? "running"
+        : "queued";
+    const claiStatus = c?.status ?? "queued";
+    const status =
+      statusRank(claiStatus) >= statusRank(piStatus) ? claiStatus : piStatus;
+    const tokensIn = (Number(c?.tokensIn) || 0) + (Number(p?.tokensIn) || 0);
+    const tokensOut = (Number(c?.tokensOut) || 0) + (Number(p?.tokensOut) || 0);
+    const cost = (Number(c?.cost) || 0) + (Number(p?.cost) || 0);
+    const wallMs = Math.max(Number(c?.wallMs) || 0, Number(p?.wallMs) || 0) || undefined;
+    return {
+      id: t.id,
+      title: t.title,
+      category: t.category,
+      status: status as LiveTask["status"],
+      wallMs,
+      steps: c?.steps,
+      tokensIn,
+      tokensOut,
+      cost,
+      error: c?.error || p?.detail,
+    };
+  });
+  return {
+    runId: opts.runId,
+    startedAt: opts.startedAt,
+    provider: "clai+pi",
+    model: opts.model,
+    offline: false,
+    parallel: opts.parallel,
+    tasks: liveTasks,
+    done: opts.done,
+    rateLimit: claiLive?.rateLimit,
+  };
+}
+
+function buildCompareResult(
+  claiRows: CompareRow[],
+  piRows: CompareRow[],
+  provider: string,
+  model: string,
+  claiLabel?: string,
+): CompareResult {
+  return {
+    at: new Date().toISOString(),
+    piProvider: provider,
+    piModel: model,
+    pi: piRows,
+    clai: claiRows,
+    piScore: scoreRows(piRows),
+    claiScore: scoreRows(claiRows),
+    claiLabel,
+  };
+}
+
+function defaultFreshClai(optsFresh?: boolean): boolean {
+  if (optsFresh != null) return optsFresh;
+  // COMPARE_CLAI=0 → history only; unset/1 → fresh (default).
+  if (process.env.COMPARE_CLAI === "0" || process.env.COMPARE_CLAI === "false") {
+    return false;
+  }
+  return true;
+}
+
+/** Programmatic CLAI vs pi compare (used by CLI and dashboard jobs). */
+export async function runComparePi(
+  opts: RunComparePiOptions = {},
+): Promise<CompareResult> {
+  const workspaceRoot = opts.workspaceRoot ?? COMPARE_ROOT;
+  const provider = process.env.PI_PROVIDER ?? "deepseek";
+  const model = process.env.PI_MODEL ?? "deepseek-v4-flash";
+  const bin = process.env.PI_BIN ?? "pi";
+  const parallel = Math.max(
+    1,
+    opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 8),
+  );
+  const freshClai = defaultFreshClai(opts.freshClai);
+
+  if (!process.env.DEEPSEEK_API_KEY) {
+    throw new Error("DEEPSEEK_API_KEY is not set (expected in .env or environment).");
+  }
+
+  const fixturesRoot = resolveBenchFixturesRoot();
+  const tasks = await loadBenchTasks(fixturesRoot, opts.taskIds);
+  if (!tasks.length) {
+    throw new Error("No bench tasks to compare.");
+  }
+
+  const runId = `compare-pi-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  const startedAt = new Date().toISOString();
+
+  let claiRows: CompareRow[] = [];
+  let claiLabel = "pending";
+  let claiLive: LiveSnapshot | null = null;
+  const piRows: Array<CompareRow | undefined> = new Array(tasks.length);
+  const piRunning = new Set<string>();
+  const activeChildren = new Set<ChildProcess>();
+
+  const emit = (phase: CompareProgress["phase"], done = false) => {
+    const live = buildCompareLiveSnapshot(tasks, claiLive, piRows, piRunning, {
+      runId,
+      startedAt,
+      model,
+      parallel,
+      done,
+    });
+    const compare = buildCompareResult(
+      claiRows,
+      piRows.filter(Boolean) as CompareRow[],
+      provider,
+      model,
+      claiLabel,
+    );
+    opts.onProgress?.({
+      phase,
+      claiRows,
+      piRows: piRows.filter(Boolean) as CompareRow[],
+      claiLabel,
+      live,
+      compare,
+    });
+  };
+
+  emit("clai");
+
+  const onAbort = () => {
+    for (const child of activeChildren) {
+      if (child.pid && process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+          windowsHide: true,
+          stdio: "ignore",
+        });
+      } else {
+        child.kill();
+      }
+    }
+  };
+  opts.signal?.addEventListener("abort", onAbort);
+
+  const runClaiSide = async () => {
+    if (!freshClai) {
+      const hist = await loadClaiFromHistory(workspaceRoot, tasks);
+      claiRows = hist.rows;
+      claiLabel = hist.label;
+      emit("clai");
+      return;
+    }
+    const record = await runBench({
+      workspaceRoot,
+      tasks,
+      parallel,
+      offline: false,
+      onUpdate: (snap) => {
+        claiLive = snap;
+        // Only finished tasks enter the scorecard (queued/running ≠ error).
+        claiRows = snap.tasks
+          .filter(
+            (t) =>
+              t.status === "pass" ||
+              t.status === "fail" ||
+              t.status === "error" ||
+              t.status === "timeout",
+          )
+          .map((t) =>
+            taskResultToClaiRow({
+              id: t.id,
+              status: t.status,
+              wallMs: t.wallMs ?? 0,
+              error: t.error,
+              tokensIn: t.tokensIn,
+              tokensOut: t.tokensOut,
+              cost: t.cost,
+            }),
+          );
+        claiLabel = `${snap.runId} [${snap.provider}/${snap.model}] fresh`;
+        emit("clai");
+      },
+    });
+    await new BenchStore(workspaceRoot).appendRun(record);
+    claiRows = record.tasks.map((t) => taskResultToClaiRow(t));
+    claiLabel = `${record.runId} [${record.provider}/${record.model}] fresh`;
+    claiLive = {
+      runId: record.runId,
+      startedAt: record.startedAt,
+      provider: record.provider,
+      model: record.model,
+      offline: false,
+      parallel: record.parallel,
+      tasks: record.tasks.map((t, i) => ({
+        id: t.id,
+        title: tasks[i]?.title ?? t.id,
+        category: tasks[i]?.category ?? "bugfix",
+        status: t.status,
+        wallMs: t.wallMs,
+        steps: t.steps,
+        tokensIn: Number(t.tokensIn) || 0,
+        tokensOut: Number(t.tokensOut) || 0,
+        cost: Number(t.cost) || 0,
+        error: t.error,
+      })),
+      done: true,
+    };
+    emit("clai");
+  };
+
+  const runPiSide = async () => {
+    let next = 0;
+    const worker = async () => {
+      while (next < tasks.length) {
+        if (opts.signal?.aborted) break;
+        const i = next++;
+        const task = tasks[i]!;
+        piRunning.add(task.id);
+        emit("pi");
+        try {
+          piRows[i] = await runPiTask(task, {
+            provider,
+            model,
+            bin,
+            signal: opts.signal,
+            onSpawn: (c) => {
+              activeChildren.add(c);
+              c.on("close", () => activeChildren.delete(c));
+            },
+          });
+        } finally {
+          piRunning.delete(task.id);
+        }
+        emit("pi");
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(parallel, tasks.length) }, () => worker()),
+    );
+  };
+
+  try {
+    // Fresh CLAI and pi share the same task pool concurrency (default 8 each).
+    await Promise.all([runClaiSide(), runPiSide()]);
+  } finally {
+    opts.signal?.removeEventListener("abort", onAbort);
+  }
+
+  const finalPi = piRows.map(
+    (r, i) =>
+      r ??
+      ({
+        id: tasks[i]!.id,
+        harness: "pi" as const,
+        status: "error" as const,
+        wallMs: 0,
+        detail: "aborted",
+        tokensIn: 0,
+        tokensOut: 0,
+        cost: 0,
+      }),
+  );
+  // Ensure token fields are always present in the scorecard JSON.
+  const finalClai = claiRows.map((r) => ({
+    ...r,
+    tokensIn: Number(r.tokensIn) || 0,
+    tokensOut: Number(r.tokensOut) || 0,
+    cost: Number(r.cost) || 0,
+  }));
+  const result = buildCompareResult(
+    finalClai,
+    finalPi.map((r) => ({
+      ...r,
+      tokensIn: Number(r.tokensIn) || 0,
+      tokensOut: Number(r.tokensOut) || 0,
+      cost: Number(r.cost) || 0,
+    })),
+    provider,
+    model,
+    claiLabel,
+  );
+
+  const outPath = path.join(workspaceRoot, ".clai", "bench", "compare-pi.json");
+  await writeFile(outPath, JSON.stringify(result, null, 2), "utf8");
+
+  claiRows = result.clai;
+  for (let i = 0; i < finalPi.length; i++) piRows[i] = result.pi[i];
+  emit("done", true);
+
+  return result;
+}
+
+function flagValue(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  if (i >= 0 && args[i + 1] && !args[i + 1]!.startsWith("-")) return args[i + 1];
+  return undefined;
 }
 
 async function main() {
+  await loadEnvFiles();
   const args = process.argv.slice(2);
-  const ids = flagValue(args, "--tasks")?.split(",").map((s) => s.trim()).filter(Boolean);
-  const fixturesRoot = resolveBenchFixturesRoot();
-  const tasks = await loadBenchTasks(fixturesRoot, ids);
+  const ids = flagValue(args, "--tasks")
+    ?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const parallel = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 8));
+  let printedHeader = false;
+  const seenPi = new Set<string>();
+  const seenClai = new Set<string>();
 
-  if (!process.env.DEEPSEEK_API_KEY) {
-    console.error("DEEPSEEK_API_KEY is not set (expected in .env or environment).");
-    process.exit(1);
-  }
+  const result = await runComparePi({
+    taskIds: ids,
+    parallel,
+    onProgress: (p) => {
+      if (!printedHeader) {
+        printedHeader = true;
+        const n = Math.max(
+          p.live?.tasks.length ?? 0,
+          ids?.length ?? 0,
+          8,
+        );
+        console.log(
+          `compare: ${n} tasks · parallel=${parallel} · fresh CLAI + pi together\n` +
+            `  clai  ${p.claiLabel}\n` +
+            `  pi    ${process.env.PI_PROVIDER ?? "deepseek"}/${process.env.PI_MODEL ?? "deepseek-v4-flash"}`,
+        );
+      }
+      for (const row of p.claiRows) {
+        if (!row.wallMs || seenClai.has(row.id)) continue;
+        if (row.status !== "pass" && row.status !== "fail" && row.status !== "error") {
+          continue;
+        }
+        seenClai.add(row.id);
+        console.log(
+          `  clai ${row.status.toUpperCase().padEnd(5)} ${row.id} ${row.wallMs}ms` +
+            `  tok=${(row.tokensIn || 0) + (row.tokensOut || 0)}` +
+            `  $${Number(row.cost || 0).toFixed(4)}`,
+        );
+      }
+      for (const row of p.piRows) {
+        if (seenPi.has(row.id)) continue;
+        seenPi.add(row.id);
+        console.log(
+          `  pi   ${row.status.toUpperCase().padEnd(5)} ${row.id} ${row.wallMs}ms` +
+            `  tok=${(row.tokensIn || 0) + (row.tokensOut || 0)}` +
+            `  $${Number(row.cost || 0).toFixed(4)}` +
+            (row.detail ? `  ${row.detail.slice(0, 60)}` : ""),
+        );
+      }
+    },
+  });
 
-  // Load CLAI side first so the terminal shows both harnesses immediately.
-  const clai = await loadClaiRows(tasks);
-  const claiPass = clai.rows.filter((r) => r.status === "pass").length;
+  console.log(`\n=== scorecard ===`);
   console.log(
-    `compare: ${tasks.length} tasks · parallel=${PARALLEL}\n` +
-      `  clai  ${clai.label}` +
-      (clai.rows.length ? `  ${claiPass}/${clai.rows.length} pass` : "") +
-      `\n  pi    ${PI_PROVIDER}/${PI_MODEL}`,
+    `pi   (${result.piProvider}/${result.piModel}):  ${result.piScore.pass}/${result.piScore.total} pass (${Math.round(result.piScore.rate * 100)}%)  fail=${result.piScore.fail} error=${result.piScore.err}`,
   );
-
-  const piRows: Row[] = new Array(tasks.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < tasks.length) {
-      const i = next++;
-      const task = tasks[i]!;
-      process.stdout.write(`  pi   ${task.id}…\n`);
-      piRows[i] = await runPiTask(task);
-      console.log(
-        `  pi   ${piRows[i]!.status.toUpperCase().padEnd(5)} ${task.id} ${piRows[i]!.wallMs}ms` +
-          (piRows[i]!.detail ? `  ${piRows[i]!.detail}` : ""),
-      );
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(PARALLEL, tasks.length) }, worker));
-
-  const claiRows = clai.rows;
-
-  const score = (rows: Row[]) => {
-    const pass = rows.filter((r) => r.status === "pass").length;
-    const fail = rows.filter((r) => r.status === "fail").length;
-    const err = rows.filter((r) => r.status === "error").length;
-    return { pass, fail, err, total: rows.length, rate: rows.length ? pass / rows.length : 0 };
-  };
-
-  const piScore = score(piRows);
-  const claiScore = score(claiRows);
-
-  console.log("\n=== scorecard ===");
-  console.log(
-    `pi   (${PI_PROVIDER}/${PI_MODEL}):  ${piScore.pass}/${piScore.total} pass (${Math.round(piScore.rate * 100)}%)  fail=${piScore.fail} error=${piScore.err}`,
-  );
-  if (claiRows.length) {
+  if (result.clai.length) {
     console.log(
-      `clai (${clai.label}): ${claiScore.pass}/${claiScore.total} pass (${Math.round(claiScore.rate * 100)}%)  fail=${claiScore.fail} error=${claiScore.err}`,
+      `clai (${result.claiLabel ?? "history"}): ${result.claiScore.pass}/${result.claiScore.total} pass (${Math.round(result.claiScore.rate * 100)}%)  fail=${result.claiScore.fail} error=${result.claiScore.err}`,
     );
   }
   console.log("\nid                     clai    pi      notes");
-  for (const t of tasks) {
-    const c = claiRows.find((r) => r.id === t.id);
-    const p = piRows.find((r) => r.id === t.id)!;
+  for (const p of result.pi) {
+    const c = result.clai.find((r) => r.id === p.id);
     console.log(
-      `${t.id.padEnd(22)} ${(c?.status ?? "—").padEnd(7)} ${p.status.padEnd(7)} ${(c?.detail || p.detail || "").slice(0, 60)}`,
+      `${p.id.padEnd(22)} ${(c?.status ?? "—").padEnd(7)} ${p.status.padEnd(7)} ${(c?.detail || p.detail || "").slice(0, 60)}`,
     );
   }
-
-  const outPath = path.join(ROOT, ".clai", "bench", "compare-pi.json");
-  await writeFile(
-    outPath,
-    JSON.stringify(
-      {
-        at: new Date().toISOString(),
-        piProvider: PI_PROVIDER,
-        piModel: PI_MODEL,
-        pi: piRows,
-        clai: claiRows,
-        piScore,
-        claiScore,
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-  console.log(`\nwrote ${outPath}`);
+  console.log(`\nwrote ${path.join(COMPARE_ROOT, ".clai", "bench", "compare-pi.json")}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const entry = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
+if (import.meta.url === entry) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
