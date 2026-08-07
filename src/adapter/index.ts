@@ -102,6 +102,8 @@ export type AgentLoopOptions = {
   }) => void;
   /** Harness status updates (compaction, rate-limit retries). */
   onStatus?: (status: RetryStatusEvent) => void;
+  /** Cancel in-flight generateText + retry backoff. */
+  signal?: AbortSignal;
 };
 
 export type AgentLoopResult = {
@@ -365,6 +367,7 @@ export async function runAgentLoop(
           maxRetries: 0,
           system,
           messages: activeMessages,
+          abortSignal: opts.signal,
           experimental_repairToolCall: async ({
             toolCall,
             parameterSchema,
@@ -418,6 +421,7 @@ export async function runAgentLoop(
       },
       {
         onStatus: opts.onStatus,
+        signal: opts.signal,
         onTrace: async (payload) => {
           await opts.trace?.append("info", payload);
         },
