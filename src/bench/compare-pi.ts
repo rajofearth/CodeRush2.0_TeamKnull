@@ -12,6 +12,12 @@
  *   (peak ~8 in-flight). Override with COMPARE_SIDE_PARALLEL.
  *   PI_PROVIDER=deepseek  PI_MODEL=deepseek-v4-flash
  *
+ * Fair fresh pi: after `--no-session`, compare pins a clean coding-agent
+ * surface (`--no-extensions`, `--no-skills`, `--no-prompt-templates`,
+ * `--no-themes`, `--no-context-files`, `--tools read,bash,edit,write`) to
+ * match CLAI's coding tool profile. Set `COMPARE_PI_RAW=1` to skip those
+ * flags (escape hatch for debugging local pi config).
+ *
  * Pi tokens: `--mode json` sums `message_end` usage
  * (input+cacheRead+cacheWrite / output). Cost uses estimateUsdBench —
  * all tokensIn × inputPerM + tokensOut × outputPerM (no cache-hit discount).
@@ -282,6 +288,7 @@ function runPi(
     // --mode json streams native usage on message_end (print -p has no telemetry).
     // Extensions (pi-tps / pi-token-usage / pi-otel) are interactive overlays on the same data.
     // Build flags then prompt — never splice between a flag and its value.
+    // Do not pass `-a`: current pi rejects it as "Unknown option: -a" (no short alias).
     const args = [
       ...prefixArgs,
       "--mode",
@@ -291,8 +298,19 @@ function runPi(
       "--model",
       opts.model,
       "--no-session",
-      "-a",
     ];
+    // Fair coding surface (matches CLAI toolProfile=coding). Escape: COMPARE_PI_RAW=1.
+    if (process.env.COMPARE_PI_RAW !== "1") {
+      args.push(
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--tools",
+        "read,bash,edit,write",
+      );
+    }
     // Only pass --thinking when explicitly set — defaulting to "off" hurts quality.
     if (process.env.PI_THINKING) {
       args.push("--thinking", process.env.PI_THINKING);

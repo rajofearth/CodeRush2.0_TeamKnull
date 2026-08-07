@@ -49,6 +49,8 @@ export type CreateSandboxOptions = {
   onApproval?: ApprovalHook;
   /** Auto-approve for offline demos (still records approval events via caller). */
   autoApprove?: boolean;
+  /** Force scrubbed stub (no sandbox-runtime). Use for parallel bench to avoid EPERM thrash. */
+  forceStub?: boolean;
 };
 
 const SECRET_ENV_RE =
@@ -110,75 +112,85 @@ export async function createSandbox(
     reset: () => Promise<void>;
   } | null = null;
 
-  try {
-    const mod = await import("@anthropic-ai/sandbox-runtime");
-    const SandboxManager = mod.SandboxManager;
-    if (!SandboxManager?.initialize || !SandboxManager?.wrapWithSandbox) {
-      stubReason = "sandbox-runtime missing SandboxManager API";
-    } else {
-      const supported =
-        typeof SandboxManager.isSupportedPlatform === "function"
-          ? SandboxManager.isSupportedPlatform()
-          : true;
-      if (!supported) {
-        stubReason = "platform not supported by sandbox-runtime";
-      } else {
-        const windowsConfig =
-          process.platform === "win32" && mod.VENDORED_SRT_WIN_EXE
-            ? { srtWin: { path: mod.VENDORED_SRT_WIN_EXE } }
-            : undefined;
-        const initPromise = SandboxManager.initialize({
-          network: {
-            allowedDomains: opts.allowedDomains ?? [],
-            deniedDomains: [],
-          },
-          filesystem: {
-            denyRead: [],
-            allowWrite: [workspaceRoot],
-            denyWrite: [
-              path.join(workspaceRoot, ".env"),
-              path.join(workspaceRoot, ".env.local"),
-            ],
-            allowRead: [workspaceRoot],
-          },
-          ...(windowsConfig ? { windows: windowsConfig } : {}),
-        });
-        // Avoid hanging on UAC / native install prompts during demos.
-        const timeoutMs = 8_000;
-        await Promise.race([
-          initPromise,
-          new Promise((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    `sandbox-runtime initialize timed out after ${timeoutMs}ms`,
-                  ),
-                ),
-              timeoutMs,
-            ),
-          ),
-        ]);
-        runtime = {
-          wrapWithSandbox: (command: string) =>
-            SandboxManager.wrapWithSandbox(command),
-          reset: async () => {
-            if (typeof SandboxManager.reset === "function") {
-              await SandboxManager.reset();
-            }
-          },
-        };
-        mode = "runtime";
-        stubReason = undefined;
-      }
-    }
-  } catch (err) {
-    stubReason =
-      err instanceof Error
-        ? `sandbox-runtime unavailable: ${err.message}`
-        : "sandbox-runtime unavailable";
+  const forceStub =
+    opts.forceStub === true || process.env.CLAI_SANDBOX_MODE === "stub";
+  if (forceStub) {
+    stubReason = opts.forceStub
+      ? "forceStub: scrubbed stub (bench / parallel)"
+      : 'CLAI_SANDBOX_MODE=stub: scrubbed stub (no sandbox-runtime)';
     mode = "stub";
     runtime = null;
+  } else {
+    try {
+      const mod = await import("@anthropic-ai/sandbox-runtime");
+      const SandboxManager = mod.SandboxManager;
+      if (!SandboxManager?.initialize || !SandboxManager?.wrapWithSandbox) {
+        stubReason = "sandbox-runtime missing SandboxManager API";
+      } else {
+        const supported =
+          typeof SandboxManager.isSupportedPlatform === "function"
+            ? SandboxManager.isSupportedPlatform()
+            : true;
+        if (!supported) {
+          stubReason = "platform not supported by sandbox-runtime";
+        } else {
+          const windowsConfig =
+            process.platform === "win32" && mod.VENDORED_SRT_WIN_EXE
+              ? { srtWin: { path: mod.VENDORED_SRT_WIN_EXE } }
+              : undefined;
+          const initPromise = SandboxManager.initialize({
+            network: {
+              allowedDomains: opts.allowedDomains ?? [],
+              deniedDomains: [],
+            },
+            filesystem: {
+              denyRead: [],
+              allowWrite: [workspaceRoot],
+              denyWrite: [
+                path.join(workspaceRoot, ".env"),
+                path.join(workspaceRoot, ".env.local"),
+              ],
+              allowRead: [workspaceRoot],
+            },
+            ...(windowsConfig ? { windows: windowsConfig } : {}),
+          });
+          // Avoid hanging on UAC / native install prompts during demos.
+          const timeoutMs = 8_000;
+          await Promise.race([
+            initPromise,
+            new Promise((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `sandbox-runtime initialize timed out after ${timeoutMs}ms`,
+                    ),
+                  ),
+                timeoutMs,
+              ),
+            ),
+          ]);
+          runtime = {
+            wrapWithSandbox: (command: string) =>
+              SandboxManager.wrapWithSandbox(command),
+            reset: async () => {
+              if (typeof SandboxManager.reset === "function") {
+                await SandboxManager.reset();
+              }
+            },
+          };
+          mode = "runtime";
+          stubReason = undefined;
+        }
+      }
+    } catch (err) {
+      stubReason =
+        err instanceof Error
+          ? `sandbox-runtime unavailable: ${err.message}`
+          : "sandbox-runtime unavailable";
+      mode = "stub";
+      runtime = null;
+    }
   }
 
   const requestApproval: ApprovalHook = onApproval;

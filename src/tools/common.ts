@@ -16,6 +16,8 @@ export type ToolContext = {
   onEvent?: (event: ToolPlaneEvent) => void;
   /** Session-scoped background shell jobs (bash_bg / bash_jobs / …). */
   shellJobs?: ShellJobManager;
+  /** When set, called after bash when command looks like node check.mjs and exitCode===0. */
+  onBenchCheckPass?: () => void;
 };
 
 export type ToolPlaneEvent = {

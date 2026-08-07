@@ -90,6 +90,13 @@ export type AgentLoopOptions = {
    * Default false — preserves existing loop behaviour; stages still emit.
    */
   injectAssembledContext?: boolean;
+  /**
+   * When true, `system` fully replaces DEFAULT_SYSTEM (harness/bench).
+   * Default false — append under Session context via composeSystem.
+   */
+  replaceSystem?: boolean;
+  /** Tool surface: full ADE set (default) or lean coding set for bench. */
+  toolProfile?: "full" | "coding";
   onText?: (text: string) => void;
   /**
    * Incremental assistant prose (token/chunk deltas). Prefer this for live TUI
@@ -231,10 +238,13 @@ export async function runAgentLoop(
   opts: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
   const resolved = opts.model ?? (await resolveModel());
-  const tools = {
-    ...createAiTools(opts.ctx),
-    task: createTaskTool(opts.ctx, resolved),
-  };
+  const profile = opts.toolProfile ?? "full";
+  const aiTools = createAiTools(opts.ctx, { profile });
+  // Spread into a plain record so streamText sees one tool-map shape (coding vs full).
+  const tools: Record<string, unknown> =
+    profile === "coding"
+      ? { ...aiTools }
+      : { ...aiTools, task: createTaskTool(opts.ctx, resolved) };
   const maxSteps = opts.maxSteps ?? 12;
 
   await opts.trace?.append("model_step", {
@@ -307,7 +317,9 @@ export async function runAgentLoop(
     }
   }
 
-  const system = composeSystem(systemExtra);
+  const system = opts.replaceSystem
+    ? (systemExtra?.trim() || DEFAULT_SYSTEM)
+    : composeSystem(systemExtra);
 
   const readUsage = (usage: unknown): { promptTokens: number; completionTokens: number } => {
     const u = (usage ?? {}) as Record<string, unknown>;
@@ -362,7 +374,7 @@ export async function runAgentLoop(
       async () => {
         const result = streamText({
           model: resolved.model as Parameters<typeof streamText>[0]["model"],
-          tools,
+          tools: tools as Parameters<typeof streamText>[0]["tools"],
           maxSteps,
           maxRetries: 0,
           system,

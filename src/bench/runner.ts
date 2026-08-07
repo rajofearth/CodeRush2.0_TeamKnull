@@ -372,10 +372,22 @@ async function agentSolve(
   });
   out.tracePath = trace.path;
 
+  // Bench must not use seatbelt — stub avoids EPERM on node check.mjs writes
+  // under parallel workers (matches devices where stub already wins).
   const sandbox = await createSandbox({
     workspaceRoot: workdir,
     autoApprove: true,
+    forceStub: true,
   });
+
+  let benchCheckPassed = false;
+  const checkAbort = new AbortController();
+  const onParentAbort = () => checkAbort.abort();
+  if (ctx.signal?.aborted) {
+    checkAbort.abort();
+  } else {
+    ctx.signal?.addEventListener("abort", onParentAbort);
+  }
 
   const toolCtx: ToolContext = {
     workspaceRoot: workdir,
@@ -386,23 +398,30 @@ async function agentSolve(
         out.toolCalls[event.tool] = (out.toolCalls[event.tool] ?? 0) + 1;
       }
     },
+    onBenchCheckPass: () => {
+      benchCheckPassed = true;
+      checkAbort.abort();
+    },
   };
 
   const timedOut = Symbol("timeout");
   let timer: NodeJS.Timeout | undefined;
   const BENCH_SYSTEM = `You are running a scored coding benchmark task in a tiny isolated workspace.
 You MUST make the required code change with the edit/write tools and verify with bash ({command: "node check.mjs"}).
-Do not stop after only reading files. Prefer: glob/read → edit → bash check → done.
+Prefer: read (or glob) → edit/write → bash node check.mjs → stop.
+Do not use LSP, intake, task, or background shells — they are not available.
 If check.mjs exits 0, stop. If it fails, fix and re-check within your step budget.`;
   try {
-    const loop = runAgentLoop({
+    const loopPromise = runAgentLoop({
       ctx: toolCtx,
       prompt: task.prompt,
-      maxSteps: Math.max(task.maxSteps, 12),
+      maxSteps: Math.max(1, task.maxSteps || 10),
       model: ctx.model,
       system: BENCH_SYSTEM,
+      replaceSystem: true,
+      toolProfile: "coding",
       trace,
-      signal: ctx.signal,
+      signal: checkAbort.signal,
       onStatus: (status) => {
         const m = /waiting (\d+)s/.exec(status.label);
         ctx.onRateLimit?.({
@@ -427,10 +446,21 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
           cost: out.cost,
         });
       },
+    }).catch((err) => {
+      // Early stop after check.mjs pass aborts the loop — treat as normal end.
+      if (benchCheckPassed) {
+        return {
+          text: "",
+          finishReason: "check-pass",
+          steps: out.steps || 0,
+          messages: [],
+        };
+      }
+      throw err;
     });
     const aborted = Symbol("abort");
     const raced = await Promise.race([
-      loop,
+      loopPromise,
       new Promise<typeof timedOut>((resolve) => {
         timer = setTimeout(() => resolve(timedOut), task.timeoutMs);
       }),
@@ -447,13 +477,21 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
       }),
     ]);
     if (raced === timedOut) {
+      checkAbort.abort();
       out.status = "timeout";
       out.error = `agent exceeded ${task.timeoutMs}ms`;
       await trace.close("timeout");
     } else if (raced === aborted) {
-      out.status = "error";
-      out.error = "aborted";
-      await trace.close("error", { message: "aborted" });
+      if (benchCheckPassed) {
+        out.steps = out.steps || 0;
+        out.status = "fail"; // provisional; check decides
+        out.error = undefined;
+        await trace.close("ok", { finishReason: "check-pass" });
+      } else {
+        out.status = "error";
+        out.error = "aborted";
+        await trace.close("error", { message: "aborted" });
+      }
     } else {
       out.steps = raced.steps;
       out.status = "fail"; // provisional; check decides
@@ -461,17 +499,27 @@ If check.mjs exits 0, stop. If it fails, fix and re-check within your step budge
       await trace.close("ok", { finishReason: raced.finishReason });
     }
   } catch (err) {
-    const isAbort =
-      ctx.signal?.aborted ||
-      (err instanceof Error && (err.name === "AbortError" || /aborted/i.test(err.message)));
-    out.status = "error";
-    out.error = isAbort
-      ? "aborted"
-      : err instanceof Error
-        ? err.message
-        : String(err);
-    await trace.close("error", { message: out.error }).catch(() => {});
+    if (benchCheckPassed) {
+      out.status = "fail"; // provisional; outer check decides
+      out.steps = out.steps || 0;
+      out.error = undefined;
+      await trace.close("ok", { finishReason: "check-pass" }).catch(() => {});
+    } else {
+      const isAbort =
+        ctx.signal?.aborted ||
+        checkAbort.signal.aborted ||
+        (err instanceof Error &&
+          (err.name === "AbortError" || /aborted/i.test(err.message)));
+      out.status = "error";
+      out.error = isAbort
+        ? "aborted"
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      await trace.close("error", { message: out.error }).catch(() => {});
+    }
   } finally {
+    ctx.signal?.removeEventListener("abort", onParentAbort);
     if (timer) clearTimeout(timer);
     await sandbox.dispose().catch(() => {});
   }
