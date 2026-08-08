@@ -6,7 +6,7 @@
  *   GET /events         SSE — snapshot + compare + job events
  *   GET /api/runs       run summaries from history.jsonl (oldest first)
  *   GET /api/runs/:id   full BenchRunRecord for one run
- *   GET /api/compare    CLAI vs pi harness scorecard (latest compare-pi.json)
+ *   GET /api/compare    CLAI vs pi (+ Codex when mode=all) scorecard (latest compare-pi.json)
  *   GET /api/compare/:id archived compare scorecard
  *   GET /api/tasks      catalog ids + count
  *   GET /api/jobs/current

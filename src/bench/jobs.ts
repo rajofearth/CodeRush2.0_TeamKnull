@@ -5,7 +5,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { loadEnvFiles } from "../adapter/env.js";
-import { runComparePi, type CompareResult } from "./compare-pi.js";
+import { runCompareAll } from "./compare-all.js";
+import type { CompareResult } from "./compare-pi.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
 import { runBench } from "./runner.js";
 import type { BenchStore, LiveRunFeed } from "./store.js";
@@ -24,7 +25,7 @@ export type JobManager = {
   start: (req: {
     kind: JobKind;
     parallel?: number;
-    /** Compare only: workers per harness (overrides half-of-parallel default). */
+    /** Compare only: workers per harness (overrides split-of-parallel default). */
     sideParallel?: number;
     tasks?: string[];
     /** Take the first N catalog tasks (after optional tasks filter). */
@@ -101,7 +102,8 @@ export function createJobManager(opts: {
     const signal = abort?.signal;
 
     if (req.kind === "compare") {
-      await runComparePi({
+      // Web compare races CLAI + pi + Codex (three-way).
+      await runCompareAll({
         workspaceRoot: opts.workspaceRoot,
         taskIds,
         parallel: req.parallel ?? 4,
@@ -162,14 +164,20 @@ export function createJobManager(opts: {
           ? latestCompare
           : null;
       if (req.kind === "compare") {
+        const zeroScore = { pass: 0, fail: 0, err: 0, total: 0, rate: 0 };
         publishCompare({
           at: new Date().toISOString(),
+          mode: "all",
           piProvider: process.env.PI_PROVIDER ?? "deepseek",
           piModel: process.env.PI_MODEL ?? "deepseek-v4-flash",
           pi: [],
           clai: [],
-          piScore: { pass: 0, fail: 0, err: 0, total: 0, rate: 0 },
-          claiScore: { pass: 0, fail: 0, err: 0, total: 0, rate: 0 },
+          codex: [],
+          piScore: { ...zeroScore },
+          claiScore: { ...zeroScore },
+          codexScore: { ...zeroScore },
+          codexProfile: process.env.CODEX_PROFILE ?? "deepseek",
+          codexModel: process.env.CODEX_MODEL ?? "deepseek-v4-flash",
           claiLabel: "starting…",
           partial: true,
         });

@@ -42,7 +42,7 @@ export const COMPARE_ROOT = path.resolve(
 
 export type CompareRow = {
   id: string;
-  harness: "clai" | "pi";
+  harness: "clai" | "pi" | "codex";
   status: "pass" | "fail" | "error";
   wallMs: number;
   detail?: string;
@@ -83,13 +83,23 @@ export type CompareResult = {
   partial?: boolean;
   /** True when the job was stopped (user abort / circuit breaker). */
   stopped?: boolean;
+  codexProfile?: string;
+  codexModel?: string;
+  codex?: CompareRow[];
+  codexScore?: CompareScore;
+  /** "pi" | "all" — dual vs three-way. Dual compare leaves this undefined or "pi". */
+  mode?: "pi" | "all";
 };
 
 export type CompareProgress = {
-  /** "both" = fresh CLAI + pi in parallel; "clai"/"pi" = single-side updates; "done" = final. */
-  phase: "clai" | "pi" | "both" | "done";
+  /**
+   * "both" = multi-side race (CLAI+pi or CLAI+pi+codex);
+   * "clai"/"pi"/"codex" = single-side updates; "done" = final.
+   */
+  phase: "clai" | "pi" | "codex" | "both" | "done";
   claiRows: CompareRow[];
   piRows: CompareRow[];
+  codexRows?: CompareRow[];
   claiLabel: string;
   /** Synthetic live snapshot for the dashboard Live panel (both harnesses). */
   live?: LiveSnapshot;
@@ -471,7 +481,7 @@ function truncateDetail(text: string, max = 800): string {
   return t.length <= max ? t : `${t.slice(0, max)}…`;
 }
 
-async function runPiTask(
+export async function runPiTask(
   task: BenchTaskSpec,
   opts: {
     provider: string;
@@ -1045,22 +1055,26 @@ export async function runComparePi(
     }
     return abortedClaiRow(t.id, abortDetail);
   });
-  const result = buildCompareResult(
-    finalClai,
-    finalPi.map((r) => ({
-      ...r,
-      tokensIn: Number(r.tokensIn) || 0,
-      tokensOut: Number(r.tokensOut) || 0,
-      cost: Number(r.cost) || 0,
-    })),
-    provider,
-    model,
-    claiLabel,
-    false,
-    concurrency,
-    stopped,
-    compareIds(),
-  );
+  const result: CompareResult = {
+    ...buildCompareResult(
+      finalClai,
+      finalPi.map((r) => ({
+        ...r,
+        tokensIn: Number(r.tokensIn) || 0,
+        tokensOut: Number(r.tokensOut) || 0,
+        cost: Number(r.cost) || 0,
+      })),
+      provider,
+      model,
+      claiLabel,
+      false,
+      concurrency,
+      stopped,
+      compareIds(),
+    ),
+    // Dual CLAI+pi; leave mode undefined/"pi" so three-way remains opt-in.
+    mode: "pi",
+  };
 
   const store = new BenchStore(workspaceRoot);
   await store.appendCompare(result);

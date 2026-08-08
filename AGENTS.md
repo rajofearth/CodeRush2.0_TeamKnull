@@ -37,6 +37,7 @@ pnpm clai demo lsp      # offline intake + TS diagnostics on fixtures/lsp-ts
 pnpm clai intake        # print repository intake map JSON
 pnpm clai bench run --offline --serve  # 81-task suite + live dashboard
 pnpm bench:compare-pi                   # CLAI vs pi scorecard (needs DEEPSEEK_API_KEY + pi)
+pnpm bench:compare-all                  # CLAI vs pi vs Codex (same; dashboard Compare all)
 pnpm clai run "…"       # soft agent loop (needs a provider key)
 ```
 

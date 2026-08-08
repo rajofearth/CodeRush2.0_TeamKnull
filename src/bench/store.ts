@@ -4,8 +4,9 @@
  * Layout under `<workspaceRoot>/.clai/bench/`:
  *   history.jsonl              one compact line per completed run / compare
  *   runs/<runId>.json          full BenchRunRecord (CLAI, offline, or compare)
- *   compares/<compareId>.json  full CLAI-vs-pi scorecard
+ *   compares/<compareId>.json  full CLAI-vs-pi (+ optional Codex) scorecard
  *   compare-pi.json            latest compare (dashboard default)
+ *   compare-all.json           latest three-way copy when mode==="all"
  */
 
 import { appendFile, access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
@@ -80,6 +81,18 @@ export type StoredCompareResult = {
   sideParallel?: number;
   partial?: boolean;
   stopped?: boolean;
+  codexProfile?: string;
+  codexModel?: string;
+  codex?: Array<Record<string, unknown>>;
+  codexScore?: {
+    pass: number;
+    fail: number;
+    err: number;
+    total: number;
+    rate: number;
+  };
+  /** "pi" | "all" — dual vs three-way. */
+  mode?: "pi" | "all";
 };
 
 export class BenchStore {
@@ -109,9 +122,10 @@ export class BenchStore {
   }
 
   /**
-   * Persist a finished CLAI-vs-pi compare so history can rebuild dual charts.
-   * Writes compares/<id>.json, compare-pi.json (latest), a runs/<id>.json view,
-   * and a history.jsonl line.
+   * Persist a finished CLAI-vs-pi (or CLAI+pi+codex) compare so history can
+   * rebuild dual/triple charts. Writes compares/<id>.json, compare-pi.json
+   * (latest — dashboard default), optionally compare-all.json when mode==="all",
+   * a runs/<id>.json view, and a history.jsonl line.
    */
   async appendCompare(result: StoredCompareResult): Promise<string> {
     const compareId =
@@ -137,6 +151,13 @@ export class BenchStore {
       "utf8",
     );
     await writeFile(this.latestComparePath, compareJson, "utf8");
+    if (stored.mode === "all" || (stored.codex && stored.codex.length)) {
+      await writeFile(
+        path.join(this.benchDir, "compare-all.json"),
+        compareJson,
+        "utf8",
+      );
+    }
 
     const record = compareToRunRecord(stored, compareId, claiRunId);
     await writeFile(
@@ -394,29 +415,54 @@ function compareToRunRecord(
 ): BenchRunRecord {
   const clai = stored.clai || [];
   const pi = stored.pi || [];
+  const codex = stored.codex || [];
   const byPi = new Map(pi.map((r) => [String(r.id), r]));
+  const byCodex = new Map(codex.map((r) => [String(r.id), r]));
+  const hasCodex =
+    stored.mode === "all" ||
+    (Array.isArray(stored.codex) && stored.codex.length > 0) ||
+    !!stored.codexScore;
   const tasks = clai.map((c) => {
     const p = byPi.get(String(c.id));
+    const x = byCodex.get(String(c.id));
     const cStatus = String(c.status || "error");
     const pStatus = p ? String(p.status || "error") : "error";
-    const status =
-      cStatus === "pass" && pStatus === "pass"
-        ? "pass"
-        : cStatus === "fail" || pStatus === "fail"
-          ? "fail"
-          : "error";
+    const xStatus = x ? String(x.status || "error") : hasCodex ? "error" : "pass";
+    const allPass = hasCodex
+      ? cStatus === "pass" && pStatus === "pass" && xStatus === "pass"
+      : cStatus === "pass" && pStatus === "pass";
+    const anyFail = hasCodex
+      ? cStatus === "fail" || pStatus === "fail" || xStatus === "fail"
+      : cStatus === "fail" || pStatus === "fail";
+    const status = allPass ? "pass" : anyFail ? "fail" : "error";
+    const errorParts = [
+      `clai=${cStatus}`,
+      `pi=${pStatus}`,
+      hasCodex ? `codex=${xStatus}` : "",
+    ].filter(Boolean);
     return {
       id: String(c.id),
       title: String(c.id),
       category: "bugfix" as const,
       status: status as BenchRunRecord["tasks"][number]["status"],
-      wallMs: Math.max(Number(c.wallMs) || 0, Number(p?.wallMs) || 0),
+      wallMs: Math.max(
+        Number(c.wallMs) || 0,
+        Number(p?.wallMs) || 0,
+        Number(x?.wallMs) || 0,
+      ),
       steps: 0,
       toolCalls: {},
-      tokensIn: (Number(c.tokensIn) || 0) + (Number(p?.tokensIn) || 0),
-      tokensOut: (Number(c.tokensOut) || 0) + (Number(p?.tokensOut) || 0),
-      cost: (Number(c.cost) || 0) + (Number(p?.cost) || 0),
-      error: `clai=${cStatus} · pi=${pStatus}`,
+      tokensIn:
+        (Number(c.tokensIn) || 0) +
+        (Number(p?.tokensIn) || 0) +
+        (Number(x?.tokensIn) || 0),
+      tokensOut:
+        (Number(c.tokensOut) || 0) +
+        (Number(p?.tokensOut) || 0) +
+        (Number(x?.tokensOut) || 0),
+      cost:
+        (Number(c.cost) || 0) + (Number(p?.cost) || 0) + (Number(x?.cost) || 0),
+      error: errorParts.join(" · "),
     };
   });
   const passed = tasks.filter((t) => t.status === "pass").length;
@@ -426,7 +472,7 @@ function compareToRunRecord(
     runId: compareId,
     startedAt: stored.at,
     finishedAt: stored.at,
-    provider: "clai+pi",
+    provider: hasCodex ? "clai+pi+codex" : "clai+pi",
     model: stored.piModel,
     offline: false,
     parallel: stored.sideParallel || stored.compareParallel || 1,

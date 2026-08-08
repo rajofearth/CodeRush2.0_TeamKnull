@@ -9,6 +9,8 @@
   "scripts": {
     "clai": "tsx src/cli.tsx",
     "bench:compare-pi": "tsx src/bench/compare-pi.ts",
+    "bench:compare-codex": "tsx src/bench/compare-codex.ts",
+    "bench:compare-all": "tsx src/bench/compare-all.ts",
     "bench:scaffold": "tsx src/bench/scaffold-fixtures.ts",
     "bench:verify-fixtures": "tsx src/bench/verify-fixtures.ts",
     "dev": "node scripts/serve.mjs",

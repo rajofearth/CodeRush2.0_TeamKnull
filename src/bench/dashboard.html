@@ -31,30 +31,41 @@
   }
   body { padding: 20px 24px 56px; max-width: 1120px; margin: 0 auto; }
   @media (prefers-reduced-motion: no-preference) {
-    body > * {
+    .hdr, .controls, #stage > *, #history-panel {
       animation: rise-in 0.35s ease both;
     }
-    body > *:nth-child(1) { animation-delay: 0s; }
-    body > *:nth-child(2) { animation-delay: 0.03s; }
-    body > *:nth-child(3) { animation-delay: 0.06s; }
-    body > *:nth-child(4) { animation-delay: 0.09s; }
-    body > *:nth-child(5) { animation-delay: 0.12s; }
-    body > *:nth-child(6) { animation-delay: 0.15s; }
-    body > *:nth-child(7) { animation-delay: 0.18s; }
+    .hdr { animation-delay: 0s; }
+    .controls { animation-delay: 0.03s; }
+    #stage > *:nth-child(1) { animation-delay: 0.06s; }
+    #stage > *:nth-child(2) { animation-delay: 0.09s; }
+    #stage > *:nth-child(3) { animation-delay: 0.12s; }
+    #history-panel { animation-delay: 0.15s; }
   }
   @keyframes rise-in {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: 0.02em; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
   h1 span.brand { color: var(--accent); }
   h2 {
     font-size: 13px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--text); margin: 0 0 12px;
   }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-  .sub a { color: var(--accent); text-decoration: none; }
-  .sub a:hover { color: var(--accent-hover); }
+  .hdr {
+    display: flex; align-items: baseline; gap: 12px 16px;
+    flex-wrap: wrap; margin-bottom: 14px;
+  }
+  .hdr .conn { float: none; margin-left: auto; }
+  .hdr-links {
+    margin: 0; border: none; background: transparent;
+    font-size: 12px;
+  }
+  .hdr-links > summary {
+    padding: 0; color: var(--faint); font-size: 11px;
+  }
+  .hdr-links .fold-body { padding: 4px 0 0; }
+  .hdr-links a { color: var(--accent); text-decoration: none; }
+  .hdr-links a:hover { color: var(--accent-hover); }
   .panel {
     background: var(--panel);
     border-left: 3px solid var(--border);
@@ -62,9 +73,33 @@
     margin-bottom: 14px;
   }
   .panel.live { border-left-color: var(--accent); }
+  .panel.primary { border-left-width: 3px; }
+  .panel.dim {
+    border-left-color: var(--border-subtle);
+    opacity: 0.88;
+  }
+  .panel.dim > h2,
+  .panel.dim .compare-eyebrow h2 {
+    font-size: 11px; color: var(--muted); margin-bottom: 8px;
+  }
+  .panel.history {
+    border-left-color: var(--border-subtle);
+    opacity: 0.9;
+  }
+  .panel.history > h2 {
+    font-size: 11px; color: var(--muted);
+  }
   .meta {
     display: flex; flex-wrap: wrap; gap: 12px 20px;
     color: var(--muted); font-size: 13px; margin-bottom: 12px;
+  }
+  .meta.meta-tight {
+    flex-wrap: nowrap;
+    gap: 10px 16px;
+    overflow-x: auto;
+    font-size: 12px;
+    margin-bottom: 8px;
+    padding-bottom: 2px;
   }
   .meta strong { color: var(--text); font-weight: 600; }
   .progress {
@@ -226,9 +261,16 @@
   .banner .detail { color: var(--muted); margin-top: 4px; font-size: 12px; }
   .spark { vertical-align: middle; }
   .panel.compare { border-left-color: var(--info); }
+  .panel.compare.primary { border-left-color: var(--info); opacity: 1; }
+  .compare-eyebrow {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .compare-eyebrow h2 { margin: 0; }
+  .compare-eyebrow .pill { margin-left: 0; }
+  /* Hero is #scoreboard — keep #compare-scores in DOM for JS, never show both */
   .compare-scores {
-    display: flex; flex-wrap: wrap; gap: 12px 24px;
-    margin-bottom: 12px;
+    display: none !important;
   }
   .compare-score {
     background: var(--element);
@@ -307,9 +349,63 @@
   .chart-box.hidden { display: none; }
   .scoreboard {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 12px;
-    margin: 12px 0;
+    margin: 4px 0 12px;
+  }
+  #stage {
+    display: flex;
+    flex-direction: column;
+  }
+  #stage[data-mode="compare"] #compare-panel { order: 1; }
+  #stage[data-mode="compare"] #charts-panel { order: 2; }
+  #stage[data-mode="compare"] #live-panel { order: 3; }
+  #stage[data-mode="live"] #live-panel { order: 1; }
+  #stage[data-mode="live"] #charts-panel { order: 2; }
+  #stage[data-mode="live"] #compare-panel { order: 3; }
+  #stage[data-mode="history"] #live-panel { order: 1; }
+  #stage[data-mode="history"] #charts-panel { order: 2; }
+  #stage[data-mode="history"] #compare-panel { order: 3; }
+  #stage[data-mode="idle"] #compare-panel { order: 1; }
+  #stage[data-mode="idle"] #live-panel { order: 2; }
+  #stage[data-mode="idle"] #charts-panel { order: 3; }
+  /* Live: full panel when focal; fold chrome only in compare mode */
+  #stage[data-mode="live"] #live-as-fold,
+  #stage[data-mode="history"] #live-as-fold,
+  #stage[data-mode="idle"] #live-as-fold {
+    margin-top: 0; border: none; background: transparent;
+  }
+  #stage[data-mode="live"] #live-as-fold > summary,
+  #stage[data-mode="history"] #live-as-fold > summary,
+  #stage[data-mode="idle"] #live-as-fold > summary {
+    display: none;
+  }
+  #stage[data-mode="live"] #live-as-fold .fold-body,
+  #stage[data-mode="history"] #live-as-fold .fold-body,
+  #stage[data-mode="idle"] #live-as-fold .fold-body {
+    padding: 0;
+  }
+  #stage[data-mode="compare"] #charts-panel {
+    padding-top: 10px; padding-bottom: 10px;
+  }
+  /* Charts: fold chrome only during compare; full panel otherwise */
+  #stage[data-mode="live"] #charts-as-fold,
+  #stage[data-mode="history"] #charts-as-fold,
+  #stage[data-mode="idle"] #charts-as-fold {
+    margin-top: 0; border: none; background: transparent;
+  }
+  #stage[data-mode="live"] #charts-as-fold > summary,
+  #stage[data-mode="history"] #charts-as-fold > summary,
+  #stage[data-mode="idle"] #charts-as-fold > summary {
+    display: none;
+  }
+  #stage[data-mode="live"] #charts-as-fold .fold-body,
+  #stage[data-mode="history"] #charts-as-fold .fold-body,
+  #stage[data-mode="idle"] #charts-as-fold .fold-body {
+    padding: 0;
+  }
+  #stage[data-mode="compare"] #charts-as-fold > summary {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
   }
   .score-card {
     background: var(--element);
@@ -345,14 +441,21 @@
 </style>
 </head>
 <body>
-  <div class="conn" id="conn">● Connecting</div>
-  <h1><span class="brand">clai</span> bench</h1>
-  <p class="sub">control center · live · harness compare · history &nbsp;·&nbsp; <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a></p>
+  <header class="hdr">
+    <h1><span class="brand">clai</span> bench</h1>
+    <details class="fold hdr-links">
+      <summary>API</summary>
+      <div class="fold-body">
+        <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a>
+      </div>
+    </details>
+    <div class="conn" id="conn">● Connecting</div>
+  </header>
 
   <div class="controls" id="controls">
     <button type="button" class="primary" id="btn-clai" data-kind="clai">CLAI</button>
     <button type="button" id="btn-offline" data-kind="offline">offline</button>
-    <button type="button" class="primary" id="btn-compare" data-kind="compare">compare</button>
+    <button type="button" class="primary" id="btn-compare" data-kind="compare">compare all</button>
     <button type="button" class="danger" id="btn-stop" disabled>Stop</button>
     <div class="ctrl-group" id="task-count" title="How many catalog tasks to run">
       <span class="tc-label">tasks</span>
@@ -374,37 +477,53 @@
     <div class="job-err" id="job-err"></div>
   </div>
 
+  <main id="stage" data-mode="idle">
   <section class="panel live" id="live-panel">
-    <h2 id="live-heading">Live run</h2>
-    <div class="banner" id="rate-banner" role="status"></div>
-    <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
-    <div class="progress" id="live-progress" aria-hidden="true"></div>
-    <div class="task-focus" id="task-focus"></div>
-    <details class="fold" id="live-fold">
-      <summary id="live-fold-summary">All tasks</summary>
+    <details class="fold" id="live-as-fold" open>
+      <summary id="live-as-fold-summary">Live stream</summary>
       <div class="fold-body">
-        <table>
-          <thead>
-            <tr>
-              <th>task</th>
-              <th>status</th>
-              <th>time</th>
-              <th>detail</th>
-            </tr>
-          </thead>
-          <tbody id="task-grid"></tbody>
-        </table>
+        <h2 id="live-heading">Live run</h2>
+        <div class="banner" id="rate-banner" role="status"></div>
+        <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
+        <div class="progress" id="live-progress" aria-hidden="true"></div>
+        <div class="task-focus" id="task-focus"></div>
+        <details class="fold" id="live-fold">
+          <summary id="live-fold-summary">All tasks</summary>
+          <div class="fold-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>task</th>
+                  <th>status</th>
+                  <th>time</th>
+                  <th>detail</th>
+                </tr>
+              </thead>
+              <tbody id="task-grid"></tbody>
+            </table>
+          </div>
+        </details>
       </div>
     </details>
   </section>
 
   <section class="panel compare" id="compare-panel" style="display:none">
-    <h2>Harness compare</h2>
-    <div class="meta" id="compare-meta"></div>
+    <div class="compare-eyebrow">
+      <h2>Harness compare</h2>
+      <span class="pill hidden" id="compare-mode-pill"></span>
+    </div>
     <div class="winner-callout" id="compare-winner"></div>
     <div class="compare-scores" id="compare-scores"></div>
     <div id="scoreboard" class="scoreboard"></div>
-    <p class="score-formula" id="score-formula"></p>
+    <div class="meta meta-tight" id="compare-meta"></div>
+    <details class="fold" id="compare-details">
+      <summary>Formula &amp; notes</summary>
+      <div class="fold-body">
+        <p class="score-formula" id="score-formula"></p>
+        <div id="compare-meta-extra" class="meta"></div>
+        <p class="compare-note">three-way CLAI + pi + Codex · source: <code>.clai/bench/compare-pi.json</code> / <code>compare-all.json</code> · control bar or <code>pnpm bench:compare-all</code> / <code>pnpm bench:compare-pi</code></p>
+      </div>
+    </details>
     <details class="fold" id="compare-fold">
       <summary id="compare-fold-summary">Task results</summary>
       <div class="fold-body">
@@ -421,35 +540,39 @@
         </table>
       </div>
     </details>
-    <p class="compare-note">source: <code>.clai/bench/compare-pi.json</code> · start from the control bar or <code>pnpm bench:compare-pi</code></p>
   </section>
 
-  <section>
-    <h2>Charts</h2>
-    <div class="charts-summary">
-      <div class="chart-box">
-        <h3 id="chart-pass-title">Pass rate</h3>
-        <svg class="chart" id="chart-pass" viewBox="0 0 320 150" role="img"></svg>
+  <section class="panel charts" id="charts-panel">
+    <details class="fold" id="charts-as-fold" open>
+      <summary id="charts-as-fold-summary">Efficiency</summary>
+      <div class="fold-body">
+        <div class="charts-summary">
+          <div class="chart-box">
+            <h3 id="chart-pass-title">Pass rate</h3>
+            <svg class="chart" id="chart-pass" viewBox="0 0 320 150" role="img"></svg>
+          </div>
+          <div class="chart-box" id="chart-avg-box">
+            <h3>Averages (per task)</h3>
+            <svg class="chart" id="chart-avg" viewBox="0 0 320 150" role="img"></svg>
+          </div>
+        </div>
+        <div class="metrics-panel">
+          <details class="fold" id="metrics-fold">
+            <summary id="chart-dur-title">Per-task metrics</summary>
+            <div class="fold-body" id="chart-dur"></div>
+          </details>
+          <!-- Compat stubs — filled/hidden by render paths -->
+          <div id="chart-tok-box" class="hidden"><div id="chart-tok"></div></div>
+          <div id="chart-cost-box" class="hidden"><div id="chart-cost"></div></div>
+          <span id="chart-tok-title" class="hidden"></span>
+          <span id="chart-cost-title" class="hidden"></span>
+        </div>
       </div>
-      <div class="chart-box" id="chart-avg-box">
-        <h3>Averages (per task)</h3>
-        <svg class="chart" id="chart-avg" viewBox="0 0 320 150" role="img"></svg>
-      </div>
-    </div>
-    <div class="metrics-panel">
-      <details class="fold" id="metrics-fold">
-        <summary id="chart-dur-title">Per-task metrics</summary>
-        <div class="fold-body" id="chart-dur"></div>
-      </details>
-      <!-- Compat stubs — filled/hidden by render paths -->
-      <div id="chart-tok-box" class="hidden"><div id="chart-tok"></div></div>
-      <div id="chart-cost-box" class="hidden"><div id="chart-cost"></div></div>
-      <span id="chart-tok-title" class="hidden"></span>
-      <span id="chart-cost-title" class="hidden"></span>
-    </div>
+    </details>
   </section>
+  </main>
 
-  <section class="panel">
+  <section class="panel history" id="history-panel">
     <h2>History</h2>
     <div id="spark-wrap" style="margin-bottom:10px;color:var(--muted);font-size:13px;"></div>
     <table>
@@ -526,6 +649,100 @@
     el.textContent = "● " + label;
   }
 
+  function syncStage() {
+    const stage = $("stage");
+    if (!stage) return;
+    const running = job.status === "running" || job.status === "stopping";
+    let mode;
+    if (historyChartsPinned) {
+      mode = "history";
+    } else if (running && job.kind === "compare") {
+      mode = "compare";
+    } else if (running && (job.kind === "clai" || job.kind === "offline")) {
+      mode = "live";
+    } else if (compare) {
+      mode = "compare";
+    } else if (snapshot) {
+      mode = "live";
+    } else {
+      mode = "idle";
+    }
+    stage.dataset.mode = mode;
+    document.body.dataset.mode = mode;
+
+    const live = $("live-panel");
+    const cmp = $("compare-panel");
+    const charts = $("charts-panel");
+    if (live) {
+      live.classList.toggle("primary", mode === "live" || mode === "history");
+      live.classList.toggle("dim", mode === "compare");
+    }
+    if (cmp) {
+      cmp.classList.toggle("primary", mode === "compare");
+      cmp.classList.toggle("dim", mode === "history" || mode === "live");
+    }
+    if (charts) {
+      charts.classList.toggle("dim", mode === "compare" || mode === "history" || mode === "idle");
+    }
+
+    const liveFold = $("live-as-fold");
+    if (liveFold) {
+      const prev = syncStage._prevMode;
+      if (mode === "compare") {
+        const banner = $("rate-banner");
+        const bannerOn = banner && banner.classList.contains("show");
+        if (bannerOn) liveFold.open = true;
+        else if (prev !== "compare") liveFold.open = false;
+        const sum = $("live-as-fold-summary");
+        if (sum) {
+          const rid = snapshot && snapshot.runId ? snapshot.runId : "snapshot";
+          sum.textContent = "Live stream · " + rid;
+        }
+      } else {
+        liveFold.open = true;
+      }
+    }
+
+    const chartsFold = $("charts-as-fold");
+    if (chartsFold) {
+      const prev = syncStage._prevMode;
+      const scoringReady = compare && typeof isCompareScoringReady === "function"
+        ? isCompareScoringReady(compare)
+        : false;
+      if (mode === "compare") {
+        // Keep charts collapsed while racing; open once composites are ready.
+        if (scoringReady) chartsFold.open = true;
+        else if (prev !== "compare") chartsFold.open = false;
+        const csum = $("charts-as-fold-summary");
+        if (csum) {
+          csum.textContent = scoringReady ? "Efficiency" : "Efficiency · pending";
+        }
+      } else {
+        chartsFold.open = true;
+        const csum = $("charts-as-fold-summary");
+        if (csum) csum.textContent = "Efficiency";
+      }
+    }
+    syncStage._prevMode = mode;
+
+    const compareRunning = running && job.kind === "compare";
+    const cf = $("compare-fold");
+    if (cf && (compareRunning || mode === "compare")) {
+      if (compareRunning) cf.open = true;
+    }
+
+    const pill = $("compare-mode-pill");
+    if (pill) {
+      if (compare) {
+        pill.textContent = isThreeWay(compare) ? "three-way" : "dual";
+        pill.classList.remove("hidden");
+      } else {
+        pill.textContent = "";
+        pill.classList.add("hidden");
+      }
+    }
+  }
+
   function renderLive() {
     const meta = $("live-meta");
     const grid = $("task-grid");
@@ -540,6 +757,7 @@
       prog.innerHTML = "";
       const ban0 = $("rate-banner");
       if (ban0) { ban0.className = "banner"; ban0.innerHTML = ""; }
+      syncStage();
       return;
     }
     const banner = $("rate-banner");
@@ -632,22 +850,36 @@
     }
     const elapsed = Date.now() - startedMs();
     const done = !!snapshot.done;
-    const dualHarness = snapshot.provider === "clai+pi";
-    meta.innerHTML =
-      "<span><strong>" + esc(snapshot.runId) + "</strong>" +
-      (snapshot.offline ? '<span class="pill">offline</span>' : "") +
-      (done ? '<span class="pill">done</span>' : '<span class="pill">live</span>') +
-      (dualHarness ? '<span class="pill">CLAI + pi</span>' : "") +
-      "</span>" +
-      "<span>" + esc(snapshot.provider) + " · " + esc(snapshot.model) +
-      (dualHarness ? " · both harnesses in parallel" : "") + "</span>" +
-      "<span>parallel <strong>" + esc(snapshot.parallel) + "</strong>" +
-      (dualHarness ? " each" : "") + "</span>" +
-      "<span>elapsed <strong id='elapsed'>" + fmtMs(elapsed) + "</strong></span>" +
-      "<span>tokens <strong>" + (tokensIn + tokensOut).toLocaleString() + "</strong></span>" +
-      "<span>cost <strong>" + fmtCost(cost) + "</strong></span>" +
-      "<span>pass <strong class='" + rateClass(counts.pass / Math.max(tasks.length, 1)) + "'>" +
-      counts.pass + "/" + tasks.length + "</strong></span>";
+    const dualHarness =
+      snapshot.provider === "clai+pi" || snapshot.provider === "clai+pi+codex";
+    const stageMode = ($("stage") && $("stage").dataset.mode) || "";
+    const compareFocus =
+      stageMode === "compare" ||
+      (job.kind === "compare" && (job.status === "running" || job.status === "stopping")) ||
+      dualHarness;
+    if (compareFocus) {
+      meta.innerHTML =
+        "<span><strong>" + esc(snapshot.runId) + "</strong>" +
+        (done ? '<span class="pill">done</span>' : '<span class="pill">live</span>') +
+        "</span>" +
+        "<span>elapsed <strong id='elapsed'>" + fmtMs(elapsed) + "</strong></span>" +
+        "<span>pass <strong class='" + rateClass(counts.pass / Math.max(tasks.length, 1)) + "'>" +
+        counts.pass + "/" + tasks.length + "</strong></span>" +
+        "<span>tokens <strong>" + (tokensIn + tokensOut).toLocaleString() + "</strong></span>" +
+        "<span>cost <strong>" + fmtCost(cost) + "</strong></span>";
+    } else {
+      meta.innerHTML =
+        "<span><strong>" + esc(snapshot.runId) + "</strong>" +
+        (snapshot.offline ? '<span class="pill">offline</span>' : "") +
+        (done ? '<span class="pill">done</span>' : '<span class="pill">live</span>') +
+        "</span>" +
+        "<span>" + esc(snapshot.provider) + " · " + esc(snapshot.model) + "</span>" +
+        "<span>elapsed <strong id='elapsed'>" + fmtMs(elapsed) + "</strong></span>" +
+        "<span>pass <strong class='" + rateClass(counts.pass / Math.max(tasks.length, 1)) + "'>" +
+        counts.pass + "/" + tasks.length + "</strong></span>" +
+        "<span>tokens <strong>" + (tokensIn + tokensOut).toLocaleString() + "</strong></span>" +
+        "<span>cost <strong>" + fmtCost(cost) + "</strong></span>";
+    }
 
     const n = Math.max(tasks.length, 1);
     const seg = (key, cls) => {
@@ -726,6 +958,7 @@
     // are not overwritten by merged live cards.
     const compareLive =
       snapshot.provider === "clai+pi" ||
+      snapshot.provider === "clai+pi+codex" ||
       (job.kind === "compare" && (job.status === "running" || job.status === "stopping"));
     if (
       !(historyChartsPinned && selectedId && historyDetailTasks && historyDetailTasks.length) &&
@@ -742,6 +975,7 @@
     } else {
       clearInterval(tickTimer);
     }
+    syncStage();
   }
 
   function historyTasksFromSummary(runId) {
@@ -781,7 +1015,16 @@
   }
 
   function historyRowIsCompare(r) {
-    return r.kind === "compare" || r.provider === "clai+pi" || !!(r.compareId && r.runId === r.compareId);
+    return (
+      r.kind === "compare" ||
+      r.provider === "clai+pi" ||
+      r.provider === "clai+pi+codex" ||
+      !!(r.compareId && r.runId === r.compareId)
+    );
+  }
+
+  function isThreeWay(c) {
+    return !!(c && (c.mode === "all" || (Array.isArray(c.codex) && c.codex.length) || c.codexScore));
   }
 
   function muteHarnessCompareForHistory(runId) {
@@ -805,42 +1048,34 @@
       "<span>viewing history <strong>" + esc(runId) + "</strong></span>" +
       (summary
         ? "<span>" + esc(summary.provider) + " / " + esc(summary.model) + "</span>"
-        : "") +
-      (compare.claiLabel
+        : "");
+    const extra = $("compare-meta-extra");
+    if (extra) {
+      extra.innerHTML = compare.claiLabel
         ? "<span style=\"color:var(--faint)\">latest compare CLAI source: " +
           esc(compareClaiRunId() || compare.claiLabel) + "</span>"
-        : "");
+        : "";
+    }
 
     const winEl = $("compare-winner");
     winEl.className = "winner-callout tie";
     winEl.textContent =
       "History run selected — Live + Charts show " + runId +
-      ". Click the compare CLAI source row or run Compare for CLAI vs pi.";
+      ". Click the compare CLAI source row or run Compare for CLAI vs pi vs Codex.";
 
-    $("compare-scores").innerHTML =
-      '<div class="compare-score">' +
-        '<div class="label">Selected run</div>' +
-        '<div class="value ' + rateClass(passRate) + '">' +
-          passed + "/" + total +
-          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(passRate) + ")</span></div>" +
-        '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
-          fmtMinutes(wall) + "</strong></div>" +
-        '<div style="margin-top:4px;font-size:12px;color:var(--muted)">cost <strong style="color:var(--text)">' +
-          fmtCost(cost) + "</strong></div>" +
-      "</div>" +
-      '<div class="compare-score">' +
-        '<div class="label">Harness compare</div>' +
-        '<div class="value" style="color:var(--faint)">—</div>' +
-        '<div style="margin-top:6px;font-size:12px;color:var(--faint)">paused while browsing history</div>' +
-      "</div>";
-
+    $("compare-scores").innerHTML = "";
     const scoreboard = $("scoreboard");
     if (scoreboard) {
       scoreboard.innerHTML =
-        '<div class="scoreboard-pending" style="color:var(--faint);font-size:13px;padding:8px 0">' +
-        "Composite CLAI vs pi scoreboard hidden — select " +
-        esc(compareClaiRunId() || "the compare CLAI run") +
-        " in History, or start Compare</div>";
+        '<div class="score-card">' +
+          '<div class="name">Selected run</div>' +
+          '<div class="big ' + rateClass(passRate) + '">' + passed + "/" + total + "</div>" +
+          '<div class="avg">' +
+            "<div>pass rate <strong>" + fmtPct(passRate) + "</strong></div>" +
+            "<div>total time <strong>" + fmtMinutes(wall) + "</strong></div>" +
+            "<div>cost <strong>" + fmtCost(cost) + "</strong></div>" +
+            '<div style="color:var(--faint)">composite paused — history view</div>' +
+          "</div></div>";
     }
     const formula = $("score-formula");
     if (formula) formula.textContent = "";
@@ -848,6 +1083,7 @@
       '<tr><td colspan="4" class="empty">task table is for harness compare — see Charts / Live for this run</td></tr>';
     const foldSum = $("compare-fold-summary");
     if (foldSum) foldSum.textContent = "Task results — history view";
+    syncStage();
   }
 
   function syncHarnessCompareForHistory() {
@@ -863,8 +1099,15 @@
     const avgTitle = avgBox && avgBox.querySelector("h3");
     const n = taskCount != null ? " (" + taskCount + ")" : "";
     if (mode === "compare") {
-      passT.textContent = "Pass rate — both harness pies";
-      if (durT) durT.textContent = "Per-task metrics — CLAI vs pi" + n;
+      const three = isThreeWay(compare);
+      passT.textContent = three
+        ? "Pass rate — CLAI vs pi vs Codex pies"
+        : "Pass rate — both harness pies";
+      if (durT) {
+        durT.textContent = three
+          ? "Per-task metrics — CLAI vs pi vs Codex" + n
+          : "Per-task metrics — CLAI vs pi" + n;
+      }
       if (avgTitle) avgTitle.textContent = "Averages (per task)";
       if (avgBox) avgBox.classList.remove("hidden");
     } else if (mode === "history" && runId) {
@@ -903,15 +1146,20 @@
     };
   }
 
-  function sharedScoreWeights(claiM, piM) {
-    // Same weights for both harnesses. Tok/cost only count when BOTH report them.
-    const bothTok = !!(claiM.hasTok && piM.hasTok);
-    const bothCost = !!(claiM.hasCost && piM.hasCost);
+  function sharedScoreWeightsN(metrics) {
+    // Tok/cost only count when ALL harnesses report them.
+    const list = (metrics || []).filter(Boolean);
+    const bothTok = list.length > 0 && list.every((m) => m.hasTok);
+    const bothCost = list.length > 0 && list.every((m) => m.hasCost);
     let wPass = 50, wSpeed = 30, wTok = 10, wCost = 10;
     if (!bothTok && !bothCost) { wPass = 60; wSpeed = 40; wTok = 0; wCost = 0; }
     else if (!bothTok) { wPass = 55; wSpeed = 35; wTok = 0; wCost = 10; }
     else if (!bothCost) { wPass = 55; wSpeed = 35; wTok = 10; wCost = 0; }
     return { wPass, wSpeed, wTok, wCost, bothTok, bothCost };
+  }
+
+  function sharedScoreWeights(claiM, piM, codexM) {
+    return sharedScoreWeightsN(codexM ? [claiM, piM, codexM] : [claiM, piM]);
   }
 
   function scoreHarness(m, refs, weights) {
@@ -947,6 +1195,27 @@
       draw(240, piM.passRate, "#56b6c2", "pi", piM.pass + "/" + piM.n);
   }
 
+  function tripleDonutSvg(claiM, piM, codexM) {
+    const draw = (cx, rate, color, label, sub) => {
+      const r = 36, stroke = 12, circ = 2 * Math.PI * r;
+      const len = Math.max(0, Math.min(1, rate)) * circ;
+      return (
+        '<circle cx="' + cx + '" cy="70" r="' + r + '" fill="none" stroke="#3c3c3c" stroke-width="' + stroke + '" />' +
+        '<circle cx="' + cx + '" cy="70" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="' + stroke +
+        '" stroke-dasharray="' + len + " " + (circ - len) + '" transform="rotate(-90 ' + cx + ' 70)" />' +
+        '<text x="' + cx + '" y="74" text-anchor="middle" fill="#eeeeee" font-size="16" font-weight="700">' +
+        Math.round(rate * 100) + "%</text>" +
+        '<text x="' + cx + '" y="128" text-anchor="middle" fill="' + color + '" font-size="11">' + esc(label) + "</text>" +
+        '<text x="' + cx + '" y="142" text-anchor="middle" fill="#808080" font-size="10">' + esc(sub) + "</text>"
+      );
+    };
+    return (
+      draw(80, claiM.passRate, "#5c9cf5", "CLAI", claiM.pass + "/" + claiM.n) +
+      draw(240, piM.passRate, "#56b6c2", "pi", piM.pass + "/" + piM.n) +
+      draw(400, codexM.passRate, "#c678dd", "codex", codexM.pass + "/" + codexM.n)
+    );
+  }
+
   /** One full-width dual metrics table — page scrolls; no nested scroll boxes. */
   function dualMetricsUnified(ids, claiMap, piMap) {
     if (!ids.length) return '<div class="metric-empty">no data</div>';
@@ -974,6 +1243,40 @@
     return (
       "<table><thead><tr>" +
       "<th>task</th><th>CLAI</th><th>pi</th><th>tokens (c/p)</th><th>cost (c/p)</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table>"
+    );
+  }
+
+  function tripleMetricsUnified(ids, claiMap, piMap, codexMap) {
+    if (!ids.length) return '<div class="metric-empty">no data</div>';
+    let rows = "";
+    ids.forEach((id) => {
+      const c = claiMap[id];
+      const p = piMap[id];
+      const x = codexMap[id];
+      const cTok = c ? (c.tokensIn || 0) + (c.tokensOut || 0) : 0;
+      const pTok = p ? (p.tokensIn || 0) + (p.tokensOut || 0) : 0;
+      const xTok = x ? (x.tokensIn || 0) + (x.tokensOut || 0) : 0;
+      const cCost = c ? Number(c.cost) || 0 : 0;
+      const pCost = p ? Number(p.cost) || 0 : 0;
+      const xCost = x ? Number(x.cost) || 0 : 0;
+      rows +=
+        "<tr>" +
+        "<td title=\"" + esc(id) + "\">" + esc(id) + "</td>" +
+        "<td class=\"num\">" + (c ? esc(c.status) + " " + fmtMs(c.wallMs) : "—") + "</td>" +
+        "<td class=\"num\">" + (p ? esc(p.status) + " " + fmtMs(p.wallMs) : "—") + "</td>" +
+        "<td class=\"num\">" + (x ? esc(x.status) + " " + fmtMs(x.wallMs) : "—") + "</td>" +
+        "<td class=\"num\">" + (cTok || pTok || xTok
+          ? cTok.toLocaleString() + " / " + pTok.toLocaleString() + " / " + xTok.toLocaleString()
+          : "—") + "</td>" +
+        "<td class=\"num\">" + (cCost || pCost || xCost
+          ? fmtCost(cCost) + " / " + fmtCost(pCost) + " / " + fmtCost(xCost)
+          : "—") + "</td>" +
+        "</tr>";
+    });
+    return (
+      "<table><thead><tr>" +
+      "<th>task</th><th>CLAI</th><th>pi</th><th>codex</th><th>tokens (c/p/x)</th><th>cost (c/p/x)</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table>"
     );
   }
@@ -1023,6 +1326,53 @@
     return out;
   }
 
+  function avgGroupedSvg3(claiM, piM, codexM) {
+    const groups = [
+      {
+        label: "avg time",
+        c: claiM.avgWallMs / 1000,
+        p: piM.avgWallMs / 1000,
+        x: codexM.avgWallMs / 1000,
+        fmt: (v) => (v == null ? "n/a" : v.toFixed(1) + "s"),
+      },
+      {
+        label: "avg tokens",
+        c: claiM.avgTokens,
+        p: piM.avgTokens,
+        x: codexM.avgTokens,
+        fmt: (v) => (v == null ? "n/a" : Math.round(v).toLocaleString()),
+      },
+      {
+        label: "avg cost",
+        c: claiM.avgCost,
+        p: piM.avgCost,
+        x: codexM.avgCost,
+        fmt: (v) => (v == null ? "n/a" : "$" + v.toFixed(4)),
+      },
+    ];
+    let out =
+      '<text x="20" y="16" fill="#5c9cf5" font-size="12">CLAI</text>' +
+      '<text x="70" y="16" fill="#56b6c2" font-size="12">pi</text>' +
+      '<text x="100" y="16" fill="#c678dd" font-size="12">codex</text>';
+    groups.forEach((g, i) => {
+      const y = 30 + i * 48;
+      const vals = [g.c, g.p, g.x].filter((v) => v != null && v > 0);
+      const max = Math.max(1e-9, ...vals, 1e-9);
+      const cBw = g.c != null && g.c > 0 ? (180 * g.c) / max : 0;
+      const pBw = g.p != null && g.p > 0 ? (180 * g.p) / max : 0;
+      const xBw = g.x != null && g.x > 0 ? (180 * g.x) / max : 0;
+      out +=
+        '<text x="0" y="' + (y + 11) + '" fill="#808080" font-size="12">' + esc(g.label) + "</text>" +
+        '<rect x="90" y="' + y + '" width="' + cBw + '" height="10" fill="#5c9cf5" />' +
+        '<text x="' + (94 + cBw) + '" y="' + (y + 9) + '" fill="#808080" font-size="11">' + esc(g.fmt(g.c)) + "</text>" +
+        '<rect x="90" y="' + (y + 12) + '" width="' + pBw + '" height="10" fill="#56b6c2" />' +
+        '<text x="' + (94 + pBw) + '" y="' + (y + 21) + '" fill="#808080" font-size="11">' + esc(g.fmt(g.p)) + "</text>" +
+        '<rect x="90" y="' + (y + 24) + '" width="' + xBw + '" height="10" fill="#c678dd" />' +
+        '<text x="' + (94 + xBw) + '" y="' + (y + 33) + '" fill="#808080" font-size="11">' + esc(g.fmt(g.x)) + "</text>";
+    });
+    return out;
+  }
+
   /** Single-harness averages bar chart (history / live). */
   function singleAvgSvg(m) {
     const groups = [
@@ -1043,33 +1393,40 @@
     return out;
   }
 
-  function renderScoreboard(claiM, piM, claiScore, piScore) {
+  function scoreCardHtml(name, m, score, isWinner) {
+    return (
+      '<div class="score-card' + (isWinner ? " winner" : "") + '">' +
+        '<div class="name">' + esc(name) + " composite / 100</div>" +
+        '<div class="big">' + score.total.toFixed(1) + "</div>" +
+        '<div class="avg">' +
+          "<div>pass <strong>" + m.pass + "/" + m.n + "</strong> (" + fmtPct(m.passRate) + ")</div>" +
+          "<div>total time <strong>" + fmtMinutes(m.totalWallMs) + "</strong></div>" +
+          "<div>avg time <strong>" + fmtMs(m.avgWallMs) + "</strong></div>" +
+          "<div>avg tokens <strong>" + (m.avgTokens == null ? "n/a" : Math.round(m.avgTokens).toLocaleString()) + "</strong></div>" +
+          "<div>avg cost <strong>" + (m.avgCost == null ? "n/a" : fmtCost(m.avgCost)) + "</strong></div>" +
+        "</div></div>"
+    );
+  }
+
+  function renderScoreboard(claiM, piM, claiScore, piScore, codexM, codexScore) {
     const board = $("scoreboard");
     const formula = $("score-formula");
     if (!board) return;
-    const cWin = claiScore.total > piScore.total + 0.05;
-    const pWin = piScore.total > claiScore.total + 0.05;
-    board.innerHTML =
-      '<div class="score-card' + (cWin ? " winner" : "") + '">' +
-        '<div class="name">CLAI composite / 100</div>' +
-        '<div class="big">' + claiScore.total.toFixed(1) + "</div>" +
-        '<div class="avg">' +
-          "<div>pass <strong>" + claiM.pass + "/" + claiM.n + "</strong> (" + fmtPct(claiM.passRate) + ")</div>" +
-          "<div>total time <strong>" + fmtMinutes(claiM.totalWallMs) + "</strong></div>" +
-          "<div>avg time <strong>" + fmtMs(claiM.avgWallMs) + "</strong></div>" +
-          "<div>avg tokens <strong>" + (claiM.avgTokens == null ? "n/a" : Math.round(claiM.avgTokens).toLocaleString()) + "</strong></div>" +
-          "<div>avg cost <strong>" + (claiM.avgCost == null ? "n/a" : fmtCost(claiM.avgCost)) + "</strong></div>" +
-        "</div></div>" +
-      '<div class="score-card' + (pWin ? " winner" : "") + '">' +
-        '<div class="name">pi composite / 100</div>' +
-        '<div class="big">' + piScore.total.toFixed(1) + "</div>" +
-        '<div class="avg">' +
-          "<div>pass <strong>" + piM.pass + "/" + piM.n + "</strong> (" + fmtPct(piM.passRate) + ")</div>" +
-          "<div>total time <strong>" + fmtMinutes(piM.totalWallMs) + "</strong></div>" +
-          "<div>avg time <strong>" + fmtMs(piM.avgWallMs) + "</strong></div>" +
-          "<div>avg tokens <strong>" + (piM.avgTokens == null ? "n/a" : Math.round(piM.avgTokens).toLocaleString()) + "</strong></div>" +
-          "<div>avg cost <strong>" + (piM.avgCost == null ? "n/a" : fmtCost(piM.avgCost)) + "</strong></div>" +
-        "</div></div>";
+    const three = !!(codexM && codexScore);
+    const entries = [
+      { who: "clai", name: "CLAI", m: claiM, score: claiScore },
+      { who: "pi", name: "pi", m: piM, score: piScore },
+    ];
+    if (three) entries.push({ who: "codex", name: "codex", m: codexM, score: codexScore });
+    const max = Math.max.apply(null, entries.map((e) => e.score.total));
+    const tied = entries.filter((e) => e.score.total >= max - 0.05);
+    const uniqueWin = tied.length === 1;
+    board.innerHTML = entries.map((e) => {
+      const isWinner = uniqueWin
+        ? e.score.total > max - 1e-9
+        : false; // only highlight a clear unique winner on the scoreboard
+      return scoreCardHtml(e.name, e.m, e.score, isWinner);
+    }).join("");
     if (formula) {
       formula.textContent =
         "Composite /100 = pass×" + claiScore.wPass + " + speed×" + claiScore.wSpeed +
@@ -1080,50 +1437,86 @@
 
   function renderCompareCharts() {
     if (!compare) return false;
+    const three = isThreeWay(compare);
     const claiRows = compare.clai || [];
     const piRows = compare.pi || [];
+    const codexRows = three ? (compare.codex || []) : [];
     const scoringReady = isCompareScoringReady(compare);
     const claiM = harnessMetrics(claiRows);
     const piM = harnessMetrics(piRows);
+    const codexM = three ? harnessMetrics(codexRows) : null;
     const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
     const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
-    const ids = [...new Set(piRows.map((r) => r.id).concat(claiRows.map((r) => r.id)))];
+    const codexMap = Object.fromEntries(codexRows.map((r) => [r.id, r]));
+    const ids = [...new Set(
+      piRows.map((r) => r.id)
+        .concat(claiRows.map((r) => r.id))
+        .concat(codexRows.map((r) => r.id)),
+    )];
 
     refreshChartTitles("compare", undefined, ids.length);
-    $("chart-pass").setAttribute("viewBox", "0 0 320 150");
+    $("chart-pass").setAttribute("viewBox", three ? "0 0 480 150" : "0 0 320 150");
     if (scoringReady) {
-      const weights = sharedScoreWeights(claiM, piM);
-      const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+      const weights = three
+        ? sharedScoreWeights(claiM, piM, codexM)
+        : sharedScoreWeights(claiM, piM);
+      const wallCands = [claiM.avgWallMs, piM.avgWallMs]
+        .concat(three ? [codexM.avgWallMs] : [])
+        .filter((v) => v > 0);
       const tokCands = weights.bothTok
-        ? [claiM.avgTokens, piM.avgTokens].filter((v) => v != null && v > 0)
+        ? [claiM.avgTokens, piM.avgTokens]
+            .concat(three ? [codexM.avgTokens] : [])
+            .filter((v) => v != null && v > 0)
         : [];
       const costCands = weights.bothCost
-        ? [claiM.avgCost, piM.avgCost].filter((v) => v != null && v > 0)
+        ? [claiM.avgCost, piM.avgCost]
+            .concat(three ? [codexM.avgCost] : [])
+            .filter((v) => v != null && v > 0)
         : [];
       const refs = {
         bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
         bestAvgTok: tokCands.length ? Math.min.apply(null, tokCands) : null,
         bestAvgCost: costCands.length ? Math.min.apply(null, costCands) : null,
       };
-      renderScoreboard(claiM, piM, scoreHarness(claiM, refs, weights), scoreHarness(piM, refs, weights));
-      $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
+      const claiSc = scoreHarness(claiM, refs, weights);
+      const piSc = scoreHarness(piM, refs, weights);
+      if (three) {
+        renderScoreboard(claiM, piM, claiSc, piSc, codexM, scoreHarness(codexM, refs, weights));
+        $("chart-pass").innerHTML = tripleDonutSvg(claiM, piM, codexM);
+      } else {
+        renderScoreboard(claiM, piM, claiSc, piSc);
+        $("chart-pass").innerHTML = dualDonutSvg(claiM, piM);
+      }
     } else {
-      $("scoreboard").innerHTML =
-        '<div class="scoreboard-pending" style="color:var(--faint);font-size:13px;padding:8px 0">scoreboard when both finish</div>';
+      let pending =
+        pendingScoreCard("CLAI", claiM.totalWallMs) + pendingScoreCard("pi", piM.totalWallMs);
+      if (three) pending += pendingScoreCard("codex", codexM.totalWallMs);
+      $("scoreboard").innerHTML = pending;
+      $("compare-scores").innerHTML = "";
       const formula = $("score-formula");
-      if (formula) formula.textContent = "Composite pending until both harnesses finish";
+      if (formula) {
+        formula.textContent = three
+          ? "Composite pending until CLAI, pi, and Codex finish"
+          : "Composite pending until both harnesses finish";
+      }
       $("chart-pass").innerHTML =
-        '<text x="160" y="70" text-anchor="middle" fill="#808080" font-size="13">pass pies when both finish</text>';
+        '<text x="' + (three ? "240" : "160") + '" y="70" text-anchor="middle" fill="#808080" font-size="13">' +
+        (three ? "pass pies when all three finish" : "pass pies when both finish") +
+        "</text>";
     }
-    $("chart-dur").innerHTML = dualMetricsUnified(ids, claiMap, piMap);
+    $("chart-dur").innerHTML = three
+      ? tripleMetricsUnified(ids, claiMap, piMap, codexMap)
+      : dualMetricsUnified(ids, claiMap, piMap);
     $("chart-tok-box").classList.add("hidden");
     $("chart-cost-box").classList.add("hidden");
     const avgSvg = $("chart-avg");
     const avgBox = $("chart-avg-box");
     if (avgBox) avgBox.classList.remove("hidden");
     if (avgSvg) {
-      avgSvg.setAttribute("viewBox", "0 0 320 150");
-      avgSvg.innerHTML = avgGroupedSvg(claiM, piM);
+      avgSvg.setAttribute("viewBox", three ? "0 0 320 190" : "0 0 320 150");
+      avgSvg.innerHTML = three
+        ? avgGroupedSvg3(claiM, piM, codexM)
+        : avgGroupedSvg(claiM, piM);
     }
     return true;
   }
@@ -1375,6 +1768,7 @@
     }
     renderHistory();
     refreshChartsFromBestSource();
+    syncStage();
     const detail = $("run-detail");
     detail.className = "detail open";
     detail.innerHTML = '<span class="empty">loading ' + esc(id) + "…</span>";
@@ -1448,34 +1842,52 @@
     }
   }
 
-  function pickWinner(claiScore, piScore, claiComposite, piComposite) {
+  function pickWinner(claiScore, piScore, claiComposite, piComposite, codexScore, codexComposite) {
     if (!claiScore || !claiScore.total) {
-      return { who: "none", reason: "CLAI data unavailable — run pnpm bench:compare-pi with a history run or COMPARE_CLAI=1" };
+      return {
+        who: "none",
+        reason: "CLAI data unavailable — run pnpm bench:compare-all (or compare-pi) with a history run or COMPARE_CLAI=1",
+      };
     }
+    const three = !!(codexScore && codexComposite);
     if (claiComposite != null && piComposite != null) {
-      const c = claiComposite.total;
-      const p = piComposite.total;
-      if (c > p + 0.05) {
-        return {
-          who: "clai",
-          reason: "composite " + c.toFixed(1) + " vs " + p.toFixed(1) +
-            " (pass " + fmtPct(claiScore.rate) + " / " + fmtPct(piScore.rate) + ")",
-        };
+      const entries = [
+        { who: "clai", total: claiComposite.total, rate: claiScore.rate },
+        { who: "pi", total: piComposite.total, rate: piScore.rate },
+      ];
+      if (three) {
+        entries.push({ who: "codex", total: codexComposite.total, rate: codexScore.rate });
       }
-      if (p > c + 0.05) {
+      const max = Math.max.apply(null, entries.map((e) => e.total));
+      const leaders = entries.filter((e) => e.total >= max - 0.05);
+      if (leaders.length === 1) {
+        const w = leaders[0];
+        const others = entries
+          .filter((e) => e.who !== w.who)
+          .map((e) => e.total.toFixed(1))
+          .join(" / ");
+        const rates = entries.map((e) => fmtPct(e.rate)).join(" / ");
         return {
-          who: "pi",
-          reason: "composite " + p.toFixed(1) + " vs " + c.toFixed(1) +
-            " (pass " + fmtPct(piScore.rate) + " / " + fmtPct(claiScore.rate) + ")",
+          who: w.who,
+          reason: "composite " + w.total.toFixed(1) + " vs " + others + " (pass " + rates + ")",
         };
       }
       return {
         who: "tie",
-        reason: "composite " + c.toFixed(1) + " each · pass " + fmtPct(claiScore.rate),
+        reason: "composite " + max.toFixed(1) + " band · pass " +
+          entries.map((e) => fmtPct(e.rate)).join(" / "),
       };
     }
-    if (claiScore.rate > piScore.rate) return { who: "clai", reason: "higher pass rate" };
-    if (piScore.rate > claiScore.rate) return { who: "pi", reason: "higher pass rate" };
+    const rates = [
+      { who: "clai", rate: claiScore.rate },
+      { who: "pi", rate: piScore.rate },
+    ];
+    if (three) rates.push({ who: "codex", rate: codexScore.rate });
+    const maxRate = Math.max.apply(null, rates.map((e) => e.rate));
+    const rateLeaders = rates.filter((e) => e.rate >= maxRate - 1e-9);
+    if (rateLeaders.length === 1) {
+      return { who: rateLeaders[0].who, reason: "higher pass rate" };
+    }
     return { who: "tie", reason: "identical pass rate" };
   }
 
@@ -1483,53 +1895,79 @@
     return s === "pass" || s === "fail" || s === "error";
   }
 
-  /** Both harnesses have the same task ids, all in a terminal status. */
+  function repairSparseHarnessRows(c, key, harness, scoreKey) {
+    const clai = (c.clai || []).filter(Boolean);
+    let rows = (c[key] || []).slice();
+    if (!rows.some((r) => !r) || !clai.length) return;
+    rows = clai.map((cr, i) => {
+      const r = rows[i];
+      if (r && r.id) return r;
+      const byId = rows.find((x) => x && x.id === cr.id);
+      if (byId) return byId;
+      return {
+        id: cr.id,
+        harness,
+        status: "error",
+        wallMs: 0,
+        detail: "aborted",
+        tokensIn: 0,
+        tokensOut: 0,
+        cost: 0,
+      };
+    });
+    c[key] = rows;
+    c[scoreKey] = {
+      pass: rows.filter((r) => r.status === "pass").length,
+      fail: rows.filter((r) => r.status === "fail").length,
+      err: rows.filter((r) => r.status === "error").length,
+      total: rows.length,
+      rate: rows.length ? rows.filter((r) => r.status === "pass").length / rows.length : 0,
+    };
+  }
+
+  /** Repair sparse/null slots left by a hard kill before finalize. */
   function fillMissingCompareRows(c) {
     if (!c || c.partial === true) return c;
     if (job.status === "running" || job.status === "stopping") return c;
-    const clai = (c.clai || []).filter(Boolean);
-    let pi = (c.pi || []).slice();
-    // Repair sparse/null pi slots left by a hard kill before finalize.
-    if (pi.some((r) => !r) && clai.length) {
-      pi = clai.map((cr, i) => {
-        const r = pi[i];
-        if (r && r.id) return r;
-        const byId = pi.find((x) => x && x.id === cr.id);
-        if (byId) return byId;
-        return {
-          id: cr.id,
-          harness: "pi",
-          status: "error",
-          wallMs: 0,
-          detail: "aborted",
-          tokensIn: 0,
-          tokensOut: 0,
-          cost: 0,
-        };
-      });
-      c.pi = pi;
-      c.piScore = {
-        pass: pi.filter((r) => r.status === "pass").length,
-        fail: pi.filter((r) => r.status === "fail").length,
-        err: pi.filter((r) => r.status === "error").length,
-        total: pi.length,
-        rate: pi.length ? pi.filter((r) => r.status === "pass").length / pi.length : 0,
-      };
+    repairSparseHarnessRows(c, "pi", "pi", "piScore");
+    if (isThreeWay(c)) {
+      repairSparseHarnessRows(c, "codex", "codex", "codexScore");
     }
     return c;
   }
 
-  function bothHarnessesComplete(c) {
+  function harnessSideComplete(rows, refIds) {
+    const list = (rows || []).filter(Boolean);
+    if (!list.length || list.length !== refIds.length) return false;
+    if (!list.every((r) => isTerminalCompareStatus(r.status))) return false;
+    const ids = new Set(list.map((r) => r.id));
+    for (const id of refIds) {
+      if (!ids.has(id)) return false;
+    }
+    return true;
+  }
+
+  /** All required harnesses have the same task ids, all in a terminal status. */
+  function allHarnessesComplete(c) {
     const clai = ((c && c.clai) || []).filter(Boolean);
     const pi = ((c && c.pi) || []).filter(Boolean);
     if (!clai.length || !pi.length || clai.length !== pi.length) return false;
     if (!clai.every((r) => isTerminalCompareStatus(r.status))) return false;
     if (!pi.every((r) => isTerminalCompareStatus(r.status))) return false;
+    const claiIds = clai.map((r) => r.id);
     const piIds = new Set(pi.map((r) => r.id));
-    for (const r of clai) {
-      if (!piIds.has(r.id)) return false;
+    for (const id of claiIds) {
+      if (!piIds.has(id)) return false;
+    }
+    if (isThreeWay(c)) {
+      return harnessSideComplete(c.codex, claiIds);
     }
     return true;
+  }
+
+  // Back-compat alias
+  function bothHarnessesComplete(c) {
+    return allHarnessesComplete(c);
   }
 
   /**
@@ -1539,7 +1977,7 @@
   function isCompareScoringReady(c) {
     if (!c) return false;
     if (c.partial === true) return false;
-    return bothHarnessesComplete(c);
+    return allHarnessesComplete(c);
   }
 
   function statusCell(row) {
@@ -1550,10 +1988,38 @@
     );
   }
 
+  function pendingScoreCard(label, totalWallMs) {
+    return (
+      '<div class="score-card">' +
+        '<div class="name">' + esc(label) + " composite / 100</div>" +
+        '<div class="big" style="color:var(--faint)">—</div>' +
+        '<div class="avg">' +
+          "<div>total time <strong>" + fmtMinutes(totalWallMs) + "</strong></div>" +
+          '<div style="color:var(--faint)">composite pending</div>' +
+        "</div></div>"
+    );
+  }
+
+  function finishedScoreCard(label, score, m, composite, isWinner) {
+    return (
+      '<div class="compare-score' + (isWinner ? " winner" : "") + '">' +
+        '<div class="label">' + esc(label) + "</div>" +
+        '<div class="value ' + rateClass(score.rate) + '">' +
+          (score.pass || 0) + "/" + (score.total || 0) +
+          ' <span style="font-size:12px;font-weight:600">(' + fmtPct(score.rate) + ")</span></div>" +
+        '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
+          fmtMinutes(m.totalWallMs) + "</strong></div>" +
+        '<div style="margin-top:4px;font-size:12px;color:var(--muted)">composite <strong style="color:var(--text)">' +
+          composite.total.toFixed(1) + "</strong>/100</div>" +
+      "</div>"
+    );
+  }
+
   function renderCompare(skipCharts) {
     const panel = $("compare-panel");
     if (!compare) {
       panel.style.display = "none";
+      syncStage();
       return;
     }
     // Browsing a non-compare history row: don't repaint stale CLAI-vs-pi winner.
@@ -1564,75 +2030,119 @@
     panel.style.display = "block";
     compare = fillMissingCompareRows(compare);
 
+    const three = isThreeWay(compare);
     const claiRows = (compare.clai || []).filter(Boolean);
     const piRows = (compare.pi || []).filter(Boolean);
+    const codexRows = three ? (compare.codex || []).filter(Boolean) : [];
     const scoringReady = isCompareScoringReady(compare);
     const compareRunning =
       (job.status === "running" || job.status === "stopping") && job.kind === "compare";
 
-    $("compare-meta").innerHTML =
-      "<span>model <strong>" + esc(compare.piProvider) + " / " + esc(compare.piModel) + "</strong></span>" +
-      "<span>generated <strong>" + esc((compare.at || "").replace("T", " ").slice(0, 19)) + "</strong></span>" +
-      (compare.claiLabel
-        ? "<span>CLAI source <strong>" + esc(compare.claiLabel) + "</strong></span>"
-        : "") +
-      "<span>mode <strong>parallel</strong> — CLAI + pi together</span>" +
-      (compare.sideParallel != null
-        ? "<span>workers <strong>" + esc(compare.sideParallel) + " each</strong>" +
-          (compare.compareParallel != null ? " (req " + esc(compare.compareParallel) + ")" : "") +
-          "</span>"
-        : "") +
-      (compare.stopped
-        ? '<span style="color:var(--warning)">stopped early</span>'
-        : "") +
-      (compareRunning
-        ? "<span>progress <strong>" + claiRows.length + " clai · " + piRows.length + " pi</strong> rows</span>"
-        : "");
+    // PRIMARY meta: progress · workers · model — verbose bits go to #compare-meta-extra
+    let metaHtml = "";
+    if (compareRunning) {
+      metaHtml +=
+        "<span>progress <strong>" +
+        claiRows.length + " clai · " + piRows.length + " pi" +
+        (three ? " · " + codexRows.length + " codex" : "") +
+        "</strong></span>";
+    }
+    if (compare.sideParallel != null) {
+      metaHtml +=
+        "<span>workers <strong>" + esc(compare.sideParallel) + " each</strong></span>";
+    }
+    metaHtml +=
+      "<span>pi <strong>" + esc(compare.piModel || compare.piProvider || "—") + "</strong></span>";
+    if (three) {
+      metaHtml +=
+        "<span>codex <strong>" +
+        esc(compare.codexModel || compare.codexProfile || "—") +
+        "</strong></span>";
+    }
+    if (compare.stopped) {
+      metaHtml += '<span style="color:var(--warning)">stopped early</span>';
+    }
+    $("compare-meta").innerHTML = metaHtml;
 
+    const extra = $("compare-meta-extra");
+    if (extra) {
+      extra.innerHTML =
+        "<span>generated <strong>" + esc((compare.at || "").replace("T", " ").slice(0, 19)) + "</strong></span>" +
+        (compare.claiLabel
+          ? "<span>CLAI source <strong>" + esc(compare.claiLabel) + "</strong></span>"
+          : "") +
+        "<span>mode <strong>" + (three ? "three-way" : "dual") + "</strong></span>" +
+        (compare.compareParallel != null
+          ? "<span>req parallel <strong>" + esc(compare.compareParallel) + "</strong></span>"
+          : "") +
+        (compare.piProvider
+          ? "<span>pi provider <strong>" + esc(compare.piProvider) + "</strong></span>"
+          : "");
+    }
+
+    const pill = $("compare-mode-pill");
+    if (pill) {
+      pill.textContent = three ? "three-way" : "dual";
+      pill.classList.remove("hidden");
+    }
+
+    $("compare-scores").innerHTML = "";
     const winEl = $("compare-winner");
     if (!scoringReady) {
-      // Freeze winner + composite while either harness is still finishing tasks.
-      // Still show live total wall sums so progress is visible.
       const liveClai = harnessMetrics(claiRows);
       const livePi = harnessMetrics(piRows);
+      const liveCodex = three ? harnessMetrics(codexRows) : null;
       winEl.className = "winner-callout tie";
       winEl.textContent = compare.stopped
         ? "Stopped — filling remaining tasks as aborted…"
-        : "Scoring when both harnesses finish…";
-      $("compare-scores").innerHTML =
-        '<div class="compare-score">' +
-          '<div class="label">CLAI</div>' +
-          '<div class="value" style="color:var(--faint)">—</div>' +
-          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
-            fmtMinutes(liveClai.totalWallMs) + "</strong></div>" +
-          '<div style="margin-top:4px;font-size:12px;color:var(--faint)">composite pending</div>' +
-        "</div>" +
-        '<div class="compare-score">' +
-          '<div class="label">pi</div>' +
-          '<div class="value" style="color:var(--faint)">—</div>' +
-          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
-            fmtMinutes(livePi.totalWallMs) + "</strong></div>" +
-          '<div style="margin-top:4px;font-size:12px;color:var(--faint)">composite pending</div>' +
-        "</div>";
+        : (three
+          ? "Scoring when all three harnesses finish…"
+          : "Scoring when both harnesses finish…");
+      let pending = pendingScoreCard("CLAI", liveClai.totalWallMs) + pendingScoreCard("pi", livePi.totalWallMs);
+      if (three) pending += pendingScoreCard("codex", liveCodex.totalWallMs);
+      $("scoreboard").innerHTML = pending;
+      const formula = $("score-formula");
+      if (formula) {
+        formula.textContent = three
+          ? "Composite pending until CLAI, pi, and Codex finish"
+          : "Composite pending until both harnesses finish";
+      }
     } else {
       const claiScore = compare.claiScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
       const piScore = compare.piScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 };
+      const codexScore = three
+        ? (compare.codexScore || { pass: 0, total: 0, rate: 0, fail: 0, err: 0 })
+        : null;
       const claiM = harnessMetrics(claiRows);
       const piM = harnessMetrics(piRows);
-      const weights = sharedScoreWeights(claiM, piM);
-      const wallCands = [claiM.avgWallMs, piM.avgWallMs].filter((v) => v > 0);
+      const codexM = three ? harnessMetrics(codexRows) : null;
+      const weights = three
+        ? sharedScoreWeights(claiM, piM, codexM)
+        : sharedScoreWeights(claiM, piM);
+      const wallCands = [claiM.avgWallMs, piM.avgWallMs]
+        .concat(three ? [codexM.avgWallMs] : [])
+        .filter((v) => v > 0);
+      const tokCands = weights.bothTok
+        ? [claiM.avgTokens, piM.avgTokens]
+            .concat(three ? [codexM.avgTokens] : [])
+            .filter((v) => v != null && v > 0)
+        : [];
+      const costCands = weights.bothCost
+        ? [claiM.avgCost, piM.avgCost]
+            .concat(three ? [codexM.avgCost] : [])
+            .filter((v) => v != null && v > 0)
+        : [];
       const refs = {
         bestAvgWall: wallCands.length ? Math.min.apply(null, wallCands) : 1,
-        bestAvgTok: weights.bothTok
-          ? Math.min(claiM.avgTokens, piM.avgTokens)
-          : null,
-        bestAvgCost: weights.bothCost
-          ? Math.min(claiM.avgCost, piM.avgCost)
-          : null,
+        bestAvgTok: tokCands.length ? Math.min.apply(null, tokCands) : null,
+        bestAvgCost: costCands.length ? Math.min.apply(null, costCands) : null,
       };
       const claiComposite = scoreHarness(claiM, refs, weights);
       const piComposite = scoreHarness(piM, refs, weights);
-      const winner = pickWinner(claiScore, piScore, claiComposite, piComposite);
+      const codexComposite = three ? scoreHarness(codexM, refs, weights) : null;
+      const winner = pickWinner(
+        claiScore, piScore, claiComposite, piComposite, codexScore, codexComposite,
+      );
 
       const stoppedNote = compare.stopped ? " (stopped early — remaining counted aborted)" : "";
       if (winner.who === "none") {
@@ -1648,45 +2158,48 @@
           esc(winner.reason) + esc(stoppedNote);
       }
 
-      const claiWin = winner.who === "clai";
-      const piWin = winner.who === "pi";
-      $("compare-scores").innerHTML =
-        '<div class="compare-score' + (claiWin ? " winner" : "") + '">' +
-          '<div class="label">CLAI</div>' +
-          '<div class="value ' + rateClass(claiScore.rate) + '">' +
-            (claiScore.pass || 0) + "/" + (claiScore.total || 0) +
-            ' <span style="font-size:12px;font-weight:600">(' + fmtPct(claiScore.rate) + ")</span></div>" +
-          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
-            fmtMinutes(claiM.totalWallMs) + "</strong></div>" +
-          '<div style="margin-top:4px;font-size:12px;color:var(--muted)">composite <strong style="color:var(--text)">' +
-            claiComposite.total.toFixed(1) + "</strong>/100</div>" +
-        "</div>" +
-        '<div class="compare-score' + (piWin ? " winner" : "") + '">' +
-          '<div class="label">pi</div>' +
-          '<div class="value ' + rateClass(piScore.rate) + '">' +
-            (piScore.pass || 0) + "/" + (piScore.total || 0) +
-            ' <span style="font-size:12px;font-weight:600">(' + fmtPct(piScore.rate) + ")</span></div>" +
-          '<div style="margin-top:6px;font-size:12px;color:var(--muted)">total time <strong style="color:var(--text)">' +
-            fmtMinutes(piM.totalWallMs) + "</strong></div>" +
-          '<div style="margin-top:4px;font-size:12px;color:var(--muted)">composite <strong style="color:var(--text)">' +
-            piComposite.total.toFixed(1) + "</strong>/100</div>" +
-        "</div>";
+      if (three) {
+        renderScoreboard(claiM, piM, claiComposite, piComposite, codexM, codexComposite);
+      } else {
+        renderScoreboard(claiM, piM, claiComposite, piComposite);
+      }
+    }
+
+    if (compareRunning) {
+      const cf = $("compare-fold");
+      if (cf) cf.open = true;
     }
 
     // Task table + wall bars always update from streaming compare rows.
     const claiMap = Object.fromEntries(claiRows.map((r) => [r.id, r]));
     const piMap = Object.fromEntries(piRows.map((r) => [r.id, r]));
-    const ids = [...new Set([...piRows.map((r) => r.id), ...claiRows.map((r) => r.id)])];
+    const codexMap = Object.fromEntries(codexRows.map((r) => [r.id, r]));
+    const ids = [...new Set([
+      ...piRows.map((r) => r.id),
+      ...claiRows.map((r) => r.id),
+      ...codexRows.map((r) => r.id),
+    ])];
+
+    const theadRow = panel.querySelector("#compare-fold thead tr");
+    if (theadRow) {
+      theadRow.innerHTML = three
+        ? "<th>task</th><th>clai</th><th>pi</th><th>codex</th><th>notes</th>"
+        : "<th>task</th><th>clai</th><th>pi</th><th>notes</th>";
+    }
 
     $("compare-body").innerHTML = ids.map((id) => {
-      const note = [claiMap[id]?.detail && "clai: " + claiMap[id].detail, piMap[id]?.detail && "pi: " + piMap[id].detail]
-        .filter(Boolean)
-        .join(" · ");
+      const noteParts = [
+        claiMap[id]?.detail && "clai: " + claiMap[id].detail,
+        piMap[id]?.detail && "pi: " + piMap[id].detail,
+      ];
+      if (three) noteParts.push(codexMap[id]?.detail && "codex: " + codexMap[id].detail);
+      const note = noteParts.filter(Boolean).join(" · ");
       return (
         "<tr>" +
           "<td>" + esc(id) + "</td>" +
           "<td>" + statusCell(claiMap[id]) + "</td>" +
           "<td>" + statusCell(piMap[id]) + "</td>" +
+          (three ? "<td>" + statusCell(codexMap[id]) + "</td>" : "") +
           "<td style=\"color:var(--muted);font-size:11px;max-width:280px\">" +
             (note ? esc(note.length > 160 ? note.slice(0, 159) + "…" : note) : "—") +
           "</td>" +
@@ -1698,14 +2211,17 @@
     if (foldSum) {
       const cPass = claiRows.filter((r) => r.status === "pass").length;
       const pPass = piRows.filter((r) => r.status === "pass").length;
+      const xPass = codexRows.filter((r) => r.status === "pass").length;
       foldSum.textContent =
         "Task results (" + ids.length + ") — CLAI " + cPass + "/" + claiRows.length +
-        " · pi " + pPass + "/" + piRows.length;
+        " · pi " + pPass + "/" + piRows.length +
+        (three ? " · codex " + xPass + "/" + codexRows.length : "");
     }
     // Avoid pass-rate pie / composite chart thrash while rows are still streaming.
     if (!skipCharts && (scoringReady || !compareRunning)) {
       refreshChartsFromBestSource();
     }
+    syncStage();
   }
 
   async function hydrateClaiTokens() {
@@ -1832,7 +2348,7 @@
         : "idle";
     } else {
       const elapsed = job.startedAt ? fmtMinutes(Date.now() - Date.parse(job.startedAt)) : "";
-      const compareHint = job.kind === "compare" ? " · CLAI+pi" : "";
+      const compareHint = job.kind === "compare" ? " · CLAI+pi+codex" : "";
       meta.innerHTML =
         "<strong>" + esc(job.status) + "</strong> · " + esc(job.kind || "") +
         compareHint +
@@ -1844,6 +2360,7 @@
     } else if (job.status !== "idle") {
       $("job-err").textContent = "";
     }
+    syncStage();
   }
 
   async function startJob(kind) {
@@ -1862,7 +2379,7 @@
       const payload = {
         kind,
         limit,
-        parallel: kind === "compare" ? Math.max(workers * 2, workers) : workers,
+        parallel: kind === "compare" ? Math.max(workers * 3, workers) : workers,
         freshClai: kind === "compare" ? true : undefined,
       };
       if (kind === "compare") payload.sideParallel = workers;
@@ -1995,6 +2512,7 @@
 
   renderLive();
   renderJob();
+  syncStage();
   loadTaskCatalog();
   loadRuns().then(() => refreshChartsFromBestSource());
   loadCompare();
