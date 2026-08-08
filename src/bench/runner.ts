@@ -445,12 +445,17 @@ Flow: read → edit/write → bash {command:"node check.mjs"}; stop on exit 0. M
       trace,
       signal: checkAbort.signal,
       onStatus: (status) => {
-        const m = /waiting (\d+)s/.exec(status.label);
-        ctx.onRateLimit?.({
-          label: status.label,
-          detail: status.detail,
-          retryInSec: m ? Number(m[1]) : undefined,
-        });
+        const isRateLimit = /quota|rate.?limit|waiting \d+s|provider hiccup|rate limited/i.test(
+          status.label,
+        );
+        if (isRateLimit) {
+          const m = /waiting (\d+)s/.exec(status.label);
+          ctx.onRateLimit?.({
+            label: status.label,
+            detail: status.detail,
+            retryInSec: m ? Number(m[1]) : undefined,
+          });
+        }
         ctx.onProgress({
           error: status.level === "error" ? status.label : undefined,
         });
