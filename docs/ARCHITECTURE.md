@@ -15,10 +15,10 @@ This document is a visual and structural map of how CLAI is organized, how a run
 | **Memory** | SQLite/JSON with provenance + invalidation | Session history; durable memory is convention/prompt |
 | **Context** | Budgeted `assemble()` + deterministic history compaction | Compaction + prompt; no harness memory plane |
 | **Subagents** | `task` tool — `explore` (read-only) / `general` (+bash); bounded summary return | Sub-agents, multi-session |
-| **Benchmarks** | Built-in 81-task bench + live SSE dashboard + CLAI vs pi compare | Community evals; no first-party harness bench |
+| **Benchmarks** | Built-in 81-task bench + live SSE dashboard + CLAI vs pi vs Codex compare | Community evals; no first-party harness bench |
 | **Done means** | Designed: `PASS \| FAIL \| BLOCKED` + evidence *(verify seam scaffolded)* | Model `stop` finish reason — tests are advisory |
 | **Trace** | Append-only JSONL under `.clai/traces/<runId>/` | Session store + share links |
-| **UI** | Ink ADE pane (`UiBus` → TUI or headless) | SolidJS/OpenTUI; event bus across threads |
+| **UI** | Ink ADE pane (`UiBus` → TUI, headless, or `clai chat` log) | SolidJS/OpenTUI; event bus across threads |
 | **Providers** | Vercel AI SDK registry (`src/adapter/providers.ts`) | 75+ via Models.dev |
 
 ---
@@ -29,15 +29,17 @@ This document is a visual and structural map of how CLAI is organized, how a run
 flowchart TB
   subgraph Human["Human surface"]
     TUI["Ink ADE TUI<br/>activity · plan · approvals · strip"]
+    Chat["clai chat log printer<br/>tools · I/O · tokens · ctx %"]
     Headless["Headless printer<br/>CLAI_NO_TUI=1 / CI"]
     Dashboard["Bench dashboard<br/>:4310 SSE"]
     UiBus["UiBus event API"]
     TUI --> UiBus
+    Chat --> UiBus
     Headless --> UiBus
   end
 
   subgraph CLI["clai CLI"]
-    Entry["cli.tsx<br/>launch · run · demo · intake · memory · bench"]
+    Entry["cli.tsx<br/>launch · run · chat · demo · intake · memory · bench · glass"]
     WS["workspace.ts<br/>root · .clai paths"]
     Entry --> WS
   end
@@ -45,7 +47,7 @@ flowchart TB
   subgraph Harness["Harness plane"]
   direction TB
     Adapter["adapter/<br/>AI SDK loop · retry · compaction"]
-    Context["context/<br/>assemble() · compactHistory()"]
+    Context["context/<br/>assemble() · compactHistory() · prompt-clean"]
     Memory["memory/<br/>SQLite / JSON store"]
     Agents["agents/<br/>task · explore / general"]
     Verify["verify/<br/>completion contract (scaffold)"]
@@ -74,7 +76,7 @@ flowchart TB
 
   subgraph Bench["Benchmark plane"]
     Runner["bench/runner.ts"]
-    Compare["bench/compare-pi.ts<br/>CLAI vs pi race"]
+    Compare["bench/compare-*.ts<br/>pi · codex · all · agy"]
     Server["bench/server.ts<br/>SSE + jobs"]
     Store["bench/store.ts<br/>history.jsonl"]
     Runner --> Store
@@ -148,7 +150,7 @@ Every session is anchored to a single resolved **workspace root** (`src/workspac
 ```mermaid
 flowchart TD
   A["argv parsing<br/>parseEntry()"] --> B{"First token?"}
-  B -->|reserved word| C["subcommand<br/>run · demo · bench · …"]
+  B -->|reserved word| C["subcommand<br/>run · chat · demo · bench · …"]
   B -->|path| D["workspaceInput"]
   C --> E["--cwd wins over positional"]
   D --> E
@@ -164,7 +166,7 @@ flowchart TD
 | `Workspace.tracesDir` | `<dataDir>/traces` | Per-run JSONL directories |
 | `Workspace.isGitRepo` | `.git` present | Intake git summary; non-fatal note if absent |
 
-**Subcommand vs path tie-breaker:** bare words `run`, `demo`, `intake`, `memory`, `bench`, `help` are subcommands. Anything else is a folder path. Use `clai -- demo` or `clai --cwd demo` when the folder name collides with a subcommand.
+**Subcommand vs path tie-breaker:** bare words `run`, `chat`, `demo`, `intake`, `memory`, `bench`, `glass`, `help` are subcommands. Anything else is a folder path. Use `clai -- demo` or `clai --cwd demo` when the folder name collides with a subcommand.
 
 ---
 
@@ -174,6 +176,7 @@ flowchart TD
 |---------|---------|-------------|
 | `clai` / `clai <folder>` | Yes | Interactive Ink session on the workspace root |
 | `clai run "<prompt>"` | Yes | Single-turn (headless) or first-turn + interactive (TTY) |
+| `clai chat ["<prompt>"]` | Yes | Verbose log-mode session — tools, I/O, tokens, cost, `ctx %` on stdout; multi-turn stdin |
 | `clai demo` | No | Offline edit+bash on `fixtures/tiny-edit` |
 | `clai demo lsp` | No | Offline intake + LSP diagnostics on `fixtures/lsp-ts` |
 | `clai demo injection` | No | Red-team memory/context assembly demo |
@@ -182,18 +185,20 @@ flowchart TD
 | `clai memory list\|get\|set\|delete\|export` | No | Harness memory store CLI |
 | `clai bench run\|serve\|list` | Optional | 81-task benchmark suite + live dashboard |
 
+**Smart context** is always on in chat / run / TUI: prompt clean, mid-turn history compact, parallel task-result fold, overflow compact+retry. Status lines show `prompt cleaned` / `compacted context` / `folded task results`; metrics show `ctx N%`.
+
 Heavy modules (`adapter`, `sandbox`, `bench`, `memory`) are **lazy-imported** so `clai --help` stays fast.
 
 ---
 
 ## Run lifecycle
 
-### Interactive session (`clai` / `clai run`)
+### Interactive session (`clai` / `clai run` / `clai chat`)
 
 ```mermaid
 sequenceDiagram
   participant U as Operator
-  participant UI as UiBus / TUI
+  participant UI as UiBus / TUI / chat log
   participant A as adapter loop
   participant C as compactHistory
   participant I as repo_intake
@@ -202,16 +207,16 @@ sequenceDiagram
   participant LLM as Provider
   participant TR as trace JSONL
 
-  U->>UI: clai / clai run "fix the test"
+  U->>UI: clai / clai run / clai chat
   UI->>TR: run_start
   loop each user turn
     A->>I: ensureIntake (once) → summary seed
-    A->>C: compactHistory if over token threshold
+    A->>C: compactHistory if over soft/hard threshold
     C-->>A: digest or unchanged messages
     loop maxSteps (default 12)
       A->>LLM: messages + tools + system policy
-      LLM-->>A: text / tool_calls
-      A->>UI: assistant / tool rows / metrics
+      LLM-->>A: text / thinking / tool_calls
+      A->>UI: assistant / thinking / tool rows / metrics
       A->>TR: model_step
       opt tool call
         alt task delegation
@@ -237,12 +242,14 @@ sequenceDiagram
 |-------|--------|-------|
 | Intake summary seed | **Wired** | First turn runs `repo_intake`; product one-liner appended to system context |
 | `ContextManager.assemble()` | **Wired for glass observability** | Emits `context_stage` into the run trace each turn; prompt injection remains opt-in (`injectAssembledContext`) |
-| `compactHistory()` | **Wired** | Triggers at ~45k estimated tokens; keeps original task + last N messages |
+| `compactHistory()` | **Wired** | Soft trigger ≈ `min(CLAI_COMPACT_THRESHOLD_TOKENS, window×soft)`; hard ≈ window×hard; keeps original task + last N messages |
+| Prompt clean | **Wired** | Strips filler from the user turn; `CLAI_PROMPT_CLEAN=0` disables |
 | Multi-tool-call parallelism | **Wired** | AI SDK runs multiple tool calls in one step concurrently |
 | `task` subagent | **Wired** | `explore` (read-only) or `general` (+bash); multiple `task` calls parallelize |
 | Background shells | **Wired** | `bash_bg` / `bash_jobs` / `bash_output` / `bash_kill` via `ShellJobManager` |
 | Provider retry | **Wired** | 429/5xx backoff with jitter; quota waits ~60s |
 | Tool arg repair | **Wired** | Groq-ish schema mistakes repaired or nudged once |
+| `toolProfile` | **Wired** | `"full"` (default, includes `task`) vs `"coding"` (lean set for bench fairness vs peers) |
 | Verification gate | **Scaffold** | `verify/` exports empty; loop uses soft completion |
 
 ---
@@ -251,20 +258,26 @@ sequenceDiagram
 
 ```
 src/
-├── cli.tsx              # Entry: launch, run, demo, intake, memory, bench, glass
+├── cli.tsx              # Entry: launch, run, chat, demo, intake, memory, bench, glass
 ├── workspace.ts         # Workspace root resolution + argv parsing
 ├── adapter/
-│   ├── index.ts         # runAgentLoop(), resolveModel(), system policy
+│   ├── index.ts         # runAgentLoop(), resolveModel(), system policy, toolProfile
 │   ├── providers.ts     # Pluggable Vercel AI SDK provider registry
 │   ├── retry.ts         # 429/5xx exponential backoff
 │   └── env.ts           # .env loading
 ├── agents/
+│   ├── index.ts         # Re-exports
 │   └── task.ts          # explore/general subagent + `task` AI SDK tool
+├── chat/
+│   └── index.ts         # `clai chat` entry → session loop + log printer
+├── session/
+│   └── interactive.ts   # Shared multi-turn chat/log loop (runChatLoop)
 ├── tools/
 │   ├── index.ts         # grep, glob, read, edit, write, bash, parallel, LSP, intake
 │   ├── bg-shell.ts      # bash_bg / bash_jobs / bash_output / bash_kill
 │   ├── common.ts        # workspace path confinement, tool events
 │   ├── limits.ts        # Model-facing output caps (single truncation layer)
+│   ├── log-preview.ts   # Cap-aware previews for chat log / tool events
 │   ├── lsp.ts           # TS Language Service + Python pyright
 │   └── intake.ts        # Repository map scanner
 ├── shell/
@@ -272,7 +285,9 @@ src/
 ├── context/
 │   ├── index.ts         # ContextManager.assemble() + ablation gates + stage emit
 │   ├── stages.ts        # context_stage types + flag heuristics
-│   └── compact.ts       # Deterministic history compaction
+│   ├── compact.ts       # Deterministic history compaction
+│   ├── prompt-clean.ts  # User-prompt filler stripping
+│   └── windows.ts       # Per-provider/model window + soft/hard thresholds
 ├── memory/
 │   ├── index.ts         # SQLite / JSON tiered store
 │   └── cli.ts           # memory list|get|set|delete|export
@@ -286,25 +301,37 @@ src/
 ├── glass/
 │   └── cli.ts           # `clai glass` entry
 ├── ui-glass/
+│   ├── index.ts         # Glass package entry
 │   ├── app.tsx          # Ink glass pane (reuses ui/theme.ts)
 │   └── model.ts         # Stage row reducer
 ├── ui/
+│   ├── index.tsx        # Public facade: bus, shell, headless, log, session-log
 │   ├── events.ts        # UiBus + typed UiEvent union
 │   ├── state.ts         # reduceUiEvent → UiState
 │   ├── app.tsx          # Ink ClaiApp shell
 │   ├── bridge.ts        # Tool plane → UiBus adapter
 │   ├── headless.ts      # CLAI_NO_TUI / non-TTY printer
+│   ├── log.ts           # Verbose stdout printer for `clai chat`
+│   ├── session-log.ts   # TUI → <traceDir>/session.jsonl
+│   ├── scroll.ts        # Line-based transcript windowing
 │   ├── components.tsx   # Activity, footer, plan, tool rows
 │   ├── theme.ts         # Colors, glyphs, wordmark
 │   └── mouse.ts         # SGR mouse / alt-screen helpers
 ├── bench/
 │   ├── index.ts         # runBenchCli entry
-│   ├── runner.ts        # Parallel task execution + check.mjs
+│   ├── runner.ts        # Parallel task execution + check.mjs (toolProfile=coding)
 │   ├── server.ts        # Live dashboard (node:http + SSE)
-│   ├── store.ts         # history.jsonl + LiveRunFeed
+│   ├── store.ts         # history.jsonl + LiveRunFeed + compare archives
 │   ├── jobs.ts          # Dashboard-triggered clai / offline / compare jobs
 │   ├── types.ts         # BenchRunRecord, LiveSnapshot
-│   ├── compare-pi.ts    # CLAI vs pi race + scorecard (partial / sideParallel)
+│   ├── pricing.ts       # Token → USD estimates
+│   ├── compare-pi.ts    # CLAI vs pi race + scorecard
+│   ├── compare-codex.ts # CLAI vs Codex race
+│   ├── compare-all.ts   # CLAI vs pi vs Codex (dashboard compare default)
+│   ├── compare-agy.ts   # CLAI vs Antigravity `agy` (CLI-only)
+│   ├── scaffold-fixtures.ts / verify-fixtures.ts
+│   ├── task-catalog/    # Catalog sources for scaffold (TB / DeepSWE)
+│   ├── drive-*.ts       # Thin CLI drivers (list / offline / serve)
 │   └── dashboard.html   # Self-contained metrics + compare UI
 └── demo/
     ├── offline.ts       # No-API edit+bash happy path
@@ -317,6 +344,7 @@ src/
 ```mermaid
 flowchart LR
   JSONL["Session JSONL<br/>`.clai/traces/<runId>/events.jsonl`<br/><i>what happened</i>"]
+  SESS["Session UI log<br/>`.clai/traces/<runId>/session.jsonl`<br/><i>UiBus mirror (TUI)</i>"]
   BENCH["Bench history<br/>`.clai/bench/history.jsonl`<br/><i>eval runs</i>"]
   SQL["SQLite memory<br/>`.clai/memory.sqlite`<br/><i>what we believe now</i>"]
   ASM["Ephemeral assemble()<br/><i>one turn's prompt slice</i>"]
@@ -331,6 +359,7 @@ flowchart LR
 | Store | Owns | Mutability |
 |-------|------|------------|
 | **JSONL trace** | Messages, tool calls, approvals, costs, full truncated tool output | Append-only |
+| **session.jsonl** | UiBus mirror for TUI sessions (beside `events.jsonl`) | Append-only |
 | **Bench history** | Run records, aggregates, per-task metrics | Append-only |
 | **Memory DB** | Conventions, evidence, task notes | Invalidate / supersede |
 | **assemble()** | Prompt context for one model turn | Ephemeral |
@@ -356,7 +385,7 @@ flowchart LR
   RET --> LOOP
 ```
 
-Default provider: **Groq** (`GROQ_API_KEY`). Override with `CLAI_PROVIDER`.
+Default provider: **Groq** (`GROQ_API_KEY`). When `CLAI_PROVIDER` is unset, the first configured key wins with Groq preferred. Override with `CLAI_PROVIDER` / `CLAI_MODEL`.
 
 | `CLAI_PROVIDER` | Env key(s) | Default model |
 |-----------------|------------|---------------|
@@ -383,7 +412,7 @@ Retry policy (`retry.ts`): up to 4 retries on 429/5xx; quota errors wait ~60s ba
 
 | Tool | Role | Notes |
 |------|------|-------|
-| `grep` | Ripgrep JSON → Node fallback | Parallel-safe read-only; default 50 matches |
+| `grep` | Ripgrep JSON → Node fallback | Parallel-safe read-only; tool default 50 matches (model-facing cap 100) |
 | `glob` | fast-glob patterns | Workspace-confined; empty pattern → `**/*` |
 | `read` | File I/O with offset/limit | Head+tail truncation via `limits.ts` |
 | `parallel` | Batch ≤6 `grep`/`glob`/`read` | One combined result; prefer native multi-tool-call when possible |
@@ -424,11 +453,12 @@ Tool implementations return full results (with source-level safety caps). A **si
 | Cap | Value |
 |-----|-------|
 | `read` content | 8 KB (6 KB head + 2 KB tail) |
-| `grep` matches | 100 |
+| `grep` matches | 100 (tool default request: 50) |
 | `bash` stdout+stderr | 4 KB |
 | `glob` paths | 200 |
 | `lsp_*` items | 100 |
 | `task` summary | 2 KB to parent |
+| generic / other results | 16 KB serialized |
 
 ### LSP engines
 
@@ -448,11 +478,11 @@ CLAI has **two complementary context mechanisms**:
 
 ### 1. History compaction (`context/compact.ts`) — wired in main loop
 
-Smart, deterministic compaction (no extra model call):
+Smart, deterministic compaction (no extra model call). Thresholds come from `context/windows.ts` (per-provider window defaults; most 128k, anthropic 200k) plus env overrides:
 
 | Trigger | Behavior |
 |---------|----------|
-| Soft (~70% of model window, capped by `CLAI_COMPACT_THRESHOLD_TOKENS`) | Digest older turns between original task and last N messages |
+| Soft (`min(CLAI_COMPACT_THRESHOLD_TOKENS, window×soft)`; soft default 0.7, threshold default 45k) | Digest older turns between original task and last N messages |
 | Hard (~90% of window) / overflow error | Aggressive mode — keep fewer turns, tighter digests, one retry |
 | Parallel `task` results | Fold long summaries in-place; digest merges findings into one "Subagent findings" block |
 | Between tool rounds | Loop runs `maxSteps: 1` so compaction can run mid-turn |
@@ -478,6 +508,8 @@ flowchart TD
   BUD --> LABEL["Label UNTRUSTED_DATA vs TRUSTED_MEMORY"]
   LABEL --> OUT["systemExtras + excluded[] + staleInvalidations[]"]
 ```
+
+Ablation env: `CLAI_MEMORY_ENABLED=0` / `CLAI_STRUCTURAL_CITATIONS=0` turn gates off (default on).
 
 **OpenCode** records build/test/lint hints in project rules and relies on the model to run them. **CLAI** adds:
 
@@ -511,7 +543,7 @@ CLI: `clai memory list|get|set|delete|export` with `--tier`, `--cite`, `--supers
 | Mode | When | Behavior |
 |------|------|----------|
 | `runtime` | Native sandbox initializes | `wrapWithSandbox()` + scrubbed env |
-| `stub` | Windows ARM, missing binary, init timeout | Scrubbed env + approval hooks still apply |
+| `stub` | Windows ARM, missing binary, init timeout, or `CLAI_SANDBOX_MODE=stub` | Scrubbed env + approval hooks still apply |
 
 **Approval kinds** (deny-by-default unless `CLAI_AUTO_APPROVE=1`):
 
@@ -540,7 +572,7 @@ Append-only JSONL at `.clai/traces/<runId>/events.jsonl`.
 | `info` | compaction, provider_retry, subagent scope |
 | `context_stage` | ContextManager.assemble() stage start/complete (glass pane) |
 
-Every run gets an 8-char UUID prefix as `runId`. Bench tasks write separate traces per task under temp workspaces.
+Every run gets an 8-char UUID prefix as `runId`. Bench tasks write separate traces per task under temp workspaces. Interactive TUI sessions also append a UiBus mirror at `.clai/traces/<runId>/session.jsonl`.
 
 ### Glass pane (`clai glass`)
 
@@ -572,23 +604,27 @@ Reusable tailer: `src/trace/tail.ts`. Ink entry: `src/ui-glass/` (reuses `src/ui
 
 ```mermaid
 flowchart TB
-  Producers["adapter · tools · sandbox · verify · demo"]
+  Producers["adapter · tools · sandbox · verify · demo · session"]
   Bus["UiBus.emit(event)"]
   Reducer["reduceUiEvent → UiState"]
   Ink["Ink ClaiApp<br/>Header · Sidebar · Activity · Strip · Footer"]
+  ChatLog["clai chat attachLogPrinter"]
   HL["headless formatHeadlessEvent"]
+  SessLog["session.jsonl attachSessionLog"]
 
   Producers --> Bus
   Bus --> Reducer
   Reducer --> Ink
+  Bus --> ChatLog
   Bus --> HL
+  Bus --> SessLog
 ```
 
-One event stream, two renderers — interactive TTY gets the ADE pane; CI/pipes get the same semantics as plain lines.
+One event stream, three renderers — interactive TTY gets the ADE pane; `clai chat` gets a verbose log printer; CI/pipes get the same semantics as plain lines. TUI also mirrors events to `session.jsonl`.
 
-**UiEvent types:** `user`, `assistant`, `tool_call`, `tool_result`, `plan`, `todo`, `approval`, `verify`, `status`, `metrics`, `context`.
+**UiEvent types:** `user`, `assistant`, `thinking`, `tool_call`, `tool_result`, `plan`, `todo`, `approval`, `verify`, `status`, `metrics`, `context`.
 
-Interactive session features: multi-turn prompt box, pgup/pgdn scroll, ctrl+c interrupt (marks status, does not kill in-flight provider call), context strip showing model/provider/sandbox/LSP/trace path.
+Interactive session features: multi-turn prompt box, pgup/pgdn scroll, ctrl+c interrupt (marks status, does not kill in-flight provider call), context strip showing model/provider/sandbox/LSP/trace path. Thinking deltas stream when the provider surfaces reasoning.
 
 Headless: set `CLAI_NO_TUI=1` or run on non-TTY stdout. Requires explicit prompt via `clai run "<prompt>"`.
 
@@ -599,7 +635,7 @@ Headless: set `CLAI_NO_TUI=1` or run on non-TTY stdout. Requires explicit prompt
 Built-in Terminal-Bench-style eval loop over **81** self-contained Node.js fixtures in `fixtures/bench/`:
 
 - **8 legacy tasks** — original CLAI mini-repo tasks (`fix-async-race`, `implement-slugify`, …)
-- **73 adapted tasks** — themes from [Terminal-Bench 2.1](https://github.com/harbor-framework/terminal-bench-2-1) and [DeepSWE](https://deepswe.datacurve.ai/), rewritten as isolated `.mjs` workspaces with `check.mjs` verifiers (no Docker required)
+- **73 adapted tasks** — **45** Terminal-Bench + **28** DeepSWE themes from [Terminal-Bench 2.1](https://github.com/harbor-framework/terminal-bench-2-1) and [DeepSWE](https://deepswe.datacurve.ai/), rewritten as isolated `.mjs` workspaces with `check.mjs` verifiers (no Docker required)
 
 Full manifest: `fixtures/bench/manifest.json` (maps each task to its upstream benchmark id).
 
@@ -629,20 +665,33 @@ flowchart LR
 
 **Offline mode** (`--offline`): applies `_solution/` patches instead of calling the LLM — no API key required.
 
+Live bench agent runs use `toolProfile: "coding"` (lean toolset) for fair comparison against peer harnesses.
+
 **Dashboard** (`bench/server.ts`): plain `node:http`, zero extra deps. Endpoints:
 
 - `GET /` — self-contained `dashboard.html`
 - `GET /events` — SSE live snapshots + compare events
 - `GET /api/runs`, `GET /api/runs/:id` — history from `.clai/bench/history.jsonl`
-- `GET /api/compare` — CLAI vs pi harness scorecard (`compare-pi.json`)
+- `GET /api/compare` — latest compare scorecard (pi / all / …)
+- `GET /api/compare/:id` — archived scorecard
 - `GET /api/tasks` — catalog `{ count, ids }` for the dashboard task-limit control
-- `POST /api/jobs` — start clai / offline / compare (`limit` = first N catalog tasks; also `parallel`, `tasks`, `freshClai`)
+- `GET /api/jobs/current`, `POST /api/jobs/stop` — in-flight job control
+- `POST /api/jobs` — start clai / offline / compare (`limit`, `parallel`, `tasks`, `sideParallel`, `freshClai`)
 
-Each task: hard wall-clock timeout, configurable `maxSteps`, isolated temp workspace (fixtures never mutated), per-task trace, token/cost estimates via provider pricing table.
+Each task: hard wall-clock timeout, configurable `maxSteps`, isolated temp workspace (fixtures never mutated), per-task trace, token/cost estimates via `pricing.ts`.
 
-### CLAI vs pi compare (`compare-pi.ts`)
+### Harness compare (`compare-*.ts`)
 
-Same-model race (default DeepSeek via `PI_PROVIDER` / `PI_MODEL`; needs `DEEPSEEK_API_KEY` + `pi` on PATH). Start from the dashboard **Compare CLAI vs pi** button, `POST /api/jobs` with `kind: "compare"`, or `pnpm bench:compare-pi`.
+Same-model race against peer CLIs (default DeepSeek via provider-specific env). Dashboard **Compare** jobs call `runCompareAll` (CLAI + pi + Codex). CLI scripts:
+
+| Script / entry | Harnesses | Needs |
+|----------------|-----------|--------|
+| `pnpm bench:compare-pi` | CLAI + pi | `DEEPSEEK_API_KEY` + `pi` on PATH (`PI_PROVIDER` / `PI_MODEL`) |
+| `pnpm bench:compare-codex` | CLAI + Codex | Codex CLI + DeepSeek profile (`CODEX_BIN` / `CODEX_PROFILE` / `CODEX_MODEL`) |
+| `pnpm bench:compare-all` | CLAI + pi + Codex | Both peers; **dashboard default** |
+| `tsx src/bench/compare-agy.ts` | CLAI + `agy` | Antigravity CLI (`AGY_BIN` / `AGY_MODEL`); no package.json script |
+
+Artifacts: `.clai/bench/compare-pi.json` (dashboard default latest), `compare-all.json`, `compare-codex.json`, `compare-agy.json`, plus `compares/<id>.json` archives.
 
 Race hardening:
 
@@ -652,10 +701,12 @@ Race hardening:
 | **Total wall time** | Scoreboard + compare cards show per-harness Σ `wallMs` (live while partial) |
 | **Partial scorecards** | `compare.partial: true` while either harness is still running; task table streams live |
 | **Scoreboard freeze** | Winner / composite scores stay frozen until `partial` clears (phase `"done"`) |
-| **`sideParallel` split** | Fresh CLAI+pi race uses `ceil(COMPARE_PARALLEL/2)` workers per side (override `COMPARE_SIDE_PARALLEL`) so API load is not doubled |
-| **Pi stall kill** | If pi emits no JSON stdout within `COMPARE_PI_STALL_MS` (default 45s), the child is killed; stderr/otel noise does not cancel the stall timer |
+| **`sideParallel` split** | Fresh multi-side race splits workers per side (`COMPARE_SIDE_PARALLEL` or derived from `COMPARE_PARALLEL`) so API load is not multiplied |
+| **Peer stall kill** | If pi emits no JSON stdout within `COMPARE_PI_STALL_MS` (default **15s**), the child is killed; Codex has analogous `COMPARE_CODEX_*` knobs |
 
 While a compare job is in flight, `/api/compare` and SSE prefer the in-memory partial card so reconnects never flash a prior finished scoreboard.
+
+See also [`CODEX-BENCH-INTEGRATION.md`](CODEX-BENCH-INTEGRATION.md) for Codex + DeepSeek wiring notes.
 
 ---
 
@@ -713,9 +764,12 @@ Offline demos emit JSON summary on headless stdout: `{ ok, runId, sandboxMode, t
 | `CLAI_MODEL` | per-provider default | Model id override |
 | `CLAI_NO_TUI` | unset | Force headless output |
 | `CLAI_AUTO_APPROVE` | unset | Auto-approve sandbox gates (dev only) |
+| `CLAI_SANDBOX_MODE` | unset | `stub` forces stub sandbox |
 | `CLAI_DATA_DIR` | `<root>/.clai` | Override harness data directory |
 | `CLAI_MEMORY_BACKEND` | sqlite with json fallback | Force `json` backend |
-| `CLAI_COMPACT_THRESHOLD_TOKENS` | 45000 | Soft compaction ceiling (also min with window×soft ratio) |
+| `CLAI_MEMORY_ENABLED` | on | Ablation: skip memory in assemble when `0` |
+| `CLAI_STRUCTURAL_CITATIONS` | on | Ablation: skip file slices when `0` |
+| `CLAI_COMPACT_THRESHOLD_TOKENS` | 45000 | Soft compaction absolute ceiling (also min with window×soft) |
 | `CLAI_COMPACT_KEEP_TURNS` | 10 | Verbatim trailing messages after compaction |
 | `CLAI_COMPACT_SOFT_RATIO` | 0.7 | Soft compact at this fraction of model window |
 | `CLAI_COMPACT_HARD_RATIO` | 0.9 | Aggressive compact / overflow pressure |
@@ -723,7 +777,23 @@ Offline demos emit JSON summary on headless stdout: `{ ok, runId, sandboxMode, t
 | `CLAI_PROMPT_CLEAN` | on | Set `0` to disable user-prompt filler stripping |
 | `CLAI_TASK_MAX_STEPS` | 10 | Subagent step budget |
 | `CLAI_LSP_PY` | auto-detect | Python language-server binary |
+| `CLAI_MOUSE` | on | `0` disables mouse |
+| `CLAI_ASCII` | unset | `1` forces ASCII glyphs |
+| `CLAI_GLYPHS` | unset | `unicode` on Windows Terminal |
+| `CLAI_COLOR` | unset | color level override |
+| `CLAI_NO_INTRO` | unset | `1` skips intro |
 | `CLAI_INVOCATION_CWD` | — | Set by `bin/clai.js` for workspace resolution |
+
+**Compare / peer harnesses** (bench only):
+
+| Variable | Notes |
+|----------|--------|
+| `COMPARE_PARALLEL`, `COMPARE_SIDE_PARALLEL`, `COMPARE_CLAI` | Race concurrency / fresh vs history CLAI |
+| `COMPARE_PI_STALL_MS` (default 15s), `COMPARE_PI_IDLE_MS`, `COMPARE_PI_STALL_BREAKER`, `COMPARE_PI_RAW`, `COMPARE_PI_DEBUG` | Pi race |
+| `COMPARE_CODEX_STALL_MS`, `COMPARE_CODEX_IDLE_MS`, `COMPARE_CODEX_STALL_BREAKER`, `COMPARE_CODEX_DEBUG` | Codex race |
+| `PI_PROVIDER`, `PI_MODEL`, `PI_BIN`, `PI_THINKING` | Pi defaults (deepseek / `deepseek-v4-flash`) |
+| `CODEX_BIN`, `CODEX_PROFILE`, `CODEX_MODEL` | Codex defaults (`codex` / `deepseek` / `deepseek-v4-flash`) |
+| `AGY_BIN`, `AGY_MODEL` | Antigravity compare |
 
 ---
 
@@ -749,7 +819,7 @@ Node **≥ 20** required. Package manager: **pnpm 9**.
 | Area | Why |
 |------|-----|
 | **Eval reproducibility** | JSONL traces + ablation flags + memory provenance → judges can replay *what the harness believed* |
-| **Built-in bench** | 81-task suite (TB/DeepSWE adapted), offline mode, live dashboard, pi comparison — no external harness required |
+| **Built-in bench** | 81-task suite (TB/DeepSWE adapted), offline mode, live dashboard, pi/Codex comparison — no external harness required |
 | **Honest completion** | Verification contract aims for evidence-based `PASS`, not “model stopped talking” |
 | **Context discipline** | Token budget, staleness invalidation, injection labels, deterministic compaction |
 | **Subagent isolation** | `task` (`explore` / `general`) keeps investigation out of parent context |
@@ -779,6 +849,8 @@ cp .env.example .env          # provider keys
 pnpm clai --help              # light entry (lazy heavy imports)
 pnpm clai                     # interactive session on cwd
 pnpm clai fixtures/tiny-edit  # session on a fixture
+pnpm clai chat                # verbose log-mode session
+pnpm clai chat "how does the bench runner work?"
 pnpm clai demo                # offline tool plane: edit + bash
 pnpm clai demo lsp            # intake + LSP diagnostics
 pnpm clai demo injection      # memory/context injection demo
@@ -787,6 +859,8 @@ pnpm clai memory list         # harness plane store
 pnpm clai bench list          # 81 eval tasks
 pnpm clai bench run --offline --serve   # offline run + dashboard :4310
 pnpm bench:compare-pi         # CLAI vs pi scorecard (DeepSeek + pi)
+pnpm bench:compare-codex      # CLAI vs Codex scorecard
+pnpm bench:compare-all        # CLAI vs pi vs Codex (dashboard Compare)
 CLAI_NO_TUI=1 pnpm clai run "what's in the codebase" --cwd fixtures/tiny-edit
 ```
 
@@ -800,6 +874,7 @@ Bench history: `.clai/bench/history.jsonl`
 - User-facing docs / quick start: [`README.md`](../README.md)
 - The agent itself: [`CLAI-AGENT.md`](CLAI-AGENT.md)
 - Repo agent guide: [`AGENTS.md`](../AGENTS.md)
+- Codex bench integration notes: [`CODEX-BENCH-INTEGRATION.md`](CODEX-BENCH-INTEGRATION.md)
 - Memory & context spec: [`.scratch/wayfinder-bodies/memory-context-architecture.md`](../.scratch/wayfinder-bodies/memory-context-architecture.md)
 - OpenCode peer verification note: [`.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md`](../.scratch/wayfinder-bodies/assets/06-peer-verify-opencode.md)
 - Wayfinder map (ticket spine): [GitHub issue #1](https://github.com/rajofearth/CodeRush2.0_TeamKnull/issues/1)
