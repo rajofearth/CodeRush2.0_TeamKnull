@@ -3,7 +3,7 @@
  *
  * Endpoints:
  *   GET /               self-contained dashboard page (dashboard.html)
- *   GET /events         SSE — snapshot + compare + job events
+ *   GET /events         SSE — snapshot + compare + job + report events
  *   GET /api/runs       run summaries from history.jsonl (oldest first)
  *   GET /api/runs/:id   full BenchRunRecord for one run
  *   GET /api/compare    CLAI vs pi (+ Codex when mode=all) scorecard (latest compare-pi.json)
@@ -12,6 +12,10 @@
  *   GET /api/jobs/current
  *   POST /api/jobs      start clai | offline | compare ({ limit?, parallel?, sideParallel?, … })
  *   POST /api/jobs/stop
+ *   POST /api/report    start AI research report ({ compareId?, runId? })
+ *   GET /api/report/current
+ *   GET /api/report/:id finished report JSON
+ *   GET /api/report/:id.pdf | :id.docx  download generated documents
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -20,6 +24,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadEnvFiles } from "../adapter/env.js";
 import { createJobManager, type JobManager } from "./jobs.js";
+import {
+  createReportManager,
+  loadReport,
+  loadReportExport,
+  type ReportManager,
+} from "./report.js";
 import type { BenchStore, LiveRunFeed } from "./store.js";
 
 export const DEFAULT_BENCH_PORT = 4310;
@@ -29,6 +39,7 @@ export type BenchServerHandle = {
   url: string;
   close: () => Promise<void>;
   jobs: JobManager;
+  reports: ReportManager;
 };
 
 export type StartBenchServerOptions = {
@@ -74,6 +85,7 @@ export async function startBenchServer(
     store: opts.store,
     live: opts.live,
   });
+  const reports = createReportManager({ store: opts.store });
 
   const sseClients = new Set<ServerResponse>();
   const broadcast = (payload: unknown) => {
@@ -89,6 +101,36 @@ export async function startBenchServer(
   });
   const unsubscribeStatus = jobs.onStatus((job) => {
     broadcast({ type: "job", job });
+    // Auto-generate research report when a CLAI or compare run finishes cleanly.
+    if (
+      job.status === "idle" &&
+      (job.kind === "clai" || job.kind === "compare") &&
+      !job.error
+    ) {
+      const running = reports.current();
+      if (running?.status === "running") return;
+      const compare = jobs.getCompare() as {
+        compareId?: string;
+        claiRunId?: string;
+        partial?: boolean;
+      } | null;
+      if (job.kind === "compare") {
+        if (compare?.partial) return;
+        const result = reports.start({
+          compareId: compare?.compareId,
+          runId: compare?.claiRunId,
+        });
+        if (result.ok) broadcast({ type: "report", report: reports.current() });
+        return;
+      }
+      const snap = opts.live.current();
+      if (!snap?.done || !snap.runId) return;
+      const result = reports.start({ runId: snap.runId });
+      if (result.ok) broadcast({ type: "report", report: reports.current() });
+    }
+  });
+  const unsubscribeReport = reports.onProgress((report) => {
+    broadcast({ type: "report", report });
   });
 
   async function loadCompareFromDisk(): Promise<unknown | null> {
@@ -155,6 +197,12 @@ export async function startBenchServer(
         res.write(
           `data: ${JSON.stringify({ type: "job", job: jobs.status() })}\n\n`,
         );
+        const reportProg = reports.current();
+        if (reportProg) {
+          res.write(
+            `data: ${JSON.stringify({ type: "report", report: reportProg })}\n\n`,
+          );
+        }
         sseClients.add(res);
         const heartbeat = setInterval(() => res.write(": ping\n\n"), 15_000);
         const jobPoll = setInterval(() => {
@@ -195,6 +243,71 @@ export async function startBenchServer(
       }
       if (url.pathname === "/api/jobs/current" && method === "GET") {
         sendJson(res, 200, jobs.status());
+        return;
+      }
+      if (url.pathname === "/api/report/current" && method === "GET") {
+        const cur = reports.current();
+        if (!cur) {
+          sendJson(res, 404, { error: "no report in progress" });
+          return;
+        }
+        sendJson(res, 200, cur);
+        return;
+      }
+      if (url.pathname === "/api/report" && method === "POST") {
+        const body = (await readJsonBody(req)) as {
+          compareId?: string;
+          runId?: string;
+        };
+        const result = reports.start({
+          compareId: body.compareId,
+          runId: body.runId,
+        });
+        if (!result.ok) {
+          sendJson(res, result.status, { error: result.error });
+          return;
+        }
+        broadcast({ type: "report", report: reports.current() });
+        sendJson(res, 202, { ok: true, reportId: result.reportId, report: reports.current() });
+        return;
+      }
+      const reportFileMatch =
+        /^\/api\/report\/([^/]+)\.(pdf|docx)$/i.exec(url.pathname);
+      if (reportFileMatch && method === "GET") {
+        const id = decodeURIComponent(reportFileMatch[1]!);
+        const format = reportFileMatch[2]!.toLowerCase() as "pdf" | "docx";
+        const file = await loadReportExport(opts.store, id, format);
+        if (!file) {
+          sendJson(res, 404, { error: "report export not found" });
+          return;
+        }
+        const type =
+          format === "pdf"
+            ? "application/pdf"
+            : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        res.writeHead(200, {
+          "content-type": type,
+          "content-disposition": `attachment; filename="${id}.${format}"`,
+          "content-length": file.bytes.length,
+          "cache-control": "no-cache",
+        });
+        res.end(file.bytes);
+        return;
+      }
+      const reportMatch = /^\/api\/report\/([^/]+)$/.exec(url.pathname);
+      if (reportMatch && method === "GET") {
+        const id = decodeURIComponent(reportMatch[1]!);
+        const cur = reports.current();
+        if (cur?.reportId === id && cur.report) {
+          sendJson(res, 200, cur.report);
+          return;
+        }
+        const loaded = await loadReport(opts.store, id);
+        if (!loaded) {
+          sendJson(res, 404, { error: "report not found" });
+          return;
+        }
+        sendJson(res, 200, loaded);
         return;
       }
       if (url.pathname === "/api/jobs/stop" && method === "POST") {
@@ -299,10 +412,12 @@ export async function startBenchServer(
     port,
     url: `http://127.0.0.1:${port}`,
     jobs,
+    reports,
     close: async () => {
       unsubscribeLive();
       unsubscribeCompare();
       unsubscribeStatus();
+      unsubscribeReport();
       jobs.stop();
       for (const res of sseClients) res.end();
       sseClients.clear();

@@ -438,6 +438,211 @@
   .winner-callout { font-size: 13px; }
   .compare-score .label { font-size: 11px; }
   .compare-score .value { font-size: 20px; }
+
+  /* —— Research report overlay (download-first) —— */
+  .btn-report {
+    border-color: var(--info);
+    color: var(--info);
+  }
+  .btn-report:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-report.busy {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  #report-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(4px);
+    padding: 10vh 16px 24px;
+    overflow: auto;
+  }
+  #report-overlay.open { display: block; }
+  .report-shell {
+    max-width: 520px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  }
+  .report-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .report-top h2 {
+    margin: 0;
+    flex: 1;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+  }
+  .report-top .r-meta {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .report-close {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .report-close:hover { border-color: var(--accent); color: var(--accent); }
+  .report-body { padding: 16px 16px 18px; }
+  .report-status {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 10px;
+    min-height: 1.3em;
+  }
+  .report-status strong { color: var(--text); font-weight: 600; }
+  .report-status.err { color: var(--error); }
+  .report-bar {
+    height: 4px;
+    background: var(--element);
+    margin: 0 0 16px;
+    overflow: hidden;
+  }
+  .report-bar > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width 0.35s ease;
+  }
+  .report-bar.done > i { background: var(--success); }
+  .report-bar.err > i { background: var(--error); }
+  .report-cta {
+    display: none;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .report-cta.show { display: flex; flex-wrap: wrap; }
+  .report-cta a.report-dl {
+    flex: 1 1 140px;
+    text-align: center;
+    text-decoration: none;
+    font: inherit;
+    font-weight: 700;
+    padding: 12px 14px;
+    border: 1px solid var(--info);
+    background: var(--element);
+    color: var(--info);
+    cursor: pointer;
+  }
+  .report-cta a.report-dl:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .report-secondary {
+    display: none;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .report-secondary.show { display: flex; }
+  .report-secondary button {
+    font: inherit;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .report-secondary button:hover {
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .report-title-line {
+    display: none;
+    margin-bottom: 12px;
+  }
+  .report-title-line.show { display: block; }
+  .report-title-line .t {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-bottom: 4px;
+  }
+  .report-title-line .sub {
+    color: var(--faint);
+    font-size: 12px;
+  }
+  .report-traces {
+    display: none;
+    margin-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 12px;
+  }
+  .report-traces.show { display: block; }
+  .report-traces > .label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .report-trace-list {
+    max-height: 220px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .report-trace-item {
+    background: var(--element);
+    border-left: 3px solid var(--border-subtle);
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .report-trace-item.pass { border-left-color: var(--success); }
+  .report-trace-item.fail,
+  .report-trace-item.error,
+  .report-trace-item.timeout { border-left-color: var(--error); }
+  .report-trace-item .head {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .report-trace-item .head strong { color: var(--text); font-size: 12px; }
+  .report-trace-item .head .tag {
+    color: var(--faint);
+    font-size: 11px;
+  }
+  .report-trace-item .beats {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .report-trace-item details > summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 11px;
+    list-style: none;
+  }
+  .report-trace-item details > summary::-webkit-details-marker { display: none; }
+  .report-trace-item ol {
+    margin: 6px 0 0;
+    padding-left: 16px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .report-empty-hint {
+    color: var(--faint);
+    font-size: 12px;
+  }
 </style>
 </head>
 <body>
@@ -446,7 +651,7 @@
     <details class="fold hdr-links">
       <summary>API</summary>
       <div class="fold-body">
-        <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a>
+        <a href="/api/runs">/api/runs</a> · <a href="/api/compare">/api/compare</a> · <a href="/api/report/current">/api/report</a>
       </div>
     </details>
     <div class="conn" id="conn">● Connecting</div>
@@ -456,6 +661,7 @@
     <button type="button" class="primary" id="btn-clai" data-kind="clai">CLAI</button>
     <button type="button" id="btn-offline" data-kind="offline">offline</button>
     <button type="button" class="primary" id="btn-compare" data-kind="compare">compare all</button>
+    <button type="button" class="btn-report" id="btn-report" title="AI research report (auto-runs after CLAI / compare finishes)">report</button>
     <button type="button" class="danger" id="btn-stop" disabled>Stop</button>
     <div class="ctrl-group" id="task-count" title="How many catalog tasks to run">
       <span class="tc-label">tasks</span>
@@ -473,10 +679,41 @@
       <button type="button" data-parallel="4">4</button>
       <span class="tc-value" id="parallel-label">1 each</span>
     </div>
-    <span class="job-meta" id="job-meta">idle</span>
+  <span class="job-meta" id="job-meta">idle</span>
     <div class="job-err" id="job-err"></div>
   </div>
 
+  <div id="report-overlay" aria-hidden="true">
+    <div class="report-shell" role="dialog" aria-modal="true" aria-labelledby="report-title">
+      <div class="report-top">
+        <h2 id="report-title">Research report</h2>
+        <span class="r-meta" id="report-top-meta"></span>
+        <button type="button" class="report-close" id="btn-report-close">Close</button>
+      </div>
+      <div class="report-body">
+        <div class="report-status" id="report-status">Starting…</div>
+        <div class="report-bar" id="report-bar" aria-hidden="true"><i id="report-bar-fill"></i></div>
+        <div class="report-cta" id="report-cta">
+          <a class="report-dl" id="btn-report-pdf" href="#" download>Download PDF</a>
+          <a class="report-dl" id="btn-report-docx" href="#" download>Download DOCX</a>
+        </div>
+        <div class="report-secondary" id="report-secondary">
+          <button type="button" id="btn-report-json">JSON</button>
+          <button type="button" id="btn-report-md">Copy markdown</button>
+        </div>
+        <div class="report-title-line" id="report-title-line">
+          <div class="t" id="report-ready-title"></div>
+          <div class="sub" id="report-ready-sub"></div>
+        </div>
+        <div class="report-traces" id="report-traces">
+          <div class="label">Model traces</div>
+          <div class="report-trace-list" id="report-trace-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main id="stage" data-mode="idle">
   <main id="stage" data-mode="idle">
   <section class="panel live" id="live-panel">
     <details class="fold" id="live-as-fold" open>
@@ -613,6 +850,19 @@
   let parallelWorkers = 1;
   let lastQuotaHit = false;
   let rateCountdownTimer = null;
+  let reportProgress = null;
+  let reportData = null;
+  const REPORT_STAGE_LABELS = {
+    queued: "Queued",
+    resolve: "Resolving source",
+    stats: "Building scorecard",
+    traces: "Reading model traces",
+    analyze: "LLM writing narrative",
+    assemble: "Assembling paper",
+    export: "Writing PDF + DOCX",
+    done: "Ready",
+    error: "Failed",
+  };
   const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
 
   function fmtMs(ms) {
@@ -2422,6 +2672,306 @@
     }
   }
 
+  function reportSourcePayload() {
+    const payload = {};
+    if (compare && compare.compareId) payload.compareId = compare.compareId;
+    if (selectedId) payload.runId = selectedId;
+    else if (compare && compare.claiRunId) payload.runId = compare.claiRunId;
+    return payload;
+  }
+
+  function openReportOverlay() {
+    $("report-overlay").classList.add("open");
+    $("report-overlay").setAttribute("aria-hidden", "false");
+  }
+
+  function closeReportOverlay() {
+    $("report-overlay").classList.remove("open");
+    $("report-overlay").setAttribute("aria-hidden", "true");
+  }
+
+  function renderReportProgress() {
+    const p = reportProgress;
+    const status = $("report-status");
+    const bar = $("report-bar-fill");
+    const barWrap = $("report-bar");
+    const meta = $("report-top-meta");
+    const btn = $("btn-report");
+    if (!p) {
+      if (status) {
+        status.textContent = "";
+        status.classList.remove("err");
+      }
+      if (bar) bar.style.width = "0%";
+      if (barWrap) barWrap.className = "report-bar";
+      if (meta) meta.textContent = "";
+      btn.classList.remove("busy");
+      btn.disabled = false;
+      btn.textContent = "report";
+      return;
+    }
+    const running = p.status === "running";
+    btn.classList.toggle("busy", running);
+    btn.disabled = running;
+    btn.textContent = running ? "reporting…" : "report";
+    const pct = Math.max(0, Math.min(100, Number(p.progress) || 0));
+    if (bar) bar.style.width = pct + "%";
+    if (barWrap) {
+      barWrap.className =
+        "report-bar" +
+        (p.status === "done" ? " done" : p.status === "error" ? " err" : "");
+    }
+    const elapsed = p.startedAt
+      ? fmtMinutes(Date.now() - Date.parse(p.startedAt))
+      : "";
+    if (meta) {
+      meta.textContent =
+        (p.reportId && p.reportId !== "…" ? p.reportId : "") +
+        (elapsed ? (p.reportId && p.reportId !== "…" ? " · " : "") + elapsed : "") +
+        (p.status === "done" && p.durationMs != null
+          ? " · " + (p.durationMs / 1000).toFixed(1) + "s"
+          : "");
+    }
+    if (status) {
+      status.classList.toggle("err", p.status === "error");
+      if (p.status === "done") {
+        status.innerHTML = "<strong>Ready</strong> — download PDF or DOCX";
+      } else if (p.status === "error") {
+        status.textContent = p.error || p.message || "Report failed";
+      } else {
+        const label = REPORT_STAGE_LABELS[p.stage] || p.stage || "Working";
+        status.innerHTML =
+          "<strong>" +
+          esc(label) +
+          "</strong> · " +
+          esc(p.message || "") +
+          " · " +
+          Math.round(pct) +
+          "%";
+      }
+    }
+  }
+
+  function clearReportReadyUi() {
+    $("report-cta").classList.remove("show");
+    $("report-secondary").classList.remove("show");
+    $("report-title-line").classList.remove("show");
+    $("report-traces").classList.remove("show");
+    $("report-trace-list").innerHTML = "";
+    $("report-ready-title").textContent = "";
+    $("report-ready-sub").textContent = "";
+  }
+
+  function renderReportReady(report) {
+    if (!report || !report.analysis) {
+      clearReportReadyUi();
+      return;
+    }
+    const id = report.reportId;
+    const pdf = $("btn-report-pdf");
+    const docx = $("btn-report-docx");
+    pdf.href = "/api/report/" + encodeURIComponent(id) + ".pdf";
+    pdf.setAttribute("download", id + ".pdf");
+    docx.href = "/api/report/" + encodeURIComponent(id) + ".docx";
+    docx.setAttribute("download", id + ".docx");
+    $("report-cta").classList.add("show");
+    $("report-secondary").classList.add("show");
+
+    $("report-ready-title").textContent = report.analysis.title || "Report ready";
+    const bits = [
+      report.provider + "/" + report.model,
+      report.durationMs != null
+        ? (report.durationMs / 1000).toFixed(1) + "s"
+        : null,
+      report.evidence &&
+      report.evidence.source &&
+      report.evidence.source.compareId
+        ? report.evidence.source.compareId
+        : null,
+    ].filter(Boolean);
+    $("report-ready-sub").textContent = bits.join(" · ");
+    $("report-title-line").classList.add("show");
+
+    const digests =
+      (report.evidence && report.evidence.digests) || [];
+    const list = $("report-trace-list");
+    if (!digests.length) {
+      list.innerHTML =
+        '<div class="report-empty-hint">No trajectory digests in this report.</div>';
+    } else {
+      list.innerHTML = digests
+        .map((d) => {
+          const beats = (d.timeline || []).map((b) => b.summary).filter(Boolean);
+          const preview = beats.slice(0, 3).join(" → ");
+          const more =
+            beats.length > 3
+              ? "<details><summary>full timeline (" +
+                beats.length +
+                ")</summary><ol>" +
+                beats.map((b) => "<li>" + esc(b) + "</li>").join("") +
+                "</ol></details>"
+              : "";
+          const statusCls = String(d.status || "")
+            .toLowerCase()
+            .replace(/[^a-z]/g, "");
+          return (
+            '<div class="report-trace-item ' +
+            esc(statusCls) +
+            '">' +
+            '<div class="head"><strong>' +
+            esc(d.harness + " / " + d.taskId) +
+            "</strong>" +
+            '<span class="tag">' +
+            esc(d.status || "") +
+            (d.wallMs ? " · " + fmtMs(d.wallMs) : "") +
+            "</span></div>" +
+            (preview
+              ? '<div class="beats">' + esc(preview) + "</div>"
+              : d.error
+                ? '<div class="beats">' + esc(d.error) + "</div>"
+                : "") +
+            more +
+            "</div>"
+          );
+        })
+        .join("");
+    }
+    $("report-traces").classList.add("show");
+  }
+
+  function reportToMarkdown(report) {
+    const a = report.analysis;
+    const lines = [
+      "# " + a.title,
+      "",
+      "*" + report.provider + "/" + report.model + " · " + (report.finishedAt || "") + "*",
+      "",
+      "## Abstract",
+      a.abstract,
+      "",
+      "## Executive summary",
+      a.executiveSummary,
+      "",
+      "## Methodology",
+      a.methodologyNotes,
+      "",
+      "## Harness comparison",
+      a.harnessComparison,
+      "",
+      "## Insights",
+      ...(a.insights || []).map((x) => "- " + x),
+      "",
+      "## Interesting finds",
+      ...(a.interestingFinds || []).map((f) =>
+        "### " + f.title + "\n" + f.detail + "\n*" + f.significance + "*"
+      ),
+      "",
+      "## Case studies",
+      ...(a.caseStudies || []).map((c) =>
+        "### " + c.taskId + " (" + c.harness + " · " + c.verdict + ")\n" + c.narrative
+      ),
+      "",
+      "## Limitations",
+      a.limitations,
+      "",
+      "## Conclusion",
+      a.conclusion,
+      "",
+      "## Recommendations",
+      ...(a.recommendations || []).map((x) => "- " + x),
+    ];
+    return lines.join("\n");
+  }
+
+  async function copyReportMarkdown() {
+    if (!reportData) return;
+    const md = reportToMarkdown(reportData);
+    try {
+      await navigator.clipboard.writeText(md);
+      $("report-top-meta").textContent = "markdown copied";
+    } catch {
+      $("job-err").textContent = "clipboard unavailable";
+    }
+  }
+
+  function downloadReportJson() {
+    if (!reportData) return;
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (reportData.reportId || "report") + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function applyReportProgress(p) {
+    reportProgress = p;
+    if (p.report) reportData = p.report;
+    openReportOverlay();
+    renderReportProgress();
+    if (p.status === "done" && p.report) {
+      renderReportReady(p.report);
+    } else {
+      clearReportReadyUi();
+    }
+  }
+
+  async function startReport() {
+    $("job-err").textContent = "";
+    const payload = reportSourcePayload();
+    openReportOverlay();
+    clearReportReadyUi();
+    reportData = null;
+    reportProgress = {
+      reportId: "…",
+      status: "running",
+      stage: "queued",
+      progress: 2,
+      message: "Starting report job…",
+      startedAt: new Date().toISOString(),
+    };
+    renderReportProgress();
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        $("job-err").textContent = body.error || ("HTTP " + res.status);
+        reportProgress = {
+          reportId: body.reportId || "error",
+          status: "error",
+          stage: "error",
+          progress: 100,
+          message: body.error || ("HTTP " + res.status),
+          startedAt: new Date().toISOString(),
+          error: body.error || ("HTTP " + res.status),
+        };
+        renderReportProgress();
+        clearReportReadyUi();
+        return;
+      }
+      if (body.report) applyReportProgress(body.report);
+    } catch (err) {
+      $("job-err").textContent = err.message || String(err);
+      reportProgress = {
+        reportId: "error",
+        status: "error",
+        stage: "error",
+        progress: 100,
+        message: err.message || String(err),
+        startedAt: new Date().toISOString(),
+        error: err.message || String(err),
+      };
+      renderReportProgress();
+      clearReportReadyUi();
+    }
+  }
+
   function connectSse() {
     const es = new EventSource("/events");
     es.onopen = () => setConn(true, "Connected");
@@ -2475,6 +3025,9 @@
             loadCompare();
           }
         }
+        if (msg.type === "report" && msg.report) {
+          applyReportProgress(msg.report);
+        }
       } catch { /* ignore bad frames */ }
     };
   }
@@ -2483,6 +3036,18 @@
   $("btn-offline").addEventListener("click", () => startJob("offline"));
   $("btn-compare").addEventListener("click", () => startJob("compare"));
   $("btn-stop").addEventListener("click", () => stopJob());
+  $("btn-report").addEventListener("click", () => startReport());
+  $("btn-report-close").addEventListener("click", () => closeReportOverlay());
+  $("btn-report-md").addEventListener("click", () => copyReportMarkdown());
+  $("btn-report-json").addEventListener("click", () => downloadReportJson());
+  $("report-overlay").addEventListener("click", (ev) => {
+    if (ev.target === $("report-overlay")) closeReportOverlay();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && $("report-overlay").classList.contains("open")) {
+      closeReportOverlay();
+    }
+  });
   $("btn-tasks-10").addEventListener("click", () => {
     taskLimit = 10;
     renderTaskCount();

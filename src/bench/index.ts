@@ -30,6 +30,14 @@ export { computeAggregates } from "./types.js";
 export { loadBenchTasks, runBench } from "./runner.js";
 export { BenchStore, LiveRunFeed } from "./store.js";
 export { startBenchServer, DEFAULT_BENCH_PORT } from "./server.js";
+export {
+  buildReportEvidence,
+  createBenchReport,
+  createReportManager,
+  loadReport,
+  loadReportExport,
+} from "./report.js";
+export { buildReportPdf, buildReportDocx, exportReportDocuments } from "./report-export.js";
 
 const USAGE = `Usage:
   clai bench [--serve] [--port N]          # alias for serve
