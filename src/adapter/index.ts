@@ -519,6 +519,7 @@ export async function runAgentLoop(
         let text = "";
         let streamingToolArgs = "";
         for await (const part of result.fullStream) {
+          if (opts.signal?.aborted) break;
           if (part.type === "text-delta") {
             text += part.textDelta;
             if (part.textDelta) opts.onTextDelta?.(part.textDelta);
@@ -553,6 +554,9 @@ export async function runAgentLoop(
           } else if (part.type === "tool-call") {
             streamingToolArgs = "";
           }
+        }
+        if (opts.signal?.aborted) {
+          throw Object.assign(new Error("aborted"), { name: "AbortError" });
         }
         const [finishReason, steps, response, usage] = await Promise.all([
           result.finishReason,
@@ -609,6 +613,16 @@ export async function runAgentLoop(
     let overflowRetried = false;
 
     for (let i = 0; i < maxSteps; i++) {
+      // Bench early-stop (check.mjs pass) aborts mid-turn — do not start
+      // another provider round or we can hang until the outer task timeout.
+      if (opts.signal?.aborted) {
+        last = {
+          ...last,
+          finishReason: "abort",
+        };
+        break;
+      }
+
       const est = estimateMessagesTokens(active);
       if (est >= windowInfo.hardThresholdTokens) {
         active = await applyCompaction(active, "aggressive", "near_hard_limit");
@@ -618,9 +632,18 @@ export async function runAgentLoop(
         active = await applyCompaction(active, "normal", i === 0 ? "turn_start" : "post_step");
       }
 
+      if (opts.signal?.aborted) {
+        last = { ...last, finishReason: "abort" };
+        break;
+      }
+
       try {
         last = await streamOneStep(active);
       } catch (err) {
+        if (opts.signal?.aborted) {
+          last = { ...last, finishReason: "abort" };
+          break;
+        }
         if (isContextOverflowError(err) && !overflowRetried) {
           overflowRetried = true;
           opts.onStatus?.({
@@ -642,6 +665,10 @@ export async function runAgentLoop(
       collectedSteps.push(...last.steps);
       active = [...active, ...last.response.messages];
 
+      if (opts.signal?.aborted) {
+        last = { ...last, finishReason: "abort" };
+        break;
+      }
       if (last.finishReason !== "tool-calls") break;
     }
 

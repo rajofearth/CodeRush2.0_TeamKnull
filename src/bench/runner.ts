@@ -401,12 +401,14 @@ async function agentSolve(
     },
     onBenchCheckPass: () => {
       benchCheckPassed = true;
-      // Defer abort so the current step's usage / tool results settle first.
-      setTimeout(() => checkAbort.abort(), 0);
+      // Abort synchronously so the agent loop cannot start another provider
+      // round (setTimeout(0) raced the next streamText and hung ~150s).
+      checkAbort.abort();
     },
   };
 
   const timedOut = Symbol("timeout");
+  const checkPassed = Symbol("check-pass");
   let timer: NodeJS.Timeout | undefined;
 
   // Workspace inventory (bench-only) — avoids glob and often skips reading check.mjs.
@@ -495,12 +497,32 @@ Flow: read → edit/write → bash {command:"node check.mjs"}; stop on exit 0. M
           { once: true },
         );
       }),
+      // Don't wait on a hung post-check provider stream — resolve as soon as
+      // check.mjs passes (loopPromise may still be draining in the background).
+      new Promise<typeof checkPassed>((resolve) => {
+        if (benchCheckPassed || checkAbort.signal.aborted) {
+          if (benchCheckPassed) resolve(checkPassed);
+          return;
+        }
+        checkAbort.signal.addEventListener(
+          "abort",
+          () => {
+            if (benchCheckPassed) resolve(checkPassed);
+          },
+          { once: true },
+        );
+      }),
     ]);
     if (raced === timedOut) {
       checkAbort.abort();
       out.status = "timeout";
       out.error = `agent exceeded ${task.timeoutMs}ms`;
       await trace.close("timeout");
+    } else if (raced === checkPassed) {
+      out.steps = out.steps || 0;
+      out.status = "fail"; // provisional; check decides
+      out.error = undefined;
+      await trace.close("ok", { finishReason: "check-pass" });
     } else if (raced === aborted) {
       if (benchCheckPassed) {
         out.steps = out.steps || 0;
