@@ -2,7 +2,35 @@
 
 **Unified Agentic Coding Harness (AE-01)** — single TypeScript package `clai`, binary `clai`.
 
-This document is a visual and structural map of how CLAI is organized, how a run flows through it, and where it deliberately differs from frontier harnesses like [OpenCode](https://opencode.ai/).
+This document is the structural and behavioral map of CLAI: how components connect, how a run flows end-to-end, and where the harness deliberately differs from frontier peers like [OpenCode](https://opencode.ai/).
+
+---
+
+## Contents
+
+| Section | What you'll find |
+|---------|------------------|
+| [At a glance](#at-a-glance) | Peer comparison table |
+| [Complete harness flow](#complete-harness-flow) | **Master diagram** — every major path in one view |
+| [System overview](#system-overview) | Layered component map |
+| [Two planes](#two-planes-core-design-choice) | Tool plane vs harness plane |
+| [Workspace model](#workspace-model) | Root resolution and `.clai/` layout |
+| [CLI entry points](#cli-entry-points) | Commands and lazy loading |
+| [Run lifecycle](#run-lifecycle) | Interactive, bench, and demo paths |
+| [Storage boundaries](#storage-boundaries) | What persists vs what is ephemeral |
+| [Provider adapter](#provider-adapter) | Registry, retry, model resolution |
+| [Tool plane](#tool-plane) | Tools, subagents, caps, LSP |
+| [Context & memory](#context--memory) | Compaction, assembly, tiers |
+| [Sandbox](#sandbox) | Runtime, stub, approvals |
+| [Trace & glass](#trace--glass) | JSONL events and observability |
+| [UI architecture](#ui-architecture) | UiBus and renderers |
+| [Benchmark system](#benchmark-system) | 81-task suite and compare races |
+| [Verification](#verification-the-biggest-harness-delta-vs-opencode) | Target completion contract |
+| [Demos & fixtures](#demos--fixtures) | Offline workspaces |
+| [Environment variables](#environment-variables) | Configuration reference |
+| [Platform notes](#platform-notes) | Optional deps and fallbacks |
+| [When CLAI wins](#when-clai-wins) | Side-by-side with OpenCode |
+| [Quick commands](#quick-commands) | Copy-paste starters |
 
 ---
 
@@ -23,85 +51,290 @@ This document is a visual and structural map of how CLAI is organized, how a run
 
 ---
 
-## System diagram
+## Complete harness flow
+
+The diagram below is the **single end-to-end map** of CLAI. Follow it top-to-bottom for any path — interactive session, `clai chat`, bench run, or offline demo. Solid arrows are the hot path; dashed arrows are optional, parallel, or scaffolded.
 
 ```mermaid
 flowchart TB
-  subgraph Human["Human surface"]
-    TUI["Ink ADE TUI<br/>activity · plan · approvals · strip"]
-    Chat["clai chat log printer<br/>tools · I/O · tokens · ctx %"]
-    Headless["Headless printer<br/>CLAI_NO_TUI=1 / CI"]
-    Dashboard["Bench dashboard<br/>:4310 SSE"]
-    UiBus["UiBus event API"]
-    TUI --> UiBus
-    Chat --> UiBus
-    Headless --> UiBus
+  classDef entry fill:#1e3a5f,stroke:#60a5fa,color:#e0f2fe
+  classDef harness fill:#3b2f4a,stroke:#c084fc,color:#f3e8ff
+  classDef tool fill:#1a3a2e,stroke:#34d399,color:#ecfdf5
+  classDef persist fill:#3d2e1a,stroke:#fbbf24,color:#fef3c7
+  classDef external fill:#2d2d2d,stroke:#94a3b8,color:#f1f5f9
+  classDef ui fill:#1e293b,stroke:#38bdf8,color:#e0f2fe
+  classDef scaffold fill:#374151,stroke:#9ca3af,color:#f9fafb,stroke-dasharray: 5 5
+
+  subgraph ENTRY["① Entry & routing"]
+    direction TB
+    ARGV["argv · parseEntry()"] --> ROUTE{"Route"}
+    ROUTE -->|interactive| LAUNCH["clai · clai run · clai chat"]
+    ROUTE -->|offline| DEMO["clai demo · demo lsp · demo injection"]
+    ROUTE -->|inspect| UTIL["intake · memory · glass"]
+    ROUTE -->|eval| BENCHCLI["clai bench run · serve · list"]
+    ROUTE -->|help| HELP["--help · lazy imports only"]
   end
 
-  subgraph CLI["clai CLI"]
-    Entry["cli.tsx<br/>launch · run · chat · demo · intake · memory · bench · glass"]
-    WS["workspace.ts<br/>root · .clai paths"]
-    Entry --> WS
+  subgraph WS["② Workspace anchor"]
+    direction TB
+    PARSE["--cwd · positional folder · tie-breaker rules"]
+    PARSE --> ROOT["Workspace.root · absolute path"]
+    ROOT --> DATA[".clai/ or CLAI_DATA_DIR"]
+    DATA --> ARTIFACTS["traces/ · memory · bench/"]
   end
 
-  subgraph Harness["Harness plane"]
-  direction TB
-    Adapter["adapter/<br/>AI SDK loop · retry · compaction"]
-    Context["context/<br/>assemble() · compactHistory() · prompt-clean"]
-    Memory["memory/<br/>SQLite / JSON store"]
-    Agents["agents/<br/>task · explore / general"]
-    Verify["verify/<br/>completion contract (scaffold)"]
-    Trace["trace/<br/>JSONL writer"]
-    Context --> Memory
-    Adapter --> Context
-    Adapter --> Agents
-    Adapter --> Verify
-    Adapter --> Trace
+  subgraph BOOT["③ Session bootstrap"]
+    direction TB
+    ENV["loadEnvFiles() · provider keys"]
+    LAZY["lazy-import adapter · sandbox · bench · memory"]
+    TRACE0["createTraceWriter · runId · run_start"]
+    UIB["UiBus · TUI · chat log · headless · session.jsonl"]
+    INTAKE0["ensureIntake once · repo map seed"]
+    LSP0["probeLspAvailability · context strip"]
+    ENV --> LAZY --> TRACE0
+    TRACE0 --> UIB
+    TRACE0 --> INTAKE0 --> LSP0
   end
 
-  subgraph Tool["Tool plane"]
-  direction TB
-    Tools["tools/<br/>grep · glob · read · edit · write · bash<br/>parallel · bash_bg*"]
-    Limits["tools/limits.ts<br/>model-facing caps"]
-    LSP["tools/lsp<br/>defs · refs · diagnostics"]
-    Intake["tools/intake<br/>repo map JSON"]
-    Shell["shell/jobs<br/>bg process manager"]
-    Sandbox["sandbox/<br/>approval + env scrub"]
-    Tools --> Limits
-    Tools --> Sandbox
-    Tools --> Shell
-    LSP --> Tools
-    Intake --> Tools
+  subgraph TURN["④ User turn loop"]
+    direction TB
+    USERIN["User prompt · stdin · bench task prompt"]
+    PCLEAN["prompt-clean · strip filler · keep paths"]
+    COMPACT["compactHistory · soft/hard thresholds"]
+    FOLD["fold parallel task summaries"]
+    ASSEMBLE["ContextManager.assemble · ablation gates"]
+    SYS["compose system · policy + intake + optional memory extras"]
+    USERIN --> PCLEAN --> COMPACT --> FOLD --> ASSEMBLE --> SYS
   end
 
-  subgraph Bench["Benchmark plane"]
-    Runner["bench/runner.ts"]
-    Compare["bench/compare-*.ts<br/>pi · codex · all · agy"]
-    Server["bench/server.ts<br/>SSE + jobs"]
-    Store["bench/store.ts<br/>history.jsonl"]
-    Runner --> Store
-    Compare --> Store
-    Server --> Store
-    Server --> Dashboard
+  subgraph LOOP["⑤ Agent loop · runAgentLoop()"]
+    direction TB
+    RESOLVE["resolveModel · providers.ts registry"]
+    STEPS["step loop · maxSteps default 12 · maxSteps:1 between tool rounds"]
+    GEN["streamText / generateText · Vercel AI SDK"]
+    RETRY["withProviderRetry · 429/5xx · retry-after"]
+    REPAIR["tool arg repair · schema nudge once"]
+    RESOLVE --> STEPS --> GEN
+    GEN --> RETRY
+    GEN -->|invalid args| REPAIR --> GEN
   end
 
-  subgraph External["External"]
-    LLM["LLM providers<br/>Groq · DeepSeek · Cerebras · …"]
-    Repo["Workspace / fixtures"]
-    LspSrv["Language servers<br/>tsserver · pyright"]
+  subgraph MODEL["⑥ Model response"]
+    direction TB
+    OUT{"Output?"}
+    TEXT["assistant text / thinking deltas"]
+    TOOLS["tool_calls · parallel in one step"]
+    STOP["finish · stop / length / error"]
+    OUT --> TEXT
+    OUT --> TOOLS
+    OUT --> STOP
   end
 
-  Entry --> UiBus
-  Entry --> Adapter
-  Entry --> Bench
-  Adapter <-->|"generateText + tools"| LLM
-  Adapter --> Tools
-  Tools --> Repo
-  LSP --> LspSrv
-  Trace -->|"events.jsonl"| Repo
-  Memory -->|"`.clai/memory`"| Repo
-  Store -->|"`.clai/bench/`"| Repo
+  subgraph DELEGATE["⑦ Tool dispatch"]
+    direction TB
+    DISPATCH{"Which tool?"}
+    TASK["task subagent · explore RO · general +bash"]
+    DIRECT["grep · glob · read · edit · write · bash · parallel · LSP · intake"]
+    SUBLOOP["child loop ~10 steps · summary-only return"]
+    DISPATCH --> TASK --> SUBLOOP
+    DISPATCH --> DIRECT
+  end
+
+  subgraph SANDBOX["⑧ Sandbox gate"]
+    direction TB
+    MODE{"sandbox mode"}
+    RUNTIME["@anthropic-ai/sandbox-runtime"]
+    STUB["structured stub fallback"]
+    SCRUB["env scrub · *_API_KEY removed"]
+    APPROVE{"approval?"}
+    DENY["deny · egress · destructive · out_of_repo"]
+    EXEC["execute · cwd confined to workspace"]
+    MODE -->|native ok| RUNTIME
+    MODE -->|fallback| STUB
+    RUNTIME --> SCRUB
+    STUB --> SCRUB
+    SCRUB --> APPROVE
+    APPROVE -->|denied| DENY
+    APPROVE -->|allowed| EXEC
+  end
+
+  subgraph LIMITS["⑨ Output shaping"]
+    direction TB
+    FULL["full tool result in process"]
+    CAP["limits.ts · single truncation layer"]
+    HINT["re-fetch hint in model message"]
+    FULL --> CAP --> HINT
+  end
+
+  subgraph PERSIST["⑩ Persistence"]
+    direction TB
+    EV["events.jsonl append-only"]
+    MEM["memory.sqlite / memory.json · tiers · supersede"]
+    BENCHH["bench/history.jsonl · compare archives"]
+    SESS["session.jsonl · UiBus mirror"]
+  end
+
+  subgraph UIOUT["⑪ Human surface"]
+    direction TB
+    TUI["Ink ADE · activity · plan · approvals · strip"]
+    CHAT["clai chat · verbose stdout log"]
+    HL["headless · CLAI_NO_TUI=1"]
+    GLASS["clai glass · tail context_stage events"]
+    DASH["bench dashboard · :4310 SSE"]
+  end
+
+  subgraph VERIFY["⑫ Completion · scaffold"]
+    direction TB
+    SOFT["today: soft stop on model finish"]
+    TARGET["target: verify → PASS | FAIL | BLOCKED"]
+    SOFT -.-> TARGET
+  end
+
+  subgraph EXT["External"]
+    LLM["LLM providers · Groq · DeepSeek · …"]
+    REPO["workspace files · fixtures"]
+    LSPSRV["tsserver · pyright"]
+    PEERS["pi · Codex · agy · compare races"]
+  end
+
+  ENTRY --> WS
+  WS --> BOOT
+  BOOT --> TURN
+  TURN --> LOOP
+  LOOP <-->|messages + tools| LLM
+  LOOP --> MODEL
+  MODEL -->|tool_calls| DELEGATE
+  DELEGATE --> SANDBOX
+  SANDBOX --> LIMITS
+  LIMITS -->|tool_result| LOOP
+  SUBLOOP --> LIMITS
+  LOOP --> PERSIST
+  LOOP --> UIOUT
+  LOOP --> VERIFY
+  DIRECT --> REPO
+  EXEC --> REPO
+  DIRECT --> LSPSRV
+  ASSEMBLE --> MEM
+  EV --> REPO
+  MEM --> REPO
+  BENCHCLI --> BENCHH
+  BENCHCLI --> DASH
+  BENCHCLI --> PEERS
+  GLASS --> EV
+  DEMO --> SANDBOX
+
+  class ARGV,ROUTE,LAUNCH,DEMO,UTIL,BENCHCLI,HELP entry
+  class PCLEAN,COMPACT,FOLD,ASSEMBLE,SYS,RESOLVE,STEPS,GEN,RETRY,REPAIR harness
+  class DISPATCH,TASK,DIRECT,SUBLOOP,EXEC,CAP,HINT tool
+  class EV,MEM,BENCHH,SESS persist
+  class LLM,REPO,LSPSRV,PEERS external
+  class UIB,TUI,CHAT,HL,GLASS,DASH ui
+  class SOFT,TARGET scaffold
 ```
+
+**Reading the master flow**
+
+| Phase | What happens |
+|-------|----------------|
+| **① Entry** | `cli.tsx` parses argv; subcommands vs folder paths follow explicit tie-breaker rules. |
+| **② Workspace** | Every artifact paths off one resolved root — no scattered `process.cwd()`. |
+| **③ Bootstrap** | Heavy modules lazy-load; trace + UiBus start; intake and LSP probes run once. |
+| **④ Turn prep** | Prompt clean → compaction → optional memory assemble → system prompt composition. |
+| **⑤–⑥ Loop** | AI SDK step loop with provider retry, tool repair, streaming to UiBus. |
+| **⑦–⑨ Tools** | Direct tools or `task` subagents; sandbox + caps before results re-enter history. |
+| **⑩–⑪ Output** | JSONL trace is source of truth; three UI renderers consume the same UiBus stream. |
+| **⑫ Done** | Today: model `stop`. Target: verification gate with evidence *(scaffold)*. |
+
+---
+
+## System overview
+
+High-level component relationships — use the [master flow](#complete-harness-flow) for step-by-step detail.
+
+```mermaid
+flowchart TB
+  subgraph humanSurface["Human surface"]
+    uiTui["Ink ADE TUI"]
+    uiChat["clai chat log"]
+    uiHeadless["Headless printer"]
+    uiDashboard["Bench dashboard SSE"]
+    uiBus["UiBus event API"]
+    uiTui --> uiBus
+    uiChat --> uiBus
+    uiHeadless --> uiBus
+  end
+
+  subgraph cliLayer["clai CLI"]
+    cliEntry["cli.tsx"]
+    cliWs["workspace.ts"]
+    cliEntry --> cliWs
+  end
+
+  subgraph harnessPlane["Harness plane"]
+    hAdapter["adapter"]
+    hContext["context"]
+    hMemory["memory"]
+    hAgents["agents"]
+    hVerify["verify scaffold"]
+    hTrace["trace JSONL"]
+    hAdapter --> hContext
+    hContext --> hMemory
+    hAdapter --> hAgents
+    hAdapter --> hVerify
+    hAdapter --> hTrace
+  end
+
+  subgraph toolPlane["Tool plane"]
+    tTools["tools"]
+    tLimits["limits.ts"]
+    tLsp["LSP"]
+    tIntake["intake"]
+    tShell["shell jobs"]
+    tSandbox["sandbox"]
+    tTools --> tLimits
+    tTools --> tSandbox
+    tTools --> tShell
+    tLsp --> tTools
+    tIntake --> tTools
+  end
+
+  subgraph benchPlane["Benchmark plane"]
+    bRunner["runner.ts"]
+    bCompare["compare scripts"]
+    bServer["server.ts SSE"]
+    bStore["store history.jsonl"]
+    bRunner --> bStore
+    bCompare --> bStore
+    bServer --> bStore
+  end
+
+  subgraph externalLayer["External"]
+    extLlm["LLM providers"]
+    extRepo["Workspace and fixtures"]
+    extLsp["Language servers"]
+  end
+
+  cliEntry --> uiBus
+  cliEntry --> hAdapter
+  cliEntry --> bRunner
+  hAdapter <-->|generateText and tools| extLlm
+  hAdapter --> tTools
+  tTools --> extRepo
+  tLsp --> extLsp
+  hTrace -->|events.jsonl| extRepo
+  hMemory -->|.clai memory| extRepo
+  bStore -->|.clai bench| extRepo
+  bServer --> uiDashboard
+```
+
+| Layer | Components |
+|-------|------------|
+| **Human surface** | Ink TUI, `clai chat` log, headless printer, bench dashboard — all fed by `UiBus` |
+| **CLI** | `cli.tsx` entry, `workspace.ts` root resolution |
+| **Harness plane** | Adapter loop, context compaction/assembly, memory store, subagents, trace writer, verify scaffold |
+| **Tool plane** | grep/glob/read/edit/write/bash, LSP, intake, sandbox, output limits, background shell jobs |
+| **Benchmark plane** | Task runner, compare scripts (pi/Codex/all), SSE server, `history.jsonl` store |
+| **External** | LLM providers, workspace files/fixtures, language servers |
 
 ---
 
@@ -132,6 +365,20 @@ flowchart LR
   HP -->|"assembled prompt extras"| Adapter["Agent loop"]
   Adapter -->|"tool calls"| TP
   T -->|"bounded summary"| Adapter
+```
+
+```mermaid
+flowchart TB
+  subgraph Cycle["One model step"]
+    A1["Adapter sends messages + tools"] --> LLM["Provider"]
+    LLM --> A2{"Tool calls?"}
+    A2 -->|no| DONE["Text response · UiBus · trace"]
+    A2 -->|yes| PAR["Execute in parallel"]
+    PAR --> TP2["Tool plane"]
+    TP2 --> CAP2["limits.ts cap"]
+    CAP2 --> HP2["compactHistory if needed"]
+    HP2 --> A1
+  end
 ```
 
 | Plane | Job | **Not** its job |
@@ -172,6 +419,20 @@ flowchart TD
 
 ## CLI entry points
 
+```mermaid
+flowchart LR
+  CLI["clai"] --> Q{"argv"}
+  Q -->|folder path| INT["Interactive Ink session"]
+  Q -->|run| RUN["Single-turn / first-turn agent"]
+  Q -->|chat| CHAT["Verbose log session"]
+  Q -->|demo*| DEMO["Offline · no API key"]
+  Q -->|bench*| BENCH["81-task eval"]
+  Q -->|glass| GLASS["Context assembly viewer"]
+  Q -->|intake| IN["Repo map JSON"]
+  Q -->|memory| MEM["Memory store CLI"]
+  Q -->|help| HLP["Light help only"]
+```
+
 | Command | API key | Description |
 |---------|---------|-------------|
 | `clai` / `clai <folder>` | Yes | Interactive Ink session on the workspace root |
@@ -197,6 +458,7 @@ Heavy modules (`adapter`, `sandbox`, `bench`, `memory`) are **lazy-imported** so
 
 ```mermaid
 sequenceDiagram
+  autonumber
   participant U as Operator
   participant UI as UiBus / TUI / chat log
   participant A as adapter loop
@@ -236,6 +498,34 @@ sequenceDiagram
   UI->>U: footer + trace path
 ```
 
+### Context pipeline within a turn
+
+```mermaid
+flowchart LR
+  P["User prompt"] --> CL["prompt-clean"]
+  CL --> CH{"Over token<br/>threshold?"}
+  CH -->|yes| CO["compactHistory<br/>keep task + last N turns"]
+  CH -->|no| AS["assemble() · optional"]
+  CO --> AS
+  AS --> SY["System prompt<br/>policy + intake + memory extras"]
+  SY --> AL["runAgentLoop"]
+```
+
+### Bench run path
+
+```mermaid
+flowchart TB
+  BR["bench run"] --> CP["Copy fixture → temp workspace"]
+  CP --> AG{"--offline?"}
+  AG -->|yes| SOL["_solution/ patch"]
+  AG -->|no| AGENT["runAgentLoop · toolProfile=coding"]
+  SOL --> CHK["node check.mjs"]
+  AGENT --> CHK
+  CHK --> REC["pass / fail / timeout / error"]
+  REC --> HIST["history.jsonl"]
+  HIST --> SSE["Dashboard SSE · :4310"]
+```
+
 **What runs today vs designed:**
 
 | Stage | Status | Notes |
@@ -254,92 +544,9 @@ sequenceDiagram
 
 ---
 
-## Module seams (`src/`)
+## Storage boundaries
 
-```
-src/
-├── cli.tsx              # Entry: launch, run, chat, demo, intake, memory, bench, glass
-├── workspace.ts         # Workspace root resolution + argv parsing
-├── adapter/
-│   ├── index.ts         # runAgentLoop(), resolveModel(), system policy, toolProfile
-│   ├── providers.ts     # Pluggable Vercel AI SDK provider registry
-│   ├── retry.ts         # 429/5xx exponential backoff
-│   └── env.ts           # .env loading
-├── agents/
-│   ├── index.ts         # Re-exports
-│   └── task.ts          # explore/general subagent + `task` AI SDK tool
-├── chat/
-│   └── index.ts         # `clai chat` entry → session loop + log printer
-├── session/
-│   └── interactive.ts   # Shared multi-turn chat/log loop (runChatLoop)
-├── tools/
-│   ├── index.ts         # grep, glob, read, edit, write, bash, parallel, LSP, intake
-│   ├── bg-shell.ts      # bash_bg / bash_jobs / bash_output / bash_kill
-│   ├── common.ts        # workspace path confinement, tool events
-│   ├── limits.ts        # Model-facing output caps (single truncation layer)
-│   ├── log-preview.ts   # Cap-aware previews for chat log / tool events
-│   ├── lsp.ts           # TS Language Service + Python pyright
-│   └── intake.ts        # Repository map scanner
-├── shell/
-│   └── jobs.ts          # Session-scoped ShellJobManager (bg processes)
-├── context/
-│   ├── index.ts         # ContextManager.assemble() + ablation gates + stage emit
-│   ├── stages.ts        # context_stage types + flag heuristics
-│   ├── compact.ts       # Deterministic history compaction
-│   ├── prompt-clean.ts  # User-prompt filler stripping
-│   └── windows.ts       # Per-provider/model window + soft/hard thresholds
-├── memory/
-│   ├── index.ts         # SQLite / JSON tiered store
-│   └── cli.ts           # memory list|get|set|delete|export
-├── sandbox/
-│   └── index.ts         # @anthropic-ai/sandbox-runtime + stub fallback
-├── verify/
-│   └── index.ts         # Completion contract (scaffold)
-├── trace/
-│   ├── index.ts         # Append-only JSONL per run
-│   └── tail.ts          # Reusable read-only events.jsonl tailer
-├── glass/
-│   └── cli.ts           # `clai glass` entry
-├── ui-glass/
-│   ├── index.ts         # Glass package entry
-│   ├── app.tsx          # Ink glass pane (reuses ui/theme.ts)
-│   └── model.ts         # Stage row reducer
-├── ui/
-│   ├── index.tsx        # Public facade: bus, shell, headless, log, session-log
-│   ├── events.ts        # UiBus + typed UiEvent union
-│   ├── state.ts         # reduceUiEvent → UiState
-│   ├── app.tsx          # Ink ClaiApp shell
-│   ├── bridge.ts        # Tool plane → UiBus adapter
-│   ├── headless.ts      # CLAI_NO_TUI / non-TTY printer
-│   ├── log.ts           # Verbose stdout printer for `clai chat`
-│   ├── session-log.ts   # TUI → <traceDir>/session.jsonl
-│   ├── scroll.ts        # Line-based transcript windowing
-│   ├── components.tsx   # Activity, footer, plan, tool rows
-│   ├── theme.ts         # Colors, glyphs, wordmark
-│   └── mouse.ts         # SGR mouse / alt-screen helpers
-├── bench/
-│   ├── index.ts         # runBenchCli entry
-│   ├── runner.ts        # Parallel task execution + check.mjs (toolProfile=coding)
-│   ├── server.ts        # Live dashboard (node:http + SSE)
-│   ├── store.ts         # history.jsonl + LiveRunFeed + compare archives
-│   ├── jobs.ts          # Dashboard-triggered clai / offline / compare jobs
-│   ├── types.ts         # BenchRunRecord, LiveSnapshot
-│   ├── pricing.ts       # Token → USD estimates
-│   ├── compare-pi.ts    # CLAI vs pi race + scorecard
-│   ├── compare-codex.ts # CLAI vs Codex race
-│   ├── compare-all.ts   # CLAI vs pi vs Codex (dashboard compare default)
-│   ├── compare-agy.ts   # CLAI vs Antigravity `agy` (CLI-only)
-│   ├── scaffold-fixtures.ts / verify-fixtures.ts
-│   ├── task-catalog/    # Catalog sources for scaffold (TB / DeepSWE)
-│   ├── drive-*.ts       # Thin CLI drivers (list / offline / serve)
-│   └── dashboard.html   # Self-contained metrics + compare UI
-└── demo/
-    ├── offline.ts       # No-API edit+bash happy path
-    ├── lsp.ts           # Intake + diagnostics demo
-    └── injection.ts     # Memory/context injection resistance demo
-```
-
-### Storage boundaries (no dual-write)
+No dual-write — each store owns one concern.
 
 ```mermaid
 flowchart LR
@@ -409,6 +616,31 @@ Retry policy (`retry.ts`): up to 4 retries on 429/5xx; quota errors wait ~60s ba
 ---
 
 ## Tool plane
+
+```mermaid
+flowchart TB
+  subgraph Direct["Direct tools"]
+    GR["grep · glob · parallel"]
+    RW["read · edit · write"]
+    SH["bash · bash_bg · bash_jobs · bash_output · bash_kill"]
+    LS["lsp_definition · lsp_references · lsp_diagnostics"]
+    IN["repo_intake"]
+  end
+
+  subgraph Sub["Subagent · task tool"]
+    EX["explore · read-only"]
+    GN["general · + bash"]
+    SUM["summary-only · 2 KB cap to parent"]
+    EX --> SUM
+    GN --> SUM
+  end
+
+  CALL["Model tool_calls · parallel"] --> Direct
+  CALL --> Sub
+  Direct --> SB["sandbox + workspace confinement"]
+  Sub --> SB
+  SB --> LM["limits.ts truncation"]
+```
 
 | Tool | Role | Notes |
 |------|------|-------|
@@ -523,7 +755,7 @@ Demonstrated by `clai demo injection` against `fixtures/red-team-readme/`.
 ### Memory store (`memory/index.ts`)
 
 | Tier | Writable | Default TTL |
-|------|----------|---------------|
+|------|----------|-------------|
 | `task` | Yes | `task` |
 | `convention` | Yes | `durable` |
 | `evidence` | Yes | `permanent` |
@@ -537,6 +769,20 @@ CLI: `clai memory list|get|set|delete|export` with `--tier`, `--cite`, `--supers
 ---
 
 ## Sandbox
+
+```mermaid
+flowchart TD
+  CMD["bash / bash_bg request"] --> MODE{"CLAI_SANDBOX_MODE · native?"}
+  MODE -->|runtime| RT["sandbox-runtime wrap"]
+  MODE -->|stub / missing| ST["structured stub"]
+  RT --> SCRUB["env scrub"]
+  ST --> SCRUB
+  SCRUB --> GATE{"Approval gate"}
+  GATE -->|egress · destructive · out_of_repo| ASK["UiBus approval · deny default"]
+  GATE -->|ok or CLAI_AUTO_APPROVE| RUN["execute · cwd in workspace"]
+  ASK -->|denied| FAIL["tool error"]
+  ASK -->|approved| RUN
+```
 
 `src/sandbox/index.ts` wraps `@anthropic-ai/sandbox-runtime` with a structured stub fallback.
 
@@ -555,9 +801,18 @@ Env scrub removes `*_API_KEY`, `*_TOKEN`, `*_SECRET`, and similar before any she
 
 ---
 
-## Trace
+## Trace & glass
 
 Append-only JSONL at `.clai/traces/<runId>/events.jsonl`.
+
+```mermaid
+flowchart LR
+  RUN["Agent loop · tools · sandbox"] --> TW["TraceWriter"]
+  TW --> EV["events.jsonl"]
+  EV --> GL["clai glass · tail.ts"]
+  EV --> AUDIT["Judge replay · provenance"]
+  UIB2["UiBus"] --> SESS["session.jsonl"]
+```
 
 | Event type | Payload |
 |------------|---------|
@@ -583,7 +838,16 @@ Parallel observability surface — a **second terminal process** that tails the 
 | `--follow-latest` (default when no `--run`) | Tail the most recently modified run under `.clai/traces/`; auto-switch when a new run starts |
 | `--run <runId>` | Pin to a run and replay from the start (safe demo without a live LLM call) |
 
-Stages (in order): `query_planner` → `structural_retrieval` → `memory_retrieval` → `relevance_scoring` → `stale_check` → `injection_scan` → `token_budget` → `summarizer`.
+```mermaid
+flowchart LR
+  S1["query_planner"] --> S2["structural_retrieval"]
+  S2 --> S3["memory_retrieval"]
+  S3 --> S4["relevance_scoring"]
+  S4 --> S5["stale_check"]
+  S5 --> S6["injection_scan"]
+  S6 --> S7["token_budget"]
+  S7 --> S8["summarizer"]
+```
 
 | Stage | Detail payload (complete) |
 |-------|---------------------------|
@@ -648,13 +912,24 @@ pnpm bench:verify-fixtures       # broken must fail, _solution/ must pass
 ```
 
 ```mermaid
-flowchart LR
-  R["bench run"] --> C["Copy fixture → temp dir"]
-  C --> A["Agent loop or offline _solution/"]
-  A --> V["node check.mjs"]
-  V --> P["pass / fail / timeout / error"]
+flowchart TB
+  subgraph Eval["Eval loop"]
+    R["bench run"] --> C["Copy fixture → temp dir"]
+    C --> A["Agent loop or offline _solution/"]
+    A --> V["node check.mjs"]
+    V --> P["pass / fail / timeout / error"]
+  end
   P --> H["history.jsonl"]
   H --> D["Dashboard SSE"]
+  subgraph Compare["Harness compare"]
+    CLAI["CLAI runner"]
+    PI["pi CLI"]
+    CX["Codex CLI"]
+    CLAI --> RACE["sideParallel race"]
+    PI --> RACE
+    CX --> RACE
+    RACE --> SC["compare-*.json scorecards"]
+  end
 ```
 
 | Command | Description |
@@ -812,7 +1087,7 @@ Node **≥ 20** required. Package manager: **pnpm 9**.
 
 ---
 
-## Side-by-side: when CLAI is the better harness
+## When CLAI wins
 
 ### CLAI wins on
 
@@ -823,7 +1098,7 @@ Node **≥ 20** required. Package manager: **pnpm 9**.
 | **Honest completion** | Verification contract aims for evidence-based `PASS`, not “model stopped talking” |
 | **Context discipline** | Token budget, staleness invalidation, injection labels, deterministic compaction |
 | **Subagent isolation** | `task` (`explore` / `general`) keeps investigation out of parent context |
-| **Simplicity** | One package, clear seams (`adapter` / `tools` / `agents` / `shell` / `memory` / `context` / `trace` / `bench`) |
+| **Simplicity** | One package, clear layers — adapter, tools, agents, memory, context, trace, bench |
 | **Offline demos** | `clai demo`, `clai demo lsp`, `clai intake`, `clai bench run --offline` — no API key |
 | **Platform pragmatism** | Optional deps + stub fallbacks; install succeeds even without C++ toolset |
 
