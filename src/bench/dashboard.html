@@ -308,6 +308,26 @@
   .controls .job-meta { color: var(--muted); font-size: 12px; margin-left: auto; }
   .controls .job-meta strong { color: var(--text); }
   .controls .job-err { color: var(--error); font-size: 12px; width: 100%; margin-top: 2px; }
+  .live-notice {
+    display: none;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--warning);
+    border-left-width: 3px;
+    background: rgba(245, 167, 66, 0.08);
+    color: var(--text);
+    font-size: 12px;
+  }
+  .live-notice.show { display: block; }
+  .live-notice.stall { border-color: var(--muted); background: rgba(255,255,255,0.03); }
+  .live-notice .ln-title { font-weight: 600; color: var(--warning); margin-bottom: 4px; }
+  .live-notice.stall .ln-title { color: var(--muted); }
+  .live-notice .ln-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .live-notice .ln-actions button {
+    font: inherit; cursor: pointer;
+    background: var(--element); color: var(--text);
+    border: 1px solid var(--border-subtle); padding: 4px 8px;
+  }
   .ctrl-group {
     display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
     padding-left: 10px;
@@ -641,6 +661,7 @@
     <button type="button" class="primary" id="btn-clai" data-kind="clai">CLAI</button>
     <button type="button" id="btn-offline" data-kind="offline">offline</button>
     <button type="button" class="primary" id="btn-compare" data-kind="compare">compare all</button>
+    <button type="button" id="btn-resume" title="Resume latest compare: keep pass/fail per harness, retry errors">Resume</button>
     <button type="button" class="btn-report" id="btn-report" title="AI research report (auto-runs after CLAI / compare finishes)">report</button>
     <button type="button" class="danger" id="btn-stop" disabled>Stop</button>
     <div class="ctrl-group" id="task-count" title="How many catalog tasks to run">
@@ -698,6 +719,7 @@
     <details class="fold" id="live-as-fold" open>
       <summary id="live-as-fold-summary">Live stream</summary>
       <div class="fold-body">
+        <div class="live-notice" id="live-notice" hidden></div>
         <div class="meta" id="live-meta"><span class="empty">waiting for a run…</span></div>
         <div class="progress" id="live-progress" aria-hidden="true"></div>
         <div class="task-focus" id="task-focus"></div>
@@ -826,6 +848,7 @@
   /** Workers for CLAI/offline; for compare = workers per harness. Default 1 (DeepSeek-safe). */
   let parallelWorkers = 1;
   let lastQuotaHit = false;
+  let lastHarnessStall = false;
   let reportProgress = null;
   let reportData = null;
   const REPORT_STAGE_LABELS = {
@@ -840,6 +863,60 @@
     error: "Failed",
   };
   const startedMs = () => snapshot ? Date.parse(snapshot.startedAt) : Date.now();
+
+  function renderLiveNotice(opts) {
+    const el = $("live-notice");
+    if (!el) return;
+    const quota = !!opts.quota;
+    const stall = !!opts.stall;
+    lastHarnessStall = stall;
+    if (!quota && !stall) {
+      el.className = "live-notice";
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    if (quota) {
+      el.className = "live-notice show";
+      el.innerHTML =
+        '<div class="ln-title">Provider quota / rate limit</div>' +
+        "<div>" + esc(opts.quotaLabel || "CLAI provider is backing off") + "</div>" +
+        '<div class="ln-actions">' +
+          '<button type="button" id="btn-notice-parallel1">Set parallel 1</button>' +
+          '<button type="button" id="btn-notice-stop">Stop run</button>' +
+        "</div>";
+      const p1 = $("btn-notice-parallel1");
+      if (p1) p1.onclick = () => setParallelWorkers(1);
+      const st = $("btn-notice-stop");
+      if (st) st.onclick = () => stopJob();
+      return;
+    }
+    el.className = "live-notice show stall";
+    const n = opts.stallCount || 0;
+    el.innerHTML =
+      '<div class="ln-title">pi/codex stall or circuit breaker</div>' +
+      "<div>" +
+      (n
+        ? n + " harness-side stall/timeout row(s) — CLAI may still be fine. Use Resume after Stop."
+        : "Harness stall detected — CLAI may still be fine. Use Resume after Stop.") +
+      "</div>" +
+      '<div class="ln-actions">' +
+        '<button type="button" id="btn-notice-resume">Resume compare</button>' +
+        '<button type="button" id="btn-notice-stop2">Stop run</button>' +
+      "</div>";
+    const rs = $("btn-notice-resume");
+    if (rs) rs.onclick = () => startJob("compare", { resume: true });
+    const st2 = $("btn-notice-stop2");
+    if (st2) st2.onclick = () => stopJob();
+  }
+
+  function compareIsResumable(c) {
+    if (!c || c.partial === true) return false;
+    if (c.stopped) return true;
+    const rows = [].concat(c.clai || [], c.pi || [], c.codex || []);
+    return rows.some((r) => r && r.status === "error");
+  }
 
   function fmtMs(ms) {
     if (ms == null || Number.isNaN(ms)) return "—";
@@ -978,23 +1055,36 @@
       if (focus) focus.innerHTML = "";
       if (foldSum) foldSum.textContent = "All tasks";
       prog.innerHTML = "";
+      renderLiveNotice({ quota: false, stall: false });
       syncStage();
       return;
     }
     const rl = snapshot.rateLimit;
-    const quotaTasks = (snapshot.tasks || []).filter(
-      (t) => t.error && /quota|rate.?limit|429/i.test(t.error),
-    );
-    const stallTasks = (snapshot.tasks || []).filter(
-      (t) => t.error && /stall|hung|rate-limited/i.test(t.error),
-    );
-    if (
-      (rl && rl.label && /quota|rate.?limit|waiting \d+s|provider hiccup/i.test(rl.label)) ||
-      quotaTasks.length ||
-      stallTasks.length
-    ) {
+    // CLAI-only quota signals — do not treat pi/codex stall copy as CLAI quota.
+    const claiQuotaTasks = (snapshot.tasks || []).filter((t) => {
+      const err = t.error || "";
+      const claiErr = /claiErr=([^·]+)/i.exec(err);
+      // Compare rows: only claiErr=… counts. Bare CLAI live errors also count.
+      const dual = /clai=|pi=|codex=/i.test(err);
+      const text = dual ? (claiErr ? claiErr[1] : "") : err;
+      return text && /quota|429|waiting \d+s|provider hiccup|rate limited/i.test(text);
+    });
+    const harnessStallTasks = (snapshot.tasks || []).filter((t) => {
+      const err = t.error || "";
+      return /(?:piErr|codexErr)=[^·]*(?:stall|hung|circuit breaker|timed out|no (?:pi|codex) JSON)/i.test(err)
+        || (!/clai=|pi=|codex=/i.test(err) && /stall|hung|circuit breaker/i.test(err));
+    });
+    const claiQuotaLive =
+      rl && rl.label && /quota|rate.?limit|waiting \d+s|provider hiccup/i.test(rl.label);
+    if (claiQuotaLive || claiQuotaTasks.length) {
       lastQuotaHit = true;
     }
+    renderLiveNotice({
+      quota: !!(claiQuotaLive || claiQuotaTasks.length),
+      quotaLabel: rl && rl.label ? rl.label : "Provider quota / rate limit",
+      stall: !!harnessStallTasks.length && !(claiQuotaLive || claiQuotaTasks.length),
+      stallCount: harnessStallTasks.length,
+    });
     const tasks = snapshot.tasks || [];
     const counts = { queued: 0, running: 0, pass: 0, fail: 0, timeout: 0, error: 0 };
     let tokensIn = 0, tokensOut = 0, cost = 0;
@@ -2170,6 +2260,11 @@
   }
 
   function renderCompare(skipCharts) {
+    const resumeBtn = $("btn-resume");
+    if (resumeBtn) {
+      const running = job.status === "running" || job.status === "stopping";
+      resumeBtn.disabled = running || !compareIsResumable(compare);
+    }
     const panel = $("compare-panel");
     if (!compare) {
       panel.style.display = "none";
@@ -2492,6 +2587,10 @@
     $("btn-clai").disabled = running;
     $("btn-offline").disabled = running;
     $("btn-compare").disabled = running;
+    const resumeBtn = $("btn-resume");
+    if (resumeBtn) {
+      resumeBtn.disabled = running || !compareIsResumable(compare);
+    }
     $("btn-stop").disabled = !running;
     $("btn-stop").textContent = job.status === "stopping" ? "Stopping…" : "Stop";
     renderTaskCount();
@@ -2517,15 +2616,19 @@
     syncStage();
   }
 
-  async function startJob(kind) {
+  async function startJob(kind, opts) {
+    opts = opts || {};
     $("job-err").textContent = "";
     historyChartsPinned = false;
     viewingHistory = false;
     const limit = effectiveTaskLimit();
     const workers = Math.max(1, Math.min(16, parallelWorkers));
-    if (lastQuotaHit && workers > 1) {
+    if (lastQuotaHit && workers > 1 && !opts.resume) {
       $("job-err").textContent =
         "Last run hit rate limits — consider parallel 1. Starting anyway…";
+    } else if (lastHarnessStall && opts.resume) {
+      $("job-err").textContent =
+        "Resuming compare — keeping pass/fail per harness, retrying errors…";
     }
     try {
       const payload = {
@@ -2533,6 +2636,7 @@
         limit,
         parallel: kind === "compare" ? Math.max(workers * 3, workers) : workers,
         freshClai: kind === "compare" ? true : undefined,
+        resume: kind === "compare" && opts.resume ? true : undefined,
       };
       if (kind === "compare") payload.sideParallel = workers;
       const res = await fetch("/api/jobs", {
@@ -2929,6 +3033,7 @@
   $("btn-clai").addEventListener("click", () => startJob("clai"));
   $("btn-offline").addEventListener("click", () => startJob("offline"));
   $("btn-compare").addEventListener("click", () => startJob("compare"));
+  $("btn-resume").addEventListener("click", () => startJob("compare", { resume: true }));
   $("btn-stop").addEventListener("click", () => stopJob());
   $("btn-report").addEventListener("click", () => startReport());
   $("btn-report-close").addEventListener("click", () => closeReportOverlay());

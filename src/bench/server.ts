@@ -10,7 +10,7 @@
  *   GET /api/compare/:id archived compare scorecard
  *   GET /api/tasks      catalog ids + count
  *   GET /api/jobs/current
- *   POST /api/jobs      start clai | offline | compare ({ limit?, parallel?, sideParallel?, … })
+ *   POST /api/jobs      start clai | offline | compare ({ limit?, parallel?, sideParallel?, resume?, … })
  *   POST /api/jobs/stop
  *   POST /api/report    start AI research report ({ compareId?, runId? })
  *   GET /api/report/current
@@ -339,6 +339,7 @@ export async function startBenchServer(
           tasks?: string[];
           limit?: number;
           freshClai?: boolean;
+          resume?: boolean;
         };
         const kind = body.kind;
         if (kind !== "clai" && kind !== "offline" && kind !== "compare") {
@@ -366,6 +367,7 @@ export async function startBenchServer(
           tasks: body.tasks,
           limit,
           freshClai: body.freshClai,
+          resume: body.resume === true,
         });
         broadcast({ type: "job", job: jobs.status() });
         if (!result.ok) {

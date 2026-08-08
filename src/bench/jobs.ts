@@ -31,6 +31,8 @@ export type JobManager = {
     /** Take the first N catalog tasks (after optional tasks filter). */
     limit?: number;
     freshClai?: boolean;
+    /** Compare only: keep pass/fail per harness; retry error/aborted sides. */
+    resume?: boolean;
   }) => { ok: true } | { ok: false; status: number; error: string };
   stop: () => { ok: true } | { ok: false; error: string };
   getCompare: () => CompareResult | null;
@@ -88,6 +90,7 @@ export function createJobManager(opts: {
     tasks?: string[];
     limit?: number;
     freshClai?: boolean;
+    resume?: boolean;
   }) => {
     await loadEnvFiles();
     const fixturesRoot = resolveBenchFixturesRoot();
@@ -109,6 +112,7 @@ export function createJobManager(opts: {
         parallel: req.parallel ?? 4,
         sideParallel: req.sideParallel,
         freshClai: req.freshClai ?? true,
+        resume: req.resume === true,
         signal,
         onProgress: (p) => {
           if (p.live) opts.live.update(p.live);
@@ -163,65 +167,88 @@ export function createJobManager(opts: {
         req.kind === "compare" && latestCompare && latestCompare.partial !== true
           ? latestCompare
           : null;
-      if (req.kind === "compare") {
-        const zeroScore = { pass: 0, fail: 0, err: 0, total: 0, rate: 0 };
-        publishCompare({
-          at: new Date().toISOString(),
-          mode: "all",
-          piProvider: process.env.PI_PROVIDER ?? "deepseek",
-          piModel: process.env.PI_MODEL ?? "deepseek-v4-flash",
-          pi: [],
-          clai: [],
-          codex: [],
-          piScore: { ...zeroScore },
-          claiScore: { ...zeroScore },
-          codexScore: { ...zeroScore },
-          codexProfile: process.env.CODEX_PROFILE ?? "deepseek",
-          codexModel: process.env.CODEX_MODEL ?? "deepseek-v4-flash",
-          claiLabel: "starting…",
-          partial: true,
-        });
-      }
       setStatus({
         status: "running",
         kind: req.kind,
         startedAt: new Date().toISOString(),
       });
-      void run(req)
-        .then(() => {
+      void (async () => {
+        if (req.kind === "compare") {
+          let seed = restoreCompare;
+          if (req.resume && !seed) {
+            try {
+              const diskPath = path.join(
+                opts.workspaceRoot,
+                ".clai",
+                "bench",
+                "compare-pi.json",
+              );
+              seed = JSON.parse(await readFile(diskPath, "utf8")) as CompareResult;
+              if (seed.partial === true) seed = null;
+            } catch {
+              seed = null;
+            }
+          }
+          if (req.resume && seed) {
+            publishCompare({
+              ...seed,
+              partial: true,
+              stopped: undefined,
+              claiLabel: `${seed.claiLabel || "compare"} · resuming…`,
+            });
+          } else {
+            const zeroScore = { pass: 0, fail: 0, err: 0, total: 0, rate: 0 };
+            publishCompare({
+              at: new Date().toISOString(),
+              mode: "all",
+              piProvider: process.env.PI_PROVIDER ?? "deepseek",
+              piModel: process.env.PI_MODEL ?? "deepseek-v4-flash",
+              pi: [],
+              clai: [],
+              codex: [],
+              piScore: { ...zeroScore },
+              claiScore: { ...zeroScore },
+              codexScore: { ...zeroScore },
+              codexProfile: process.env.CODEX_PROFILE ?? "deepseek",
+              codexModel: process.env.CODEX_MODEL ?? "deepseek-v4-flash",
+              claiLabel: "starting…",
+              partial: true,
+            });
+          }
+        }
+        try {
+          await run(req);
           const stopped = abort?.signal.aborted;
           finish(stopped ? "stopped by user" : undefined);
-        })
-        .catch((err) => {
-          void (async () => {
-            // Failed before a finished scorecard — don't leave SSE on empty seed.
-            if (req.kind === "compare" && latestCompare?.partial === true) {
-              if (restoreCompare) {
-                publishCompare(restoreCompare);
-              } else {
-                try {
-                  const diskPath = path.join(
-                    opts.workspaceRoot,
-                    ".clai",
-                    "bench",
-                    "compare-pi.json",
-                  );
-                  publishCompare(
-                    JSON.parse(await readFile(diskPath, "utf8")) as CompareResult,
-                  );
-                } catch {
-                  publishCompare(null);
-                }
+        } catch (err) {
+          // Failed before a finished scorecard — don't leave SSE on empty seed.
+          if (req.kind === "compare" && latestCompare?.partial === true) {
+            if (restoreCompare) {
+              publishCompare(restoreCompare);
+            } else {
+              try {
+                const diskPath = path.join(
+                  opts.workspaceRoot,
+                  ".clai",
+                  "bench",
+                  "compare-pi.json",
+                );
+                publishCompare(
+                  JSON.parse(await readFile(diskPath, "utf8")) as CompareResult,
+                );
+              } catch {
+                publishCompare(null);
               }
             }
-            const msg = err instanceof Error ? err.message : String(err);
-            const stopped =
-              abort?.signal.aborted ||
-              (err instanceof Error && err.name === "AbortError") ||
-              /aborted/i.test(msg);
-            finish(stopped ? "stopped by user" : msg);
-          })();
-        });
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          const stopped =
+            abort?.signal.aborted ||
+            (err instanceof Error && err.name === "AbortError") ||
+            /aborted/i.test(msg);
+          finish(stopped ? "stopped by user" : msg);
+        }
+      })();
       return { ok: true as const };
     },
     stop: () => {

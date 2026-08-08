@@ -344,7 +344,7 @@ export function runCodex(
       if (idleStalled) {
         output = `idle stall · no stdout for ${idleMs}ms after JSON (hung mid-stream)`;
       } else if (stalled && !output.trim()) {
-        output = `stall · 0 bytes after ${stallMs}ms (no codex JSON — hung or rate-limited)`;
+        output = `stall · 0 bytes after ${stallMs}ms (no codex JSON — hung / no output)`;
       } else if ((timedOut || stalled) && output.trim()) {
         output = `${output} · jsonLines=${jsonLines} raw=${raw.length}`;
       } else if (timedOut && !output.trim()) {
@@ -464,7 +464,7 @@ export async function runCodexTask(
         wallMs: codex.wallMs,
         detail: truncateDetail(
           empty
-            ? `timed out after ${codex.wallMs}ms · no codex JSON (hung / rate-limited)`
+            ? `timed out after ${codex.wallMs}ms · no codex JSON (hung / no output)`
             : codex.output.startsWith("stall") || codex.output.startsWith("idle")
               ? codex.output
               : `timed out after ${codex.wallMs}ms · ${codex.output.slice(-800)}`,

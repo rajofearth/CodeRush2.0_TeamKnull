@@ -29,6 +29,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadEnvFiles } from "../adapter/env.js";
+import {
+  assertResumeCompatible,
+  isKeepableRow,
+  seedResumeFromPrior,
+  type ResumeSeed,
+} from "./compare-resume.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
 import { estimateUsdBench } from "./pricing.js";
 import { runBench } from "./runner.js";
@@ -113,6 +119,9 @@ export type RunComparePiOptions = {
   parallel?: number;
   /** Workers per harness when racing; defaults to ceil(parallel/2). */
   sideParallel?: number;
+  /** Keep pass/fail from latest scorecard; retry error sides. */
+  resume?: boolean;
+  resumeFrom?: CompareResult;
   signal?: AbortSignal;
   onProgress?: (progress: CompareProgress) => void;
 };
@@ -399,7 +408,7 @@ function runPi(
       if (idleStalled) {
         output = `idle stall · no stdout for ${idleMs}ms after JSON (hung mid-stream)`;
       } else if (stalled && !output.trim()) {
-        output = `stall · 0 bytes after ${stallMs}ms (no pi JSON — hung or rate-limited)`;
+        output = `stall · 0 bytes after ${stallMs}ms (no pi JSON — hung / no output)`;
       } else if ((timedOut || stalled) && output.trim()) {
         output = `${output} · jsonLines=${jsonLines} raw=${raw.length}`;
       } else if (timedOut && !output.trim()) {
@@ -530,7 +539,7 @@ export async function runPiTask(
         wallMs: pi.wallMs,
         detail: truncateDetail(
           empty
-            ? `timed out after ${pi.wallMs}ms · no pi JSON (hung / rate-limited)`
+            ? `timed out after ${pi.wallMs}ms · no pi JSON (hung / no output)`
             : pi.output.startsWith("stall")
               ? pi.output
               : `timed out after ${pi.wallMs}ms · ${pi.output.slice(-800)}`,
@@ -783,7 +792,11 @@ export async function runComparePi(
     1,
     opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 4),
   );
-  const freshClai = defaultFreshClai(opts.freshClai);
+  const resume =
+    opts.resume === true ||
+    process.env.COMPARE_RESUME === "1" ||
+    process.env.COMPARE_RESUME === "true";
+  const freshClai = resume ? true : defaultFreshClai(opts.freshClai);
   // Racing both harnesses at full parallel doubles API load (e.g. 8+8=16) and
   // DeepSeek stalls pi with zero JSON until task timeout. Split concurrency.
   const sideParallel =
@@ -812,23 +825,53 @@ export async function runComparePi(
     throw new Error("No bench tasks to compare.");
   }
 
-  const runId = `compare-pi-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  let resumeSeed: ResumeSeed | null = null;
+  if (resume) {
+    let prior = opts.resumeFrom ?? null;
+    if (!prior) {
+      const stored = await new BenchStore(workspaceRoot).getCompare();
+      prior = stored ? (stored as unknown as CompareResult) : null;
+    }
+    if (!prior) {
+      throw new Error(
+        "Resume requested but no prior compare-pi.json scorecard found.",
+      );
+    }
+    assertResumeCompatible(prior, { piProvider: provider, piModel: model });
+    resumeSeed = seedResumeFromPrior(
+      tasks.map((t) => t.id),
+      prior,
+    );
+  }
+
+  const liveRunId = `compare-pi-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  const compareId = resumeSeed?.compareId || liveRunId;
   const startedAt = new Date().toISOString();
 
-  let claiRows: CompareRow[] = [];
-  let claiLabel = "pending";
-  let claiRunId: string | undefined;
+  let claiRows: CompareRow[] = resumeSeed
+    ? (resumeSeed.clai.filter(Boolean) as CompareRow[])
+    : [];
+  let claiLabel = resumeSeed?.claiLabel
+    ? `${resumeSeed.claiLabel} · resumed`
+    : "pending";
+  let claiRunId: string | undefined = resumeSeed?.claiRunId;
   let claiLive: LiveSnapshot | null = null;
-  const piRows: Array<CompareRow | undefined> = new Array(tasks.length);
+  const piRows: Array<CompareRow | undefined> = resumeSeed
+    ? [...resumeSeed.pi]
+    : new Array(tasks.length);
+  const piQueue = resumeSeed
+    ? [...resumeSeed.piTodo]
+    : tasks.map((_, i) => i);
+  const claiTodoIds = resumeSeed ? new Set(resumeSeed.claiTodo) : null;
   const piRunning = new Set<string>();
   const activeChildren = new Set<ChildProcess>();
 
   const concurrency = { compareParallel: parallel, sideParallel };
-  const compareIds = () => ({ compareId: runId, claiRunId });
+  const compareIds = () => ({ compareId, claiRunId });
 
   const emit = (phase: CompareProgress["phase"], done = false) => {
     const live = buildCompareLiveSnapshot(tasks, claiLive, piRows, piRunning, {
-      runId,
+      runId: liveRunId,
       startedAt,
       model,
       parallel: sideParallel,
@@ -876,6 +919,12 @@ export async function runComparePi(
 
   const midPhase = (): CompareProgress["phase"] => (freshClai ? "both" : "pi");
 
+  const mergeClaiRow = (row: CompareRow) => {
+    const idx = claiRows.findIndex((r) => r.id === row.id);
+    if (idx >= 0) claiRows[idx] = row;
+    else claiRows.push(row);
+  };
+
   const runClaiSide = async () => {
     if (!freshClai) {
       const hist = await loadClaiFromHistory(workspaceRoot, tasks);
@@ -885,38 +934,83 @@ export async function runComparePi(
       emit("clai");
       return;
     }
+    const tasksForClai =
+      claiTodoIds != null
+        ? tasks.filter((t) => claiTodoIds.has(t.id))
+        : tasks;
+    if (!tasksForClai.length) {
+      claiLabel = claiLabel.includes("resumed")
+        ? claiLabel
+        : `${claiLabel || compareId} [resumed]`;
+      emit(midPhase());
+      return;
+    }
+    const keptById = new Map(
+      claiRows.filter((r) => isKeepableRow(r)).map((r) => [r.id, r]),
+    );
     const record = await runBench({
       workspaceRoot,
-      tasks,
+      tasks: tasksForClai,
       parallel: sideParallel,
       offline: false,
       signal: opts.signal,
       onUpdate: (snap) => {
-        claiLive = snap;
-        // Only finished tasks enter the scorecard (queued/running ≠ error).
-        claiRows = snap.tasks
-          .filter(
-            (t) =>
-              t.status === "pass" ||
-              t.status === "fail" ||
-              t.status === "error" ||
-              t.status === "timeout",
-          )
-          .map((t) =>
-            taskResultToClaiRow(
-              {
+        claiLive = {
+          ...snap,
+          tasks: tasks.map((t) => {
+            const live = snap.tasks.find((x) => x.id === t.id);
+            if (live) return live;
+            const kept = keptById.get(t.id);
+            if (!kept) {
+              return {
                 id: t.id,
-                status: t.status,
-                wallMs: t.wallMs ?? 0,
-                error: t.error,
-                tokensIn: t.tokensIn,
-                tokensOut: t.tokensOut,
-                cost: t.cost,
-              },
-              snap.provider,
-            ),
-          );
-        claiLabel = `${snap.runId} [${snap.provider}/${snap.model}] fresh`;
+                title: t.title,
+                category: t.category,
+                status: "queued" as const,
+                tokensIn: 0,
+                tokensOut: 0,
+                cost: 0,
+              };
+            }
+            return {
+              id: t.id,
+              title: t.title,
+              category: t.category,
+              status: kept.status as LiveTask["status"],
+              wallMs: kept.wallMs,
+              tokensIn: Number(kept.tokensIn) || 0,
+              tokensOut: Number(kept.tokensOut) || 0,
+              cost: Number(kept.cost) || 0,
+              error: kept.detail,
+            };
+          }),
+        };
+        for (const t of snap.tasks) {
+          if (
+            t.status === "pass" ||
+            t.status === "fail" ||
+            t.status === "error" ||
+            t.status === "timeout"
+          ) {
+            mergeClaiRow(
+              taskResultToClaiRow(
+                {
+                  id: t.id,
+                  status: t.status,
+                  wallMs: t.wallMs ?? 0,
+                  error: t.error,
+                  tokensIn: t.tokensIn,
+                  tokensOut: t.tokensOut,
+                  cost: t.cost,
+                },
+                snap.provider,
+              ),
+            );
+          }
+        }
+        claiLabel =
+          `${snap.runId} [${snap.provider}/${snap.model}]` +
+          (resume ? " resumed" : " fresh");
         claiRunId = snap.runId;
         emit(midPhase());
       },
@@ -924,10 +1018,14 @@ export async function runComparePi(
     await new BenchStore(workspaceRoot).appendRun({
       ...record,
       kind: "clai",
-      compareId: runId,
+      compareId,
     });
-    claiRows = record.tasks.map((t) => taskResultToClaiRow(t, record.provider));
-    claiLabel = `${record.runId} [${record.provider}/${record.model}] fresh`;
+    for (const t of record.tasks) {
+      mergeClaiRow(taskResultToClaiRow(t, record.provider));
+    }
+    claiLabel =
+      `${record.runId} [${record.provider}/${record.model}]` +
+      (resume ? " resumed" : " fresh");
     claiRunId = record.runId;
     claiLive = {
       runId: record.runId,
@@ -936,18 +1034,22 @@ export async function runComparePi(
       model: record.model,
       offline: false,
       parallel: record.parallel,
-      tasks: record.tasks.map((t, i) => ({
-        id: t.id,
-        title: tasks[i]?.title ?? t.id,
-        category: tasks[i]?.category ?? "bugfix",
-        status: t.status,
-        wallMs: t.wallMs,
-        steps: t.steps,
-        tokensIn: Number(t.tokensIn) || 0,
-        tokensOut: Number(t.tokensOut) || 0,
-        cost: Number(t.cost) || 0,
-        error: t.error,
-      })),
+      tasks: tasks.map((t) => {
+        const row = claiRows.find((r) => r.id === t.id);
+        const fromRec = record.tasks.find((r) => r.id === t.id);
+        return {
+          id: t.id,
+          title: t.title,
+          category: t.category,
+          status: (fromRec?.status ?? row?.status ?? "queued") as LiveTask["status"],
+          wallMs: fromRec?.wallMs ?? row?.wallMs,
+          steps: fromRec?.steps,
+          tokensIn: Number(fromRec?.tokensIn ?? row?.tokensIn) || 0,
+          tokensOut: Number(fromRec?.tokensOut ?? row?.tokensOut) || 0,
+          cost: Number(fromRec?.cost ?? row?.cost) || 0,
+          error: fromRec?.error ?? row?.detail,
+        };
+      }),
       done: true,
     };
     emit(midPhase());
@@ -962,9 +1064,10 @@ export async function runComparePi(
       Number(process.env.COMPARE_PI_STALL_BREAKER ?? 3),
     );
     const worker = async () => {
-      while (next < tasks.length) {
+      while (next < piQueue.length) {
         if (opts.signal?.aborted || piCircuitOpen) break;
-        const i = next++;
+        const i = piQueue[next++]!;
+        if (isKeepableRow(piRows[i])) continue;
         const task = tasks[i]!;
         piRunning.add(task.id);
         emit(midPhase());
@@ -986,16 +1089,16 @@ export async function runComparePi(
         const detail = row?.detail ?? "";
         const pressure =
           row?.status === "error" &&
-          /stall|timed out|rate.?limit|429|hung|quota/i.test(detail);
+          /stall|timed out|rate.?limit|429|hung|quota|no output/i.test(detail);
         if (pressure) pressureStreak += 1;
         else if (row?.status === "pass" || row?.status === "fail") {
           pressureStreak = 0;
         }
         if (!opts.signal?.aborted && pressureStreak >= breaker) {
           piCircuitOpen = true;
-          while (next < tasks.length) {
-            const j = next++;
-            if (!piRows[j]) {
+          while (next < piQueue.length) {
+            const j = piQueue[next++]!;
+            if (!isKeepableRow(piRows[j])) {
               piRows[j] = abortedPiRow(
                 tasks[j]!.id,
                 `circuit breaker — ${breaker} consecutive pi stalls/timeouts`,
@@ -1007,7 +1110,10 @@ export async function runComparePi(
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(sideParallel, tasks.length) }, () => worker()),
+      Array.from(
+        { length: Math.min(sideParallel, Math.max(piQueue.length, 1)) },
+        () => worker(),
+      ),
     );
   };
 
@@ -1104,17 +1210,23 @@ async function main() {
   const seenPi = new Set<string>();
   const seenClai = new Set<string>();
 
+  const resumeFlag =
+    args.includes("--resume") ||
+    process.env.COMPARE_RESUME === "1" ||
+    process.env.COMPARE_RESUME === "true";
   const result = await runComparePi({
     taskIds: ids,
     parallel,
+    resume: resumeFlag,
     onProgress: (p) => {
       if (!printedHeader) {
         printedHeader = true;
         const n = ids?.length || p.live?.tasks.length || 0;
         const side = p.live?.parallel ?? parallel;
         console.log(
-          `compare: ${n} tasks · sideParallel=${side} (CLAI+pi race) · fresh CLAI + pi together\n` +
-            `  clai  ${p.claiLabel}\n` +
+          `compare: ${n} tasks · sideParallel=${side} (CLAI+pi race)` +
+            (resumeFlag ? " · resume" : " · fresh CLAI + pi together") +
+            `\n  clai  ${p.claiLabel}\n` +
             `  pi    ${process.env.PI_PROVIDER ?? "deepseek"}/${process.env.PI_MODEL ?? "deepseek-v4-flash"}`,
         );
       }

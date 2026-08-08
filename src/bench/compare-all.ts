@@ -5,12 +5,15 @@
  * Usage:
  *   pnpm bench:compare-all
  *   pnpm exec tsx src/bench/compare-all.ts --tasks off-by-one,fix-broken-import
+ *   pnpm exec tsx src/bench/compare-all.ts --resume
+ *   COMPARE_RESUME=1 pnpm bench:compare-all
  *
  * Defaults:
  *   fresh CLAI + pi + Codex in parallel
  *   PI_PROVIDER / PI_MODEL / PI_BIN — same as compare-pi
  *   CODEX_PROFILE=deepseek  CODEX_MODEL=deepseek-v4-flash  CODEX_BIN=codex
  *   COMPARE_PARALLEL=4 → sideParallel ≈ min(2, ceil(parallel/3))
+ *   --resume / COMPARE_RESUME=1 — keep pass/fail per harness; retry errors
  *
  * Requires DEEPSEEK_API_KEY (same as compare-pi).
  */
@@ -27,6 +30,12 @@ import {
   type CompareScore,
 } from "./compare-pi.js";
 import { runCodexTask, type CompareCodexRow } from "./compare-codex.js";
+import {
+  assertResumeCompatible,
+  isKeepableRow,
+  seedResumeFromPrior,
+  type ResumeSeed,
+} from "./compare-resume.js";
 import { loadBenchTasks, resolveBenchFixturesRoot } from "./index.js";
 import { estimateUsdBench } from "./pricing.js";
 import { runBench } from "./runner.js";
@@ -43,6 +52,10 @@ export type RunCompareAllOptions = {
   parallel?: number;
   /** Workers per harness when racing; defaults to min(2, ceil(parallel/3)). */
   sideParallel?: number;
+  /** Keep pass/fail from latest (or resumeFrom) scorecard; retry error sides. */
+  resume?: boolean;
+  /** Explicit prior scorecard (otherwise load .clai/bench/compare-pi.json). */
+  resumeFrom?: CompareResult;
   signal?: AbortSignal;
   onProgress?: (progress: CompareProgress) => void;
 };
@@ -314,6 +327,16 @@ function normalizeTokens(row: CompareRow): CompareRow {
   };
 }
 
+async function loadPriorCompare(
+  workspaceRoot: string,
+  resumeFrom?: CompareResult,
+): Promise<CompareResult | null> {
+  if (resumeFrom) return resumeFrom;
+  const stored = await new BenchStore(workspaceRoot).getCompare();
+  if (!stored) return null;
+  return stored as unknown as CompareResult;
+}
+
 /** Programmatic CLAI vs pi vs Codex compare (dashboard web compare + CLI). */
 export async function runCompareAll(
   opts: RunCompareAllOptions = {},
@@ -331,7 +354,11 @@ export async function runCompareAll(
     1,
     opts.parallel ?? Number(process.env.COMPARE_PARALLEL ?? 4),
   );
-  const freshClai = defaultFreshClai(opts.freshClai);
+  const resume =
+    opts.resume === true ||
+    process.env.COMPARE_RESUME === "1" ||
+    process.env.COMPARE_RESUME === "true";
+  const freshClai = resume ? true : defaultFreshClai(opts.freshClai);
   const sideParallel =
     opts.sideParallel != null && Number.isFinite(opts.sideParallel)
       ? Math.max(1, Math.floor(Number(opts.sideParallel)))
@@ -358,21 +385,58 @@ export async function runCompareAll(
     throw new Error("No bench tasks to compare.");
   }
 
-  const runId = `compare-all-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  let resumeSeed: ResumeSeed | null = null;
+  if (resume) {
+    const prior = await loadPriorCompare(workspaceRoot, opts.resumeFrom);
+    if (!prior) {
+      throw new Error(
+        "Resume requested but no prior compare-pi.json scorecard found.",
+      );
+    }
+    assertResumeCompatible(prior, {
+      piProvider,
+      piModel,
+      codexProfile,
+      codexModel,
+      requireAll: true,
+    });
+    resumeSeed = seedResumeFromPrior(
+      tasks.map((t) => t.id),
+      prior,
+    );
+  }
+
+  const liveRunId = `compare-all-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(16).slice(2, 10)}`;
+  const compareId = resumeSeed?.compareId || liveRunId;
   const startedAt = new Date().toISOString();
 
-  let claiRows: CompareRow[] = [];
-  let claiLabel = "pending";
-  let claiRunId: string | undefined;
+  let claiRows: CompareRow[] = resumeSeed
+    ? (resumeSeed.clai.filter(Boolean) as CompareRow[])
+    : [];
+  let claiLabel = resumeSeed?.claiLabel
+    ? `${resumeSeed.claiLabel} · resumed`
+    : "pending";
+  let claiRunId: string | undefined = resumeSeed?.claiRunId;
   let claiLive: LiveSnapshot | null = null;
-  const piRows: Array<CompareRow | undefined> = new Array(tasks.length);
-  const codexRows: Array<CompareRow | undefined> = new Array(tasks.length);
+  const piRows: Array<CompareRow | undefined> = resumeSeed
+    ? [...resumeSeed.pi]
+    : new Array(tasks.length);
+  const codexRows: Array<CompareRow | undefined> = resumeSeed
+    ? [...resumeSeed.codex]
+    : new Array(tasks.length);
+  const piQueue = resumeSeed
+    ? [...resumeSeed.piTodo]
+    : tasks.map((_, i) => i);
+  const codexQueue = resumeSeed
+    ? [...resumeSeed.codexTodo]
+    : tasks.map((_, i) => i);
+  const claiTodoIds = resumeSeed ? new Set(resumeSeed.claiTodo) : null;
   const piRunning = new Set<string>();
   const codexRunning = new Set<string>();
   const activeChildren = new Set<ChildProcess>();
 
   const concurrency = { compareParallel: parallel, sideParallel };
-  const compareIds = () => ({ compareId: runId, claiRunId });
+  const compareIds = () => ({ compareId, claiRunId });
 
   const emit = (phase: CompareProgress["phase"], done = false) => {
     const live = buildCompareAllLiveSnapshot(
@@ -383,7 +447,7 @@ export async function runCompareAll(
       codexRows,
       codexRunning,
       {
-        runId,
+        runId: liveRunId,
         startedAt,
         model: piModel,
         parallel: sideParallel,
@@ -432,6 +496,12 @@ export async function runCompareAll(
 
   const midPhase = (): CompareProgress["phase"] => (freshClai ? "both" : "pi");
 
+  const mergeClaiRow = (row: CompareRow) => {
+    const idx = claiRows.findIndex((r) => r.id === row.id);
+    if (idx >= 0) claiRows[idx] = row;
+    else claiRows.push(row);
+  };
+
   const runClaiSide = async () => {
     if (!freshClai) {
       const hist = await loadClaiFromHistory(workspaceRoot, tasks);
@@ -441,37 +511,112 @@ export async function runCompareAll(
       emit("clai");
       return;
     }
+
+    const tasksForClai =
+      claiTodoIds != null
+        ? tasks.filter((t) => claiTodoIds.has(t.id))
+        : tasks;
+
+    if (!tasksForClai.length) {
+      // All CLAI sides keepable — skip the live run.
+      claiLabel = claiLabel.includes("resumed")
+        ? claiLabel
+        : `${claiLabel || compareId} [resumed]`;
+      claiLive = {
+        runId: claiRunId || liveRunId,
+        startedAt,
+        provider: "deepseek",
+        model: piModel,
+        offline: false,
+        parallel: sideParallel,
+        tasks: tasks.map((t) => {
+          const row = claiRows.find((r) => r.id === t.id);
+          return {
+            id: t.id,
+            title: t.title,
+            category: t.category,
+            status: (row?.status ?? "queued") as LiveTask["status"],
+            wallMs: row?.wallMs,
+            tokensIn: Number(row?.tokensIn) || 0,
+            tokensOut: Number(row?.tokensOut) || 0,
+            cost: Number(row?.cost) || 0,
+            error: row?.detail,
+          };
+        }),
+        done: true,
+      };
+      emit(midPhase());
+      return;
+    }
+
+    const keptById = new Map(
+      claiRows.filter((r) => isKeepableRow(r)).map((r) => [r.id, r]),
+    );
+
     const record = await runBench({
       workspaceRoot,
-      tasks,
+      tasks: tasksForClai,
       parallel: sideParallel,
       offline: false,
       signal: opts.signal,
       onUpdate: (snap) => {
-        claiLive = snap;
-        claiRows = snap.tasks
-          .filter(
-            (t) =>
-              t.status === "pass" ||
-              t.status === "fail" ||
-              t.status === "error" ||
-              t.status === "timeout",
-          )
-          .map((t) =>
-            taskResultToClaiRow(
-              {
+        claiLive = {
+          ...snap,
+          // Pad live view with kept rows so the grid stays complete.
+          tasks: tasks.map((t) => {
+            const live = snap.tasks.find((x) => x.id === t.id);
+            if (live) return live;
+            const kept = keptById.get(t.id);
+            if (!kept) {
+              return {
                 id: t.id,
-                status: t.status,
-                wallMs: t.wallMs ?? 0,
-                error: t.error,
-                tokensIn: t.tokensIn,
-                tokensOut: t.tokensOut,
-                cost: t.cost,
-              },
-              snap.provider,
-            ),
-          );
-        claiLabel = `${snap.runId} [${snap.provider}/${snap.model}] fresh`;
+                title: t.title,
+                category: t.category,
+                status: "queued" as const,
+                tokensIn: 0,
+                tokensOut: 0,
+                cost: 0,
+              };
+            }
+            return {
+              id: t.id,
+              title: t.title,
+              category: t.category,
+              status: kept.status as LiveTask["status"],
+              wallMs: kept.wallMs,
+              tokensIn: Number(kept.tokensIn) || 0,
+              tokensOut: Number(kept.tokensOut) || 0,
+              cost: Number(kept.cost) || 0,
+              error: kept.detail,
+            };
+          }),
+        };
+        for (const t of snap.tasks) {
+          if (
+            t.status === "pass" ||
+            t.status === "fail" ||
+            t.status === "error" ||
+            t.status === "timeout"
+          ) {
+            mergeClaiRow(
+              taskResultToClaiRow(
+                {
+                  id: t.id,
+                  status: t.status,
+                  wallMs: t.wallMs ?? 0,
+                  error: t.error,
+                  tokensIn: t.tokensIn,
+                  tokensOut: t.tokensOut,
+                  cost: t.cost,
+                },
+                snap.provider,
+              ),
+            );
+          }
+        }
+        claiLabel =
+          `${snap.runId} [${snap.provider}/${snap.model}]` +
+          (resume ? " resumed" : " fresh");
         claiRunId = snap.runId;
         emit(midPhase());
       },
@@ -479,10 +624,14 @@ export async function runCompareAll(
     await new BenchStore(workspaceRoot).appendRun({
       ...record,
       kind: "clai",
-      compareId: runId,
+      compareId,
     });
-    claiRows = record.tasks.map((t) => taskResultToClaiRow(t, record.provider));
-    claiLabel = `${record.runId} [${record.provider}/${record.model}] fresh`;
+    for (const t of record.tasks) {
+      mergeClaiRow(taskResultToClaiRow(t, record.provider));
+    }
+    claiLabel =
+      `${record.runId} [${record.provider}/${record.model}]` +
+      (resume ? " resumed" : " fresh");
     claiRunId = record.runId;
     claiLive = {
       runId: record.runId,
@@ -491,18 +640,22 @@ export async function runCompareAll(
       model: record.model,
       offline: false,
       parallel: record.parallel,
-      tasks: record.tasks.map((t, i) => ({
-        id: t.id,
-        title: tasks[i]?.title ?? t.id,
-        category: tasks[i]?.category ?? "bugfix",
-        status: t.status,
-        wallMs: t.wallMs,
-        steps: t.steps,
-        tokensIn: Number(t.tokensIn) || 0,
-        tokensOut: Number(t.tokensOut) || 0,
-        cost: Number(t.cost) || 0,
-        error: t.error,
-      })),
+      tasks: tasks.map((t) => {
+        const row = claiRows.find((r) => r.id === t.id);
+        const fromRec = record.tasks.find((r) => r.id === t.id);
+        return {
+          id: t.id,
+          title: t.title,
+          category: t.category,
+          status: (fromRec?.status ?? row?.status ?? "queued") as LiveTask["status"],
+          wallMs: fromRec?.wallMs ?? row?.wallMs,
+          steps: fromRec?.steps,
+          tokensIn: Number(fromRec?.tokensIn ?? row?.tokensIn) || 0,
+          tokensOut: Number(fromRec?.tokensOut ?? row?.tokensOut) || 0,
+          cost: Number(fromRec?.cost ?? row?.cost) || 0,
+          error: fromRec?.error ?? row?.detail,
+        };
+      }),
       done: true,
     };
     emit(midPhase());
@@ -519,9 +672,10 @@ export async function runCompareAll(
       Number(process.env.COMPARE_PI_STALL_BREAKER ?? 3),
     );
     const worker = async () => {
-      while (next < tasks.length) {
+      while (next < piQueue.length) {
         if (opts.signal?.aborted || piCircuitOpen) break;
-        const i = next++;
+        const i = piQueue[next++]!;
+        if (isKeepableRow(piRows[i])) continue;
         const task = tasks[i]!;
         piRunning.add(task.id);
         emit(midPhase());
@@ -543,16 +697,16 @@ export async function runCompareAll(
         const detail = row?.detail ?? "";
         const pressure =
           row?.status === "error" &&
-          /stall|timed out|rate.?limit|429|hung|quota/i.test(detail);
+          /stall|timed out|rate.?limit|429|hung|quota|no output/i.test(detail);
         if (pressure) pressureStreak += 1;
         else if (row?.status === "pass" || row?.status === "fail") {
           pressureStreak = 0;
         }
         if (!opts.signal?.aborted && pressureStreak >= breaker) {
           piCircuitOpen = true;
-          while (next < tasks.length) {
-            const j = next++;
-            if (!piRows[j]) {
+          while (next < piQueue.length) {
+            const j = piQueue[next++]!;
+            if (!isKeepableRow(piRows[j])) {
               piRows[j] = abortedRow(
                 tasks[j]!.id,
                 "pi",
@@ -565,7 +719,10 @@ export async function runCompareAll(
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(sideParallel, tasks.length) }, () => worker()),
+      Array.from(
+        { length: Math.min(sideParallel, Math.max(piQueue.length, 1)) },
+        () => worker(),
+      ),
     );
   };
 
@@ -577,9 +734,10 @@ export async function runCompareAll(
       Number(process.env.COMPARE_CODEX_STALL_BREAKER ?? 3),
     );
     const worker = async () => {
-      while (next < tasks.length) {
+      while (next < codexQueue.length) {
         if (opts.signal?.aborted || codexCircuitOpen) break;
-        const i = next++;
+        const i = codexQueue[next++]!;
+        if (isKeepableRow(codexRows[i])) continue;
         const task = tasks[i]!;
         codexRunning.add(task.id);
         emit(midPhase());
@@ -602,16 +760,16 @@ export async function runCompareAll(
         const detail = row?.detail ?? "";
         const pressure =
           row?.status === "error" &&
-          /stall|timed out|rate.?limit|429|hung|quota/i.test(detail);
+          /stall|timed out|rate.?limit|429|hung|quota|no output/i.test(detail);
         if (pressure) pressureStreak += 1;
         else if (row?.status === "pass" || row?.status === "fail") {
           pressureStreak = 0;
         }
         if (!opts.signal?.aborted && pressureStreak >= breaker) {
           codexCircuitOpen = true;
-          while (next < tasks.length) {
-            const j = next++;
-            if (!codexRows[j]) {
+          while (next < codexQueue.length) {
+            const j = codexQueue[next++]!;
+            if (!isKeepableRow(codexRows[j])) {
               codexRows[j] = abortedRow(
                 tasks[j]!.id,
                 "codex",
@@ -624,7 +782,10 @@ export async function runCompareAll(
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(sideParallel, tasks.length) }, () => worker()),
+      Array.from(
+        { length: Math.min(sideParallel, Math.max(codexQueue.length, 1)) },
+        () => worker(),
+      ),
     );
   };
 
@@ -713,6 +874,10 @@ async function main() {
     ?.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const resume =
+    args.includes("--resume") ||
+    process.env.COMPARE_RESUME === "1" ||
+    process.env.COMPARE_RESUME === "true";
   const parallel = Math.max(1, Number(process.env.COMPARE_PARALLEL ?? 4));
   let printedHeader = false;
   const seenPi = new Set<string>();
@@ -722,14 +887,16 @@ async function main() {
   const result = await runCompareAll({
     taskIds: ids,
     parallel,
+    resume,
     onProgress: (p) => {
       if (!printedHeader) {
         printedHeader = true;
         const n = ids?.length || p.live?.tasks.length || 0;
         const side = p.live?.parallel ?? parallel;
         console.log(
-          `compare-all: ${n} tasks · sideParallel=${side} (CLAI+pi+codex race)\n` +
-            `  clai   ${p.claiLabel}\n` +
+          `compare-all: ${n} tasks · sideParallel=${side} (CLAI+pi+codex race)` +
+            (resume ? " · resume" : "") +
+            `\n  clai   ${p.claiLabel}\n` +
             `  pi     ${process.env.PI_PROVIDER ?? "deepseek"}/${process.env.PI_MODEL ?? "deepseek-v4-flash"}\n` +
             `  codex  ${process.env.CODEX_PROFILE ?? "deepseek"}/${process.env.CODEX_MODEL ?? "deepseek-v4-flash"}`,
         );
